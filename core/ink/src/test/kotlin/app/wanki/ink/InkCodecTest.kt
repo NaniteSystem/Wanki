@@ -24,6 +24,7 @@ class InkCodecTest {
                     )
                 },
                 InkTool.STYLUS,
+                InkBrush(BrushKind.entries[s % 3], (0xFF000000.toInt() or (s * 0x10203)), 3.5f + s),
             )
         } + InkStroke(listOf(InkPoint(-12.5f, 3f, 20_000)), InkTool.FINGER)
         return InkDrawing(strokes)
@@ -36,6 +37,7 @@ class InkCodecTest {
         assertEquals(d.strokes.size, back.strokes.size)
         for ((a, b) in d.strokes.zip(back.strokes)) {
             assertEquals(a.tool, b.tool)
+            assertEquals(a.brush, b.brush)
             assertEquals(a.points.size, b.points.size)
             for ((p, q) in a.points.zip(b.points)) {
                 assertTrue(abs(p.x - q.x) <= 1f / 32 + 1e-4 && abs(p.y - q.y) <= 1f / 32 + 1e-4, "$p vs $q")

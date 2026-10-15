@@ -11,7 +11,7 @@ import kotlin.math.roundToLong
  * Layout (all integers are LEB128 varints, signed ones zig-zag encoded):
  * ```
  * "WINK" version:u8 strokeCount
- * per stroke: tool:u8 channels:u8 pointCount
+ * per stroke: tool:u8 channels:u8 [v2: brushKind:u8 color:u32le size:f32le] pointCount
  *   per point: Δx Δy (1/16 unit) Δt (ms)
  *              [Δpressure (0..1023)] [Δtilt (0..1023 over 0..π/2)] [Δorientation (0..1023 over 0..2π)]
  * ```
@@ -21,7 +21,7 @@ import kotlin.math.roundToLong
  */
 object InkCodec {
     private val MAGIC = byteArrayOf('W'.code.toByte(), 'I'.code.toByte(), 'N'.code.toByte(), 'K'.code.toByte())
-    private const val VERSION = 1
+    private const val VERSION = 2
     private const val POS_SCALE = 16f
     private const val Q = 1023f
     private const val HAS_PRESSURE = 1
@@ -45,6 +45,9 @@ object InkCodec {
             if (s.points.isNotEmpty() && s.points.all { !it.orientationRadians.isNaN() }) channels = channels or HAS_ORIENTATION
             out.write(s.tool.ordinal)
             out.write(channels)
+            out.write(s.brush.kind.ordinal)
+            writeInt(out, s.brush.color)
+            writeInt(out, java.lang.Float.floatToIntBits(s.brush.size))
             writeVarint(out, s.points.size.toLong())
             var pp = 0L
             var ptilt = 0L
@@ -69,7 +72,7 @@ object InkCodec {
         require(bytes.size >= 5 && (0 until 4).all { bytes[it] == MAGIC[it] }) { "Not an ink blob" }
         r.pos = 4
         val version = r.u8()
-        require(version == VERSION) { "Unsupported ink format version $version" }
+        require(version in 1..VERSION) { "Unsupported ink format version $version" }
         val strokeCount = r.varint().toInt()
         var px = 0L
         var py = 0L
@@ -78,6 +81,9 @@ object InkCodec {
         repeat(strokeCount) {
             val tool = InkTool.entries.getOrElse(r.u8()) { InkTool.UNKNOWN }
             val channels = r.u8()
+            val brush = if (version >= 2) {
+                InkBrush(BrushKind.entries.getOrElse(r.u8()) { BrushKind.PEN }, r.int(), java.lang.Float.intBitsToFloat(r.int()))
+            } else InkBrush.DEFAULT
             val n = r.varint().toInt()
             val points = ArrayList<InkPoint>(n)
             var pp = 0L
@@ -92,7 +98,7 @@ object InkCodec {
                 } else Float.NaN
                 points += InkPoint(px / POS_SCALE, py / POS_SCALE, pt, pressure, tilt, orientation)
             }
-            strokes += InkStroke(points, tool)
+            strokes += InkStroke(points, tool, brush)
         }
         return InkDrawing(strokes)
     }
@@ -109,6 +115,10 @@ object InkCodec {
         out.write(v.toInt())
     }
 
+    private fun writeInt(out: ByteArrayOutputStream, v: Int) {
+        for (k in 0 until 4) out.write((v ushr (8 * k)) and 0xFF)
+    }
+
     private fun writeSigned(out: ByteArrayOutputStream, v: Long) = writeVarint(out, (v shl 1) xor (v shr 63))
 
     private class Reader(val b: ByteArray) {
@@ -116,6 +126,11 @@ object InkCodec {
         fun u8(): Int {
             require(pos < b.size) { "Truncated ink blob" }
             return b[pos++].toInt() and 0xFF
+        }
+        fun int(): Int {
+            var v = 0
+            for (k in 0 until 4) v = v or (u8() shl (8 * k))
+            return v
         }
         fun varint(): Long {
             var result = 0L
