@@ -8,6 +8,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.nativeCanvas
@@ -40,7 +41,8 @@ fun InkSurface(
     val started by rememberUpdatedState(onStrokeStarted)
     val finished by rememberUpdatedState(onStrokeFinished)
 
-    Box(modifier.onSizeChanged { viewport?.onScreenSize(it.width.toFloat(), it.height.toFloat()) }) {
+    // clip: page backgrounds are drawn far beyond the visible area
+    Box(modifier.clipToBounds().onSizeChanged { viewport?.onScreenSize(it.width.toFloat(), it.height.toFloat()) }) {
         Canvas(Modifier.fillMaxSize()) {
             val vp = viewport
             val scale = vp?.scale ?: 1f
