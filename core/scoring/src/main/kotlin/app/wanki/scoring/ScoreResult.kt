@@ -49,6 +49,8 @@ data class UserStrokeFeedback(
     val reversed: Boolean = false,
     val shape: Double = 0.0,
     val position: Double = 0.0,
+    /** All reference strokes this stroke writes (several for connected strokes). */
+    val refIndices: List<Int> = listOfNotNull(refIndex),
 )
 
 data class BeautyResult(
@@ -82,4 +84,6 @@ data class ScoreResult(
     val toReference: Similarity?,
     /** Recalled, but handwriting below [ScoringConfig.beautyPracticeThreshold]. */
     val needsHandwritingPractice: Boolean = false,
+    /** The recognizer's first choice was this character, so the form was accepted as legible handwriting. */
+    val acceptedByRecognizer: Boolean = false,
 )

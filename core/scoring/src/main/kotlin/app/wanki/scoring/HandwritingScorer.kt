@@ -9,6 +9,8 @@ import app.wanki.scoring.geom.clamp01
 import app.wanki.scoring.geom.length
 import app.wanki.scoring.geom.resample
 import app.wanki.scoring.match.StrokeMatch
+import app.wanki.scoring.match.StrokeGroup
+import app.wanki.scoring.match.StrokeGrouping
 import app.wanki.scoring.match.StrokeMatcher
 import app.wanki.scoring.match.dtwMean
 import app.wanki.scoring.match.longestIncreasingSubsequence
@@ -74,63 +76,86 @@ class HandwritingScorer(val config: ScoringConfig = ScoringConfig()) {
         val userPolys = userNorm.map { it.resample(n) }
         val matches = StrokeMatcher.match(userPolys, refPolys, size, config.unmatchedCost)
 
+        // Handwriting style: connected and broken strokes become groups instead of missing/extra strokes.
+        val groups = StrokeGrouping.group(userNorm, refRaw, matches, n, size, config.unmatchedCost)
+        val gUser = groups.map { g -> StrokeGrouping.concat(g.users.map { userNorm[it] }, n) }
+        val gRef = groups.map { g -> StrokeGrouping.concat(g.refs.map { refRaw[it] }, n) }
+        val gMatch = groups.indices.map { i ->
+            val fwd = StrokeGrouping.meanDist(gUser[i], gRef[i])
+            val rev = StrokeGrouping.meanDist(gUser[i].asReversed(), gRef[i])
+            StrokeMatch(i, i, rev < fwd, min(fwd, rev) / size)
+        }
+
         val refCount = refPolys.size.toDouble()
-        val inOrder = longestIncreasingSubsequence(matches.sortedBy { it.userIndex }.map { it.refIndex })
-            .map { matches.sortedBy { m -> m.userIndex }[it].userIndex }.toSet()
+        val byWriting = groups.indices.sortedBy { groups[it].users.min() }
+        val inOrderGroups = longestIncreasingSubsequence(byWriting.map { groups[it].refs.min() }).map { byWriting[it] }.toSet()
 
         val tol = config.tolerances
-        val pairs = matches.map { m -> PairScores(m, shapeScore(m, userPolys, refPolys, size, tol), positionScore(m, userPolys, refPolys, size, tol)) }
-        val directionOk = matches.count { !it.reversed || isDirectionless(refRaw[it.refIndex], size) }
-        val extra = userPolys.size - matches.size
-        val missing = refPolys.size - matches.size
+        val pairs = gMatch.map { m -> PairScores(m, shapeScore(m, gUser, gRef, size, tol), positionScore(m, gUser, gRef, size, tol)) }
+        fun weight(i: Int) = groups[i].refs.size
+        fun groupReversed(i: Int) = gMatch[i].reversed && !(groups[i].refs.size == 1 && isDirectionless(refRaw[groups[i].refs[0]], size))
+        val coveredRefs = groups.sumOf { it.refs.size }
+        val usedUsers = groups.sumOf { it.users.size }
+        val extra = userPolys.size - usedUsers
+        val missing = refPolys.size - coveredRefs
 
         val metrics = MetricScores(
-            shape = pairs.sumOf { it.shape } / refCount,
-            position = pairs.sumOf { it.position } / refCount,
+            shape = pairs.indices.sumOf { pairs[it].shape * weight(it) } / refCount,
+            position = pairs.indices.sumOf { pairs[it].position * weight(it) } / refCount,
             count = clamp01(1.0 - (missing + extra) / refCount),
-            order = inOrder.size / refCount,
-            direction = directionOk / refCount,
+            order = inOrderGroups.sumOf { weight(it) } / refCount,
+            direction = groups.indices.filter { !groupReversed(it) }.sumOf { weight(it) } / refCount,
         )
         val w = config.weights
         val orderW = w.order * config.orderStrictness.coerceIn(0.0, 1.0)
         val totalW = w.shape + w.position + w.count + orderW + w.direction
         val raw = 100.0 * (w.shape * metrics.shape + w.position * metrics.position + w.count * metrics.count +
             orderW * metrics.order + w.direction * metrics.direction) / totalW
-        val confusedWith = competitors.filter { it.char != reference.char }.takeIf { it.isNotEmpty() }?.let { cs ->
+
+        // The recognizer's first choice being exactly this character means it is legible as written,
+        // even when the form differs from the reference: accept it.
+        val acceptedByRecognizer = recognitionCandidates?.firstOrNull() == reference.char
+        val confusedWith = if (acceptedByRecognizer) null else competitors.filter { it.char != reference.char }.takeIf { it.isNotEmpty() }?.let { cs ->
             val own = fitDistance(reference, strokes)
             cs.map { it to fitDistance(it, strokes) }
                 .filter { (_, d) -> d < own * (1 - config.competitorMargin) }
                 .minByOrNull { (_, d) -> d }
                 ?.first?.char
         }
-        val failReasons = buildSet {
+        val failReasons = if (acceptedByRecognizer) emptySet() else buildSet {
             if (missing > 0 && config.failOnMissingStroke) add(FailReason.MISSING_STROKES)
             if (extra > 0 && config.failOnExtraStroke) add(FailReason.EXTRA_STROKES)
             if (recognition == RecognitionOutcome.NOT_RECOGNIZED) add(FailReason.NOT_RECOGNIZED)
             if (confusedWith != null) add(FailReason.CONFUSED_WITH_LOOKALIKE)
         }
-        val score = if (failReasons.isNotEmpty()) min(raw, config.passThreshold - 1) else raw
+        val score = when {
+            acceptedByRecognizer -> max(raw, config.passThreshold)
+            failReasons.isNotEmpty() -> min(raw, config.passThreshold - 1)
+            else -> raw
+        }
         val passed = score >= config.passThreshold
 
         val feedback = ArrayList<UserStrokeFeedback>()
-        val byUser = pairs.associateBy { it.match.userIndex }
+        val groupOfUser = HashMap<Int, Int>()
+        groups.forEachIndexed { gi, g -> g.users.forEach { groupOfUser[it] = gi } }
         for (k in userPolys.indices) {
-            val p = byUser[k]
-            feedback += if (p == null) {
+            val gi = groupOfUser[k]
+            feedback += if (gi == null) {
                 UserStrokeFeedback(userIndices[k], null, StrokeStatus.EXTRA)
             } else {
-                val wrongOrder = k !in inOrder && config.orderStrictness > 0
-                val reversed = p.match.reversed && !isDirectionless(refRaw[p.match.refIndex], size)
+                val wrongOrder = gi !in inOrderGroups && config.orderStrictness > 0
+                val reversed = groupReversed(gi)
                 UserStrokeFeedback(
-                    userIndices[k], p.match.refIndex,
+                    userIndices[k], groups[gi].refs.first(),
                     if (wrongOrder || reversed) StrokeStatus.ORDER_OR_DIRECTION else StrokeStatus.CORRECT,
-                    wrongOrder, reversed, p.shape, p.position,
+                    wrongOrder, reversed, pairs[gi].shape, pairs[gi].position,
+                    refIndices = groups[gi].refs,
                 )
             }
         }
-        val matchedRefs = matches.map { it.refIndex }.toSet()
+        val matchedRefs = groups.flatMap { it.refs }.toSet()
 
-        val beauty = if (passed) beauty(reference, userNorm, userPolys, refPolys, matches) else null
+        val beauty = if (passed) beauty(reference, userNorm, gUser, gRef, gMatch, groups) else null
         return ScoreResult(
             char = reference.char,
             score = score,
@@ -145,6 +170,7 @@ class HandwritingScorer(val config: ScoringConfig = ScoringConfig()) {
             missingRefStrokes = refPolys.indices.filter { it !in matchedRefs },
             toReference = transform,
             needsHandwritingPractice = beauty != null && beauty.score < config.beautyPracticeThreshold,
+            acceptedByRecognizer = acceptedByRecognizer,
         )
     }
 
@@ -218,16 +244,17 @@ class HandwritingScorer(val config: ScoringConfig = ScoringConfig()) {
     private fun beauty(
         reference: CharReference,
         userNorm: List<Polyline>,
-        userPolys: List<Polyline>,
-        refPolys: List<Polyline>,
-        matches: List<StrokeMatch>,
+        gUser: List<Polyline>,
+        gRef: List<Polyline>,
+        gMatch: List<StrokeMatch>,
+        groups: List<StrokeGroup>,
     ): BeautyResult {
         val size = reference.size
         val tol = config.beautyTolerances
-        val refCount = refPolys.size.toDouble()
-        val shape = matches.sumOf { shapeScore(it, userPolys, refPolys, size, tol) } / refCount
-        val position = matches.sumOf { positionScore(it, userPolys, refPolys, size, tol) } / refCount
-        val proportions = proportions(reference, userPolys, refPolys, matches, tol)
+        val refCount = reference.strokes.size.toDouble()
+        val shape = gMatch.sumOf { shapeScore(it, gUser, gRef, size, tol) * groups[it.userIndex].refs.size } / refCount
+        val position = gMatch.sumOf { positionScore(it, gUser, gRef, size, tol) * groups[it.userIndex].refs.size } / refCount
+        val proportions = proportions(reference, gUser, groups, tol)
         val smoothness = smoothness(userNorm, size)
         val score = 100.0 * (0.35 * shape + 0.25 * position + 0.25 * proportions + 0.15 * smoothness)
         return BeautyResult(score, shape, position, proportions, smoothness)
@@ -236,29 +263,30 @@ class HandwritingScorer(val config: ScoringConfig = ScoringConfig()) {
     /** Overall aspect ratio plus placement and size of each top-level component. */
     private fun proportions(
         reference: CharReference,
-        userPolys: List<Polyline>,
-        refPolys: List<Polyline>,
-        matches: List<StrokeMatch>,
+        gUser: List<Polyline>,
+        groups: List<StrokeGroup>,
         tol: Tolerances,
     ): Double {
         val size = reference.size
         val e = SIZE_EPS * size
+        val refPolys = reference.strokes.map { it.points }
         fun boxScore(ub: BBox, rb: BBox): Double {
             val dc = ub.center.dist(rb.center) / size
             val sizeErr = max(abs(ln((ub.width + e) / (rb.width + e))), abs(ln((ub.height + e) / (rb.height + e))))
             return 0.5 * clamp01(1.0 - dc / tol.position) + 0.5 * clamp01(1.0 - sizeErr / tol.size)
         }
-        val ub = BBox.of(userPolys.flatten())
+        val ub = BBox.of(gUser.flatten())
         val rb = BBox.of(refPolys.flatten())
         val aspect = clamp01(1.0 - abs(ln((ub.width + e) / (ub.height + e)) - ln((rb.width + e) / (rb.height + e))) / tol.size)
 
         val parts = reference.topLevelParts()
         if (parts.isEmpty()) return aspect
-        val userByRef = matches.associate { it.refIndex to it.userIndex }
+        val groupOfRef = HashMap<Int, Int>()
+        groups.forEachIndexed { gi, g -> g.refs.forEach { groupOfRef[it] = gi } }
         val partScores = parts.map { part ->
-            val users = part.strokeIndices.mapNotNull { userByRef[it] }
-            if (users.isEmpty()) 0.0
-            else boxScore(BBox.of(users.flatMap { userPolys[it] }), BBox.of(part.strokeIndices.flatMap { refPolys[it] }))
+            val gs = part.strokeIndices.mapNotNull { groupOfRef[it] }.toSet()
+            if (gs.isEmpty()) 0.0
+            else boxScore(BBox.of(gs.flatMap { gUser[it] }), BBox.of(part.strokeIndices.flatMap { refPolys[it] }))
         }
         return (aspect + partScores.sum()) / (1 + partScores.size)
     }

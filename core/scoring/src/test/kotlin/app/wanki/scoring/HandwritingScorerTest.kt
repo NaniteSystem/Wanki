@@ -171,4 +171,50 @@ class HandwritingScorerTest {
         assertNotNull(r.beauty)
         assertTrue(r.needsHandwritingPractice, "beauty=${r.beauty}")
     }
+
+    // --- handwriting style ----------------------------------------------------------------
+
+    @Test
+    fun `connected strokes are handwriting style, not missing strokes`() {
+        for (c in listOf("日", "右", "口", "目")) {
+            val t = Fixtures.kanji(c)
+            val p = Fixtures.perfect(t)
+            val k = p.size - 2 // write the last two strokes in one motion
+            val connected = p.take(k) + listOf(p[k] + p[k + 1])
+            val r = scorer.score(t, connected)
+            assertTrue(r.passed, "$c: ${r.score} ${r.failReasons} missing=${r.missingRefStrokes}")
+            assertTrue(r.missingRefStrokes.isEmpty(), "$c: ${r.missingRefStrokes}")
+            assertEquals(listOf(k, k + 1), r.strokes.last().refIndices)
+        }
+    }
+
+    @Test
+    fun `a stroke written in two pieces is not an extra stroke`() {
+        val p = perfect // 右: stroke 2 is the long horizontal
+        val long = p[1]
+        val broken = p.take(1) + listOf(long.take(long.size / 2), long.drop(long.size / 2)) + p.drop(2)
+        val r = scorer.score(ref, broken)
+        assertTrue(r.passed, "${r.score} ${r.failReasons}")
+        assertTrue(r.strokes.none { it.status == StrokeStatus.EXTRA })
+    }
+
+    @Test
+    fun `style grouping does not hide a really missing stroke`() {
+        val hon = scorer.score(Fixtures.kanji("本"), Fixtures.perfect(Fixtures.kanji("木")))
+        assertTrue(FailReason.MISSING_STROKES in hon.failReasons, "${hon.failReasons}")
+    }
+
+    @Test
+    fun `recognizer's first choice accepts an unusual form`() {
+        // a heavily distorted but legible 右: the recognizer is sure, so it counts
+        val odd = Simulate.misplace(Simulate.wobble(perfect, 9.0, 4), 9.0, 0.35, 4)
+        val geometryOnly = scorer.score(ref, Simulate.drop(odd, 4))
+        assertFalse(geometryOnly.passed)
+        val r = scorer.score(ref, Simulate.drop(odd, 4), recognitionCandidates = listOf("右", "石"))
+        assertTrue(r.passed && r.acceptedByRecognizer, "${r.score}")
+        assertTrue(r.failReasons.isEmpty())
+        // not first choice → normal rules
+        val second = scorer.score(ref, Simulate.drop(odd, 4), recognitionCandidates = listOf("石", "右"))
+        assertFalse(second.passed)
+    }
 }
