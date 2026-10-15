@@ -27,6 +27,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import app.wanki.AppGraph
 import app.wanki.data.NotebookEntity
@@ -163,7 +164,7 @@ fun PageEditor(
                 tool = state.tool,
                 viewport = state.viewport,
                 enabled = state.loaded,
-                modifier = Modifier.weight(1f).fillMaxSize(),
+                modifier = Modifier.weight(1f).fillMaxSize().testTag("page-canvas"),
                 background = {
                     if (state.infinite) drawBoard(state.viewport.visibleWorld(), state.viewport.scale)
                     else drawPage(state.template)

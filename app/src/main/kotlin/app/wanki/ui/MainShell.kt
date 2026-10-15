@@ -15,6 +15,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import app.wanki.ui.board.BoardScreen
 import app.wanki.ui.decks.DeckScreen
@@ -72,15 +73,16 @@ fun MainShell() {
     BackHandler(enabled = nav.stack.size > 1) { nav.back() }
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        // The review and full-page editors use the whole screen on phones.
         val wide = maxWidth >= 600.dp
-        val immersive = nav.current is Route.Review || nav.current is Route.Notebook ||
-            nav.current is Route.DiaryDay || nav.current is Route.Board
+        // Screens pushed on top of a tab (review, a page) take the whole screen; tab roots keep the bar.
+        val immersive = nav.stack.size > 1 &&
+            (nav.current is Route.Review || nav.current is Route.Notebook || nav.current is Route.DiaryDay)
         if (wide) {
             Row(Modifier.fillMaxSize()) {
                 NavigationRail {
                     tabs.forEach { t ->
                         NavigationRailItem(
+                            modifier = Modifier.testTag("tab-${t.label}"),
                             selected = nav.root == t.route,
                             onClick = { nav.switchTab(t.route) },
                             icon = { Text(t.glyph) },
@@ -97,6 +99,7 @@ fun MainShell() {
                     NavigationBar {
                         tabs.forEach { t ->
                             NavigationBarItem(
+                                modifier = Modifier.testTag("tab-${t.label}"),
                                 selected = nav.root == t.route,
                                 onClick = { nav.switchTab(t.route) },
                                 icon = { Text(t.glyph) },
