@@ -1,5 +1,6 @@
 package app.wanki.ui.board
 
+import app.wanki.ui.common.ui
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -97,7 +98,7 @@ fun BoardsScreen(onOpen: (String) -> Unit) {
 @Composable
 fun BoardScreen(boardId: String, onBack: () -> Unit) {
     val graph = LocalContext.current.graph
-    val board by produceState<Pair<NotebookEntity, PageEntity>?>(null, boardId) { value = graph.repository.boardPage(boardId) }
+    val board by produceState<Pair<NotebookEntity, PageEntity>?>(null, boardId) { value = ui { graph.repository.boardPage(boardId) } }
     val (notebook, page) = board ?: return
     val state = remember(page.id) { PageEditorState(graph, notebook, page, infinite = true) }
     var confirmDelete by remember { mutableStateOf(false) }

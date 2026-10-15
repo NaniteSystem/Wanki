@@ -57,7 +57,7 @@ fun SelectionBar(layer: InkLayer, language: String, modifier: Modifier = Modifie
     var dialog by remember { mutableStateOf(false) }
     var text by remember { mutableStateOf<String?>(null) }
     var failed by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
+    val scope = rememberUiScope()
     Surface(tonalElevation = 3.dp, shape = MaterialTheme.shapes.large, modifier = modifier) {
         Row(Modifier.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("Выделено: ${layer.selection.size}", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(horizontal = 8.dp))
@@ -90,7 +90,7 @@ fun SelectionBar(layer: InkLayer, language: String, modifier: Modifier = Modifie
 fun TextActionsDialog(initialText: String?, failed: Boolean = false, onDismiss: () -> Unit) {
     val context = LocalContext.current
     val graph = context.graph
-    val scope = rememberCoroutineScope()
+    val scope = rememberUiScope()
     var text by remember(initialText) { mutableStateOf(initialText.orEmpty()) }
     var target by remember { mutableStateOf(graph.settings.translateTo) }
     var translating by remember { mutableStateOf(false) }

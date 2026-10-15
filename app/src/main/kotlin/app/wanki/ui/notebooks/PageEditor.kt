@@ -1,5 +1,6 @@
 package app.wanki.ui.notebooks
 
+import app.wanki.ui.common.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -139,14 +140,14 @@ fun PageEditor(
     var translateAll by remember { mutableStateOf(false) }
     var templateMenu by remember { mutableStateOf(false) }
 
-    LaunchedEffect(state) { state.load() }
+    LaunchedEffect(state) { ui { state.load() } }
     // autosave shortly after the last change, recognize after a longer pause
     LaunchedEffect(state.layer.version, state.loaded) {
         if (!state.loaded) return@LaunchedEffect
         delay(800)
-        state.saveIfDirty()
+        ui { state.saveIfDirty() }
         delay(2500)
-        state.recognizeIfDirty()
+        ui { state.recognizeIfDirty() }
     }
     DisposableEffect(state) {
         onDispose { graph.appScope.launch { state.saveIfDirty(); state.recognizeIfDirty() } }

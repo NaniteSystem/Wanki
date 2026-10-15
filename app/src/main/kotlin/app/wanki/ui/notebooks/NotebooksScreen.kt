@@ -1,5 +1,7 @@
 package app.wanki.ui.notebooks
 
+import app.wanki.ui.common.ui
+import app.wanki.ui.common.rememberUiScope
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -57,7 +59,7 @@ fun NotebooksScreen(onOpen: (notebookId: String, pageId: String?) -> Unit) {
     var hits by remember { mutableStateOf<List<PageSearchHit>>(emptyList()) }
     LaunchedEffect(query) {
         delay(250)
-        hits = graph.repository.searchPages(query)
+        hits = ui { graph.repository.searchPages(query) }
     }
 
     Box(Modifier.fillMaxSize()) {
@@ -160,10 +162,10 @@ private fun CreateNotebookDialog(onDismiss: () -> Unit, onCreate: (String, PageT
 @Composable
 fun NotebookScreen(notebookId: String, initialPageId: String?, onBack: () -> Unit) {
     val graph = LocalContext.current.graph
-    val notebook by produceState<app.wanki.data.NotebookEntity?>(null, notebookId) { value = graph.repository.notebook(notebookId) }
+    val notebook by produceState<app.wanki.data.NotebookEntity?>(null, notebookId) { value = ui { graph.repository.notebook(notebookId) } }
     val pages by remember(notebookId) { graph.repository.observePages(notebookId) }.collectAsState(emptyList<PageEntity>())
     var index by remember { mutableStateOf<Int?>(null) }
-    val scope = rememberCoroutineScope()
+    val scope = rememberUiScope()
 
     LaunchedEffect(pages, initialPageId) {
         if (index == null && pages.isNotEmpty()) {

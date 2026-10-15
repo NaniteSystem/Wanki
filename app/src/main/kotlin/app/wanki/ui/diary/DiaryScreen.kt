@@ -1,5 +1,6 @@
 package app.wanki.ui.diary
 
+import app.wanki.ui.common.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -46,7 +47,7 @@ private val ru = Locale.forLanguageTag("ru")
 @Composable
 fun DiaryScreen(onOpenDay: (Long) -> Unit) {
     val graph = LocalContext.current.graph
-    val diary by produceState<app.wanki.data.NotebookEntity?>(null) { value = graph.repository.diary() }
+    val diary by produceState<app.wanki.data.NotebookEntity?>(null) { value = ui { graph.repository.diary() } }
     val dates by remember(diary?.id) {
         diary?.let { graph.repository.observeDiaryDates(it.id) } ?: flowOf(emptyList())
     }.collectAsState(emptyList())
@@ -120,7 +121,7 @@ fun DiaryDayScreen(epochDay: Long, onBack: () -> Unit) {
     val graph = LocalContext.current.graph
     val date = LocalDate.ofEpochDay(epochDay)
     val loaded by produceState<Pair<app.wanki.data.NotebookEntity, app.wanki.data.PageEntity>?>(null, epochDay) {
-        value = graph.repository.diary() to graph.repository.diaryPage(date)
+        value = ui { graph.repository.diary() to graph.repository.diaryPage(date) }
     }
     val (diary, page) = loaded ?: return
     val state = remember(page.id) { PageEditorState(graph, diary, page, infinite = false) }

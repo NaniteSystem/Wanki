@@ -1,5 +1,7 @@
 package app.wanki.ui.review
 
+import app.wanki.ui.common.ui
+import app.wanki.ui.common.rememberUiScope
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
@@ -217,8 +219,8 @@ class ReviewState(private val graph: AppGraph, private val deckId: String) {
 fun ReviewScreen(deckId: String, onClose: () -> Unit) {
     val graph = LocalContext.current.graph
     val state = remember(deckId) { ReviewState(graph, deckId) }
-    val scope = rememberCoroutineScope()
-    LaunchedEffect(deckId) { state.load() }
+    val scope = rememberUiScope()
+    LaunchedEffect(deckId) { ui { state.load() } }
 
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -262,7 +264,7 @@ private fun ClassicAnswer(state: ReviewState) {
 @Composable
 private fun WritingAnswer(state: ReviewState) {
     val graph = LocalContext.current.graph
-    val scope = rememberCoroutineScope()
+    val scope = rememberUiScope()
     val density = LocalDensity.current
     val layout = state.layout
     val cellsLayout = layout as? WritingLayout.Cells
@@ -284,7 +286,7 @@ private fun WritingAnswer(state: ReviewState) {
             val ready = state.cellsFilled(cellPx)
             val base = graph.settings.autoCheckDelayMs.toLong()
             delay(if (ready) base else base * 3)
-            if (cellsLayout == null || state.cellsFilled(cellPx)) state.check(cellPx, widthPx, heightPx)
+            if (cellsLayout == null || state.cellsFilled(cellPx)) ui { state.check(cellPx, widthPx, heightPx) }
         }
 
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -395,7 +397,7 @@ private const val AUTO_ADVANCE_MS = 2200
 
 @Composable
 private fun RatingRow(state: ReviewState) {
-    val scope = rememberCoroutineScope()
+    val scope = rememberUiScope()
     val cardId = state.current?.card?.id
     val intervals = remember(cardId, state.phase) { state.intervals() }
     val suggested = state.suggested()
@@ -406,7 +408,7 @@ private fun RatingRow(state: ReviewState) {
     LaunchedEffect(autoRating, paused, cardId) {
         if (autoRating == null || paused) return@LaunchedEffect
         progress.animateTo(1f, tween(AUTO_ADVANCE_MS, easing = LinearEasing))
-        state.rate(autoRating)
+        ui { state.rate(autoRating) }
     }
 
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {

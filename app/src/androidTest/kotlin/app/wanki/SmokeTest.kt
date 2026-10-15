@@ -9,7 +9,7 @@ import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onFirst
-import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
@@ -40,8 +40,13 @@ class SmokeTest {
 
     private fun shot(name: String) {
         rule.waitForIdle()
-        val bmp = rule.onRoot().captureToImage().asAndroidBitmap()
-        File(shotsDir, "$name.png").outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        // a dialog is a second window (root): save the screen and the dialog separately
+        val roots = rule.onAllNodes(isRoot()).fetchSemanticsNodes().size
+        for (i in 0 until roots) {
+            val bmp = rule.onAllNodes(isRoot())[i].captureToImage().asAndroidBitmap()
+            val file = if (i == 0) "$name.png" else "$name-window$i.png"
+            File(shotsDir, file).outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        }
     }
 
     private fun tab(label: String) = rule.onNode(hasTestTag("tab-$label")).performClick()

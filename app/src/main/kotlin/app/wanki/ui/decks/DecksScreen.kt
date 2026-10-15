@@ -1,5 +1,6 @@
 package app.wanki.ui.decks
 
+import app.wanki.ui.common.ui
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -62,7 +63,7 @@ fun DecksScreen(onOpen: (String) -> Unit, onStudy: (String) -> Unit) {
     val decks by remember(now) { graph.repository.observeDecks(now) }.collectAsState(emptyList())
     val reviewedToday by remember { graph.repository.observeReviewedToday() }.collectAsState(0)
     var creating by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { graph.repository.seedIfEmpty() }
+    LaunchedEffect(Unit) { ui { graph.repository.seedIfEmpty() } }
     // download recognition models for the decks' languages in the background
     LaunchedEffect(decks.map { it.deck.language }.toSet()) {
         decks.map { it.deck.language }.toSet().forEach { graph.recognizers.get(it).prefetch() }

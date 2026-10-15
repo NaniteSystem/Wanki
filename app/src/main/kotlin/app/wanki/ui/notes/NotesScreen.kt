@@ -1,5 +1,6 @@
 package app.wanki.ui.notes
 
+import app.wanki.ui.common.ui
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -131,7 +132,7 @@ fun NoteEditorScreen(id: String?, onBack: () -> Unit) {
     var savedVersion by remember { mutableIntStateOf(0) }
     var tool by remember { mutableStateOf(ToolSelection()) }
 
-    LaunchedEffect(id) {
+    LaunchedEffect(id) { ui {
         val n = id?.let { graph.repository.textNote(it) } ?: TextNoteEntity(title = "", body = "")
         val stored = graph.repository.noteBlocks(n.id)
         blocks.clear()
@@ -144,7 +145,7 @@ fun NoteEditorScreen(id: String?, onBack: () -> Unit) {
         }
         title = n.title
         note = n
-    }
+    } }
     val inkVersions = blocks.sumOf { it.layer?.version ?: 0 }
     suspend fun save() {
         val n = note ?: return
@@ -155,16 +156,16 @@ fun NoteEditorScreen(id: String?, onBack: () -> Unit) {
     LaunchedEffect(version, inkVersions) {
         if (note == null || version + inkVersions == savedVersion) return@LaunchedEffect
         delay(700)
-        save()
+        ui { save() }
         // recognize handwriting blocks after a longer pause so search finds them
         delay(2500)
         var changed = false
         for (b in blocks.toList()) {
             val l = b.layer ?: continue
-            val r = graph.textRecognition.recognize(l.strokes.toList(), AUTO_LANGUAGE) ?: continue
+            val r = ui { graph.textRecognition.recognize(l.strokes.toList(), AUTO_LANGUAGE) } ?: continue
             if (r.text != b.recognizedText) { b.recognizedText = r.text; changed = true }
         }
-        if (changed) save()
+        if (changed) ui { save() }
     }
     DisposableEffect(Unit) {
         onDispose { graph.appScope.launch { save() } }
