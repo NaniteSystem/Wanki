@@ -206,7 +206,7 @@ fun NoteEditorScreen(id: String?, onBack: () -> Unit) {
                             modifier = Modifier.fillMaxWidth().height(b.heightDp.dp).padding(vertical = 4.dp),
                         ) {
                             InkSurface(
-                                layer = b.layer!!, tool = tool, modifier = Modifier.fillMaxSize(),
+                                layer = b.layer!!, tool = tool, modifier = Modifier.fillMaxSize(), gestures = true,
                                 background = { drawTemplate(PageTemplate.LINED, InkRect(0f, 0f, size.width, size.height)) },
                             )
                         }

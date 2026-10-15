@@ -32,6 +32,7 @@ fun InkSurface(
     viewport: Viewport? = null,
     enabled: Boolean = true,
     showInk: Boolean = true,
+    gestures: Boolean = false,
     onStrokeStarted: () -> Unit = {},
     onStrokeFinished: () -> Unit = {},
     background: DrawScope.() -> Unit = {},
@@ -86,6 +87,7 @@ fun InkSurface(
                     it.viewport = viewport
                     it.tool = tool
                     it.enabled = enabled
+                    it.gestures = gestures
                     it.onStrokeStarted = { started() }
                     it.onStrokeFinished = { finished() }
                 }

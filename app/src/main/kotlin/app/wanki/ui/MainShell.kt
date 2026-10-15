@@ -29,6 +29,7 @@ import app.wanki.ui.notes.NoteEditorScreen
 import app.wanki.ui.notes.NotesScreen
 import app.wanki.ui.review.ReviewScreen
 import app.wanki.ui.settings.SettingsScreen
+import app.wanki.ui.stats.StatsScreen
 import app.wanki.writing.WritingTestScreen
 
 sealed interface Route {
@@ -44,6 +45,7 @@ sealed interface Route {
     data object Boards : Route
     data class Board(val id: String) : Route
     data object Settings : Route
+    data object Stats : Route
     data object WritingLab : Route
 }
 
@@ -118,7 +120,8 @@ fun MainShell() {
 @Composable
 private fun Content(nav: Navigator) {
     when (val r = nav.current) {
-        Route.Decks -> DecksScreen(onOpen = { nav.open(Route.Deck(it)) }, onStudy = { nav.open(Route.Review(it)) })
+        Route.Decks -> DecksScreen(onOpen = { nav.open(Route.Deck(it)) }, onStudy = { nav.open(Route.Review(it)) }, onStats = { nav.open(Route.Stats) })
+        Route.Stats -> StatsScreen(onBack = { nav.back() })
         is Route.Deck -> DeckScreen(r.id, onBack = { nav.back() }, onStudy = { nav.open(Route.Review(r.id)) })
         is Route.Review -> ReviewScreen(r.deckId, onClose = { nav.back() })
         Route.Notebooks -> NotebooksScreen(onOpen = { id, page -> nav.open(Route.Notebook(id, page)) })

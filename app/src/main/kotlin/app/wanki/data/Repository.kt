@@ -41,6 +41,18 @@ class Repository(private val db: WankiDatabase) {
         }
     }
 
+    data class NewCard(val front: String, val back: String, val mode: AnswerMode, val tags: String = "")
+
+    /** Bulk insert (imports), one transaction; [CardEntity.updatedAt] keeps the import order for new cards. */
+    suspend fun addCards(deckId: String, items: List<NewCard>) = db.withTransaction {
+        val t0 = System.currentTimeMillis()
+        items.forEachIndexed { i, it ->
+            val note = NoteEntity.basic(it.front.trim(), it.back.trim(), it.tags)
+            notes.upsert(note)
+            cards.upsert(CardEntity(noteId = note.id, deckId = deckId, answerMode = it.mode.name, updatedAt = t0 + i))
+        }
+    }
+
     suspend fun setAnswerMode(card: CardEntity, mode: AnswerMode) =
         cards.upsert(card.copy(answerMode = mode.name, updatedAt = System.currentTimeMillis()))
 
@@ -82,7 +94,7 @@ class Repository(private val db: WankiDatabase) {
         usedHint: Boolean,
         ink: InkDrawing?,
         now: Long = System.currentTimeMillis(),
-    ): CardEntity {
+    ): Answered {
         val next = scheduler.review(srsState(card), rating, now, card.seed)
         val updated = card.copy(
             state = next.state.name, step = next.step, stability = next.stability, difficulty = next.difficulty,
@@ -99,10 +111,41 @@ class Repository(private val db: WankiDatabase) {
                 reviews.insertAttempt(InkAttemptEntity(reviewLogId = log.id, strokes = InkCodec.encode(ink)))
             }
         }
-        return updated
+        return Answered(card, updated, log.id)
+    }
+
+    data class Answered(val before: CardEntity, val after: CardEntity, val logId: String)
+
+    /** Reverts an answer: the card gets its previous schedule back and the log entry disappears. */
+    suspend fun undo(a: Answered) = db.withTransaction {
+        cards.upsert(a.before.copy(updatedAt = System.currentTimeMillis()))
+        reviews.deleteAttempts(a.logId)
+        reviews.deleteLog(a.logId)
     }
 
     fun observeReviewedToday(): Flow<Int> = reviews.observeCountSince(startOfToday())
+
+    data class Stats(
+        val perDay: Map<Long, DayCount>,
+        val forecast: List<Int>,
+        val states: List<CardStateCount>,
+        val weakest: List<CharStat>,
+        val today: Long,
+    )
+
+    /** Everything the statistics screen shows; days are local epoch days. */
+    suspend fun stats(days: Int = 140, forecastDays: Int = 30): Stats {
+        val zone = ZoneId.systemDefault()
+        val offset = zone.rules.getOffset(java.time.Instant.now()).totalSeconds * 1000L
+        val today = LocalDate.now(zone).toEpochDay()
+        val since = LocalDate.now(zone).minusDays(days.toLong()).atStartOfDay(zone).toInstant().toEpochMilli()
+        val perDay = reviews.perDay(since, offset).associateBy { it.day }
+        val until = LocalDate.now(zone).plusDays(forecastDays.toLong()).atStartOfDay(zone).toInstant().toEpochMilli()
+        val due = cards.duePerDay(until, offset)
+        val forecast = IntArray(forecastDays)
+        for (d in due) forecast[(d.day - today).toInt().coerceIn(0, forecastDays - 1)] += d.n // overdue counts as today
+        return Stats(perDay, forecast.toList(), cards.stateCounts(), reviews.weakestHandwriting(), today)
+    }
 
     // --- notebooks, diary, board -------------------------------------------------------------
 

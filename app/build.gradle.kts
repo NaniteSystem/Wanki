@@ -53,6 +53,8 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
 
+    testImplementation(kotlin("test-junit"))
+
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     androidTestImplementation(libs.androidx.test.ext.junit)
@@ -71,5 +73,7 @@ dependencies {
     implementation(libs.mlkit.digital.ink)
     implementation(libs.mlkit.language.id)
     implementation(libs.mlkit.translate)
+    // Anki .apkg (new format) is a zstd-compressed SQLite database; the AAR carries the Android JNI libs
+    implementation("com.github.luben:zstd-jni:${libs.versions.zstd.get()}@aar")
     implementation(libs.kotlinx.coroutines.play.services)
 }

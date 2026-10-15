@@ -10,6 +10,7 @@ import androidx.ink.authoring.InProgressStrokeId
 import androidx.ink.authoring.InProgressStrokesFinishedListener
 import androidx.ink.authoring.InProgressStrokesView
 import androidx.ink.strokes.Stroke
+import app.wanki.ink.Gestures
 import app.wanki.ink.InkBrush
 import app.wanki.ink.InkPoint
 import app.wanki.ink.InkStroke
@@ -30,6 +31,8 @@ internal class InkInputHandler(
     var viewport: Viewport? = null
     var tool: ToolSelection = ToolSelection()
     var enabled: Boolean = true
+    /** Pen gestures (scratch-out to erase). Off where every stroke is an answer (review cells). */
+    var gestures: Boolean = false
     var eraserRadiusPx: Float = 22f
     var onStrokeStarted: () -> Unit = {}
     var onStrokeFinished: () -> Unit = {}
@@ -49,6 +52,8 @@ internal class InkInputHandler(
     private var drawStroke: InProgressStrokeId? = null
     private var erasePointer = -1
     private var lassoPointer = -1
+    private var movePointer = -1
+    private var lastWorld = androidx.compose.ui.geometry.Offset.Zero
 
     // finger navigation
     private var panPointer = -1
@@ -131,6 +136,15 @@ internal class InkInputHandler(
     }
 
     private fun onMove(e: MotionEvent) {
+        if (movePointer >= 0) {
+            val i = e.findPointerIndex(movePointer)
+            if (i >= 0) {
+                val w = world(e.getX(i), e.getY(i))
+                layer?.moveSelectionBy(w.x - lastWorld.x, w.y - lastWorld.y)
+                lastWorld = w
+            }
+            return
+        }
         if (lassoPointer >= 0) {
             val i = e.findPointerIndex(lassoPointer)
             if (i >= 0) layer?.let { l -> l.lasso = l.lasso.orEmpty() + world(e.getX(i), e.getY(i)) }
@@ -163,6 +177,11 @@ internal class InkInputHandler(
 
     private fun onUp(e: MotionEvent) {
         val id = e.getPointerId(e.actionIndex)
+        if (id == movePointer) {
+            movePointer = -1
+            layer?.endMove()
+            onStrokeFinished()
+        }
         if (id == lassoPointer) {
             lassoPointer = -1
             layer?.let { l ->
@@ -191,6 +210,7 @@ internal class InkInputHandler(
 
     private fun cancelAll(e: MotionEvent) {
         cancelDraw(e)
+        if (movePointer >= 0) { movePointer = -1; layer?.endMove() }
         lassoPointer = -1
         layer?.lasso = null
         erasePointer = -1
@@ -203,6 +223,17 @@ internal class InkInputHandler(
     }
 
     private fun startLasso(pointerId: Int, x: Float, y: Float) {
+        val l = layer ?: return
+        val w = world(x, y)
+        val b = l.selectionBounds()
+        val pad = 16f / (viewport?.scale ?: 1f)
+        if (b != null && w.x in b.left - pad..b.right + pad && w.y in b.top - pad..b.bottom + pad) {
+            // touching the selection drags it
+            movePointer = pointerId
+            lastWorld = w
+            l.beginMove()
+            return
+        }
         lassoPointer = pointerId
         layer?.let { it.clearSelection(); it.lasso = listOf(world(x, y)) }
     }
@@ -275,7 +306,17 @@ internal class InkInputHandler(
         capture = null
         val l = layer ?: return
         if (c.points.isEmpty()) return
-        l.add(InkStroke(c.points.toList(), c.tool, c.brush))
+        val stroke = InkStroke(c.points.toList(), c.tool, c.brush)
+        if (gestures && Gestures.isScratchOut(stroke)) {
+            val hit = Gestures.scratchedStrokes(stroke, l.strokes)
+            if (hit.isNotEmpty()) {
+                l.removeAt(hit)
+                Log.d(TAG, "scratch-out erased ${hit.size} strokes")
+                onStrokeFinished()
+                return
+            }
+        }
+        l.add(stroke)
         Log.d(TAG, "stroke committed: ${c.points.size} points, layer=${l.strokes.size}")
         onStrokeFinished()
     }

@@ -55,6 +55,39 @@ class InkLayer(initial: List<InkStroke> = emptyList()) {
 
     fun selectionBounds(): InkRect? = selection.mapNotNull { bounds(it) }.reduceOrNull { a, b -> a.union(b) }
 
+    /** Removes strokes by index (undoable), e.g. after a scratch-out gesture. */
+    fun removeAt(indices: List<Int>) {
+        val hit = indices.sorted().filter { it in strokes.indices }.map { it to strokes[it] }
+        if (hit.isEmpty()) return
+        hit.asReversed().forEach { strokes.removeAt(it.first) }
+        push(Edit.Removed(hit))
+    }
+
+    private var moveBefore: List<InkStroke>? = null
+    private var moveIndices: List<Int> = emptyList()
+
+    /** Starts dragging the selection; [moveSelectionBy] then shifts it live, [endMove] makes it one undo step. */
+    fun beginMove() {
+        moveBefore = strokes.toList()
+        moveIndices = strokes.indices.filter { i -> selection.any { it === strokes[i] } }
+    }
+
+    fun moveSelectionBy(dx: Float, dy: Float) {
+        if (moveBefore == null || (dx == 0f && dy == 0f)) return
+        val moved = moveIndices.map { i ->
+            val s = strokes[i]
+            s.copy(points = s.points.map { it.copy(x = it.x + dx, y = it.y + dy) }).also { strokes[i] = it }
+        }
+        selection.clear()
+        selection.addAll(moved)
+    }
+
+    fun endMove() {
+        val before = moveBefore ?: return
+        moveBefore = null
+        if (before != strokes.toList()) push(Edit.Replaced(before, strokes.toList()))
+    }
+
     /** Removes the selected strokes (undoable). */
     fun deleteSelection() {
         val hit = strokes.withIndex().filter { (_, s) -> selection.any { it === s } }

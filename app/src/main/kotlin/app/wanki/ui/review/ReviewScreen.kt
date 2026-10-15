@@ -68,6 +68,9 @@ import app.wanki.writing.ReviewColors
 import app.wanki.writing.drawReference
 import app.wanki.writing.drawReview
 import app.wanki.writing.drawTianzige
+import app.wanki.writing.HintColor
+import app.wanki.writing.StrokeOrderAnimation
+import app.wanki.writing.drawStrokeHint
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -86,7 +89,17 @@ class ReviewState(private val graph: AppGraph, private val deckId: String) {
         private set
     var grading by mutableStateOf(false)
         private set
-    var showHint by mutableStateOf(false)
+    /** 0 = no hint, 1 = the next stroke (per cell), 2 = the whole character. */
+    var hintLevel by mutableStateOf(0)
+        private set
+    val showHint: Boolean get() = hintLevel > 0
+
+    /**
+     * First meeting with a new written card (as in Skritter): the character is shown to trace;
+     * this does not count as a hint.
+     */
+    var intro by mutableStateOf(false)
+        private set
     var reviewed by mutableStateOf(0)
         private set
     var strokeActive by mutableStateOf(false)
@@ -119,14 +132,16 @@ class ReviewState(private val graph: AppGraph, private val deckId: String) {
         grade = null
         layer.clear()
         usedHint = false
-        showHint = false
+        intro = current?.let { it.card.lastReview == null && mode == AnswerMode.HANDWRITING } == true
+        hintLevel = if (intro) 2 else 0
         shownAt = System.currentTimeMillis()
         answeredAt = 0
     }
 
+    /** Hint button: next stroke → whole character → off. */
     fun toggleHint() {
-        showHint = !showHint
-        if (showHint && phase == Phase.QUESTION) usedHint = true
+        hintLevel = (hintLevel + 1) % 3
+        if (hintLevel > 0 && phase == Phase.QUESTION && !intro) usedHint = true
     }
 
     suspend fun switchMode(m: AnswerMode) {
@@ -177,6 +192,7 @@ class ReviewState(private val graph: AppGraph, private val deckId: String) {
         val g = grade ?: return null
         val passed = g.passed ?: return null
         val strokeCount = (layout as? WritingLayout.Cells)?.chars?.sumOf { graph.references.get(it)?.strokes?.size ?: 3 } ?: 6
+        if (intro) return if (passed) Rating.GOOD else Rating.AGAIN
         val r = RatingPolicy().suggest(passed, usedHint, answeredAt - shownAt, strokeCount)
         return Rating.valueOf(r.name)
     }
@@ -203,14 +219,30 @@ class ReviewState(private val graph: AppGraph, private val deckId: String) {
         val now = System.currentTimeMillis()
         val g = grade
         val written = mode == AnswerMode.HANDWRITING
-        val updated = graph.repository.answer(
+        val answered = graph.repository.answer(
             card = c.card, rating = r, scheduler = scheduler, mode = mode,
             score = g?.score, beauty = g?.beauty, durationMs = (if (answeredAt > 0) answeredAt else now) - shownAt,
             usedHint = usedHint, ink = if (written) layer.drawing() else null, now = now,
         )
+        val updated = answered.after
+        lastAnswer = c to answered
         queue.removeAt(0)
         if (updated.due <= now + Repository.LEARN_AHEAD_MS) queue.add(c.copy(card = updated))
         reviewed++
+        resetCard()
+    }
+
+    /** The last rated card with its answer, for "undo" (as in Anki). */
+    var lastAnswer by mutableStateOf<Pair<CardWithNote, Repository.Answered>?>(null)
+        private set
+
+    suspend fun undoLast() {
+        val (c, a) = lastAnswer ?: return
+        lastAnswer = null
+        graph.repository.undo(a)
+        queue.removeAll { it.card.id == c.card.id }
+        queue.add(0, c)
+        reviewed = (reviewed - 1).coerceAtLeast(0)
         resetCard()
     }
 }
@@ -228,6 +260,9 @@ fun ReviewScreen(deckId: String, onClose: () -> Unit) {
             Column(Modifier.weight(1f)) {
                 Text(state.deck?.name.orEmpty(), style = MaterialTheme.typography.titleMedium, maxLines = 1)
                 Text("осталось ${state.queue.size} · повторено ${state.reviewed}", style = MaterialTheme.typography.labelMedium)
+            }
+            if (state.lastAnswer != null) {
+                TextButton(onClick = { scope.launch { state.undoLast() } }) { Text("↶ Отменить оценку") }
             }
             if (state.current != null) {
                 FilterChip(state.mode == AnswerMode.CLASSIC, { scope.launch { state.switchMode(AnswerMode.CLASSIC) } }, { Text("Классика") })
@@ -290,6 +325,13 @@ private fun WritingAnswer(state: ReviewState) {
         }
 
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (state.intro && state.phase == Phase.QUESTION) {
+                val refs = cellsLayout?.chars?.mapNotNull { graph.references.get(it) }.orEmpty()
+                Text("Новая карточка: посмотрите порядок черт и обведите по образцу", style = MaterialTheme.typography.titleSmall, color = HintColor)
+                if (refs.isNotEmpty()) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { refs.forEach { StrokeOrderAnimation(it, Modifier.size(96.dp)) } }
+                }
+            }
             Surface(shape = RoundedCornerShape(12.dp), tonalElevation = 1.dp, modifier = Modifier.size(widthDp, heightDp).testTag("writing-canvas")) {
                 Box {
                     InkSurface(
@@ -305,8 +347,15 @@ private fun WritingAnswer(state: ReviewState) {
                                 cellsLayout.chars.forEachIndexed { i, ch ->
                                     val cell = Cell(i * cellPx, 0f, cellPx)
                                     drawTianzige(cell)
-                                    if (state.showHint && state.phase == Phase.QUESTION) {
-                                        graph.references.get(ch)?.let { drawReference(it, cell) }
+                                    if (state.phase == Phase.QUESTION) graph.references.get(ch)?.let { ref ->
+                                        when (state.hintLevel) {
+                                            2 -> drawReference(ref, cell)
+                                            1 -> {
+                                                // next stroke of this cell: as many strokes as already written in it
+                                                val written = AnswerGrader.splitIntoCells(state.layer.strokes.toList(), cellsLayout.chars.size, cellPx)[i].size
+                                                drawStrokeHint(ref, written, cell)
+                                            }
+                                        }
                                     }
                                 }
                             } else {
@@ -333,7 +382,10 @@ private fun WritingAnswer(state: ReviewState) {
             }
             if (state.phase == Phase.QUESTION) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    FilterChip(state.showHint, state::toggleHint, { Text("Подсказка") })
+                    FilterChip(
+                        state.showHint, state::toggleHint,
+                        { Text(when (state.hintLevel) { 0 -> "Подсказка"; 1 -> "Весь знак"; else -> "Скрыть" }) },
+                    )
                     OutlinedButton(onClick = { state.layer.clear() }, enabled = !state.layer.isEmpty) { Text("Стереть") }
                     OutlinedButton(onClick = state::giveUp) { Text("Не помню") }
                     TextButton(
@@ -356,8 +408,16 @@ private fun WritingAnswer(state: ReviewState) {
 @Composable
 private fun Verdict(state: ReviewState) {
     val g = state.grade
+    val graph = LocalContext.current.graph
     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(state.answer, fontSize = 40.sp, fontWeight = FontWeight.Medium)
+        // stroke order of the answer, animated (tap to replay)
+        val refs = (state.layout as? WritingLayout.Cells)?.chars?.mapNotNull { graph.references.get(it) }.orEmpty()
+        if (refs.isNotEmpty()) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                refs.forEach { StrokeOrderAnimation(it, Modifier.size(96.dp)) }
+            }
+        }
         when (g?.passed) {
             true -> Text(
                 "Верно" + (g.score?.let { " · %.0f%%".format(it) } ?: "") + (g.beauty?.let { " · почерк %.0f".format(it) } ?: ""),

@@ -182,6 +182,7 @@ fun PageEditor(
                 tool = state.tool,
                 viewport = state.viewport,
                 enabled = state.loaded,
+                gestures = true,
                 modifier = Modifier.weight(1f).fillMaxSize().testTag("page-canvas"),
                 background = {
                     if (state.infinite) drawBoard(state.viewport.visibleWorld(), state.viewport.scale)

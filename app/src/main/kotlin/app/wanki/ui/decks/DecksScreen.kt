@@ -1,6 +1,8 @@
 package app.wanki.ui.decks
 
 import app.wanki.ui.common.ui
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -43,6 +45,7 @@ import app.wanki.data.AnswerMode
 import app.wanki.data.CardWithNote
 import app.wanki.data.DeckEntity
 import app.wanki.graph
+import app.wanki.importer.AnkiImporter
 import app.wanki.ui.common.Languages
 import app.wanki.ui.common.ScreenHeader
 import app.wanki.ui.common.languageName
@@ -52,7 +55,7 @@ private val NewColor = Color(0xFF1E5BD8)
 private val DueColor = Color(0xFF2E9E5B)
 
 @Composable
-fun DecksScreen(onOpen: (String) -> Unit, onStudy: (String) -> Unit) {
+fun DecksScreen(onOpen: (String) -> Unit, onStudy: (String) -> Unit, onStats: () -> Unit = {}) {
     val graph = LocalContext.current.graph
     // "now" is refreshed on resume so due counts stay current
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
@@ -63,6 +66,20 @@ fun DecksScreen(onOpen: (String) -> Unit, onStudy: (String) -> Unit) {
     val decks by remember(now) { graph.repository.observeDecks(now) }.collectAsState(emptyList())
     val reviewedToday by remember { graph.repository.observeReviewedToday() }.collectAsState(0)
     var creating by remember { mutableStateOf(false) }
+    var importStatus by remember { mutableStateOf<String?>(null) }
+    val context = LocalContext.current
+    val pickApkg = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            importStatus = "Импорт…"
+            graph.appScope.launch {
+                importStatus = runCatching { AnkiImporter(context, graph.repository).import(uri) }.fold(
+                    { r -> "Импортировано: колод ${r.decks}, карточек ${r.cards}" + if (r.skipped > 0) " (пропущено ${r.skipped} без ответа)" else "" },
+                    { e -> "Не удалось импортировать: ${e.message ?: e.javaClass.simpleName}" },
+                )
+                now = System.currentTimeMillis()
+            }
+        }
+    }
     LaunchedEffect(Unit) { ui { graph.repository.seedIfEmpty() } }
     // download recognition models for the decks' languages in the background
     LaunchedEffect(decks.map { it.deck.language }.toSet()) {
@@ -71,7 +88,10 @@ fun DecksScreen(onOpen: (String) -> Unit, onStudy: (String) -> Unit) {
 
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
-            ScreenHeader("Колоды", subtitle = "Сегодня повторено: $reviewedToday")
+            ScreenHeader("Колоды", subtitle = "Сегодня повторено: $reviewedToday") {
+                TextButton(onClick = { pickApkg.launch(arrayOf("*/*")) }) { Text("Импорт Anki") }
+                TextButton(onClick = onStats) { Text("Статистика") }
+            }
             LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(decks, key = { it.deck.id }) { d ->
                     Card(Modifier.fillMaxWidth().clickable { onOpen(d.deck.id) }) {
@@ -97,6 +117,14 @@ fun DecksScreen(onOpen: (String) -> Unit, onStudy: (String) -> Unit) {
         ExtendedFloatingActionButton(onClick = { creating = true }, modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)) {
             Text("+ Колода")
         }
+    }
+    importStatus?.let { msg ->
+        AlertDialog(
+            onDismissRequest = { importStatus = null },
+            title = { Text("Импорт из Anki") },
+            text = { Text(msg) },
+            confirmButton = { TextButton(onClick = { importStatus = null }) { Text("OK") } },
+        )
     }
     if (creating) {
         CreateDeckDialog(onDismiss = { creating = false }) { name, lang, mode ->

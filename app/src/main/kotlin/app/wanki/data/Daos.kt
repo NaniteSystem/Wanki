@@ -81,6 +81,17 @@ interface CardDao {
     @Upsert
     suspend fun upsert(card: CardEntity)
 
+    @Query(
+        """
+        SELECT (due + :offset) / 86400000 AS day, COUNT(*) AS n FROM cards
+        WHERE deleted = 0 AND lastReview IS NOT NULL AND due < :until GROUP BY day ORDER BY day
+        """,
+    )
+    suspend fun duePerDay(until: Long, offset: Long): List<DueDay>
+
+    @Query("SELECT state, lastReview IS NULL AS isNew, COUNT(*) AS n FROM cards WHERE deleted = 0 GROUP BY state, isNew")
+    suspend fun stateCounts(): List<CardStateCount>
+
     @Query("UPDATE cards SET deleted = 1, updatedAt = :now WHERE id = :id")
     suspend fun delete(id: String, now: Long = System.currentTimeMillis())
 }
@@ -99,8 +110,32 @@ interface ReviewDao {
     @Insert
     suspend fun insertAttempt(attempt: InkAttemptEntity)
 
+    @Query("DELETE FROM review_logs WHERE id = :id")
+    suspend fun deleteLog(id: String)
+
+    @Query("DELETE FROM ink_attempts WHERE reviewLogId = :logId")
+    suspend fun deleteAttempts(logId: String)
+
     @Query("SELECT * FROM review_logs WHERE cardId = :cardId ORDER BY reviewedAt")
     suspend fun forCard(cardId: String): List<ReviewLogEntity>
+
+    @Query(
+        """
+        SELECT (reviewedAt + :offset) / 86400000 AS day, COUNT(*) AS n,
+               SUM(CASE WHEN rating > 1 THEN 1 ELSE 0 END) AS ok
+        FROM review_logs WHERE reviewedAt >= :since GROUP BY day ORDER BY day
+        """,
+    )
+    suspend fun perDay(since: Long, offset: Long): List<DayCount>
+
+    @Query(
+        """
+        SELECT nt.fields AS fields, AVG(r.beauty) AS beauty, AVG(r.score) AS score, COUNT(*) AS n
+        FROM review_logs r JOIN cards c ON c.id = r.cardId JOIN notes nt ON nt.id = c.noteId
+        WHERE r.beauty IS NOT NULL AND c.deleted = 0 GROUP BY c.id ORDER BY beauty ASC LIMIT 12
+        """,
+    )
+    suspend fun weakestHandwriting(): List<CharStat>
 
     @Query("SELECT COUNT(*) FROM review_logs WHERE reviewedAt >= :since")
     fun observeCountSince(since: Long): Flow<Int>

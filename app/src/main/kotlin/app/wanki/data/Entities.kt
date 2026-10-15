@@ -176,3 +176,12 @@ data class PageSearchHit(
     val date: Long?,
     val recognizedText: String,
 )
+
+data class DayCount(val day: Long, val n: Int, val ok: Int)
+
+data class DueDay(val day: Long, val n: Int)
+
+data class CardStateCount(val state: String, val isNew: Boolean, val n: Int)
+
+/** Handwriting average per card (for the "weakest characters" table). */
+data class CharStat(val fields: String, val beauty: Double?, val score: Double?, val n: Int)
