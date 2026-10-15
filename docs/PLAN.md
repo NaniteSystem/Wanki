@@ -62,7 +62,7 @@ Page(id, notebookId, index, template, date, updatedAt, deleted)
 PageInk(pageId, layersBlob, recognizedText)
 PageCardLink(pageId, regionRect, cardId)
 ```
-Штрихи хранятся в protobuf (x, y, t, давление, наклон). `InkAttempt` нужен для истории почерка по знаку.
+Штрихи хранятся в компактном бинарном формате `InkCodec` (дельты + varint; x, y, t, давление, наклон, поворот; ~7–8 байт на точку со стилусом). `InkAttempt` нужен для истории почерка по знаку.
 
 ## Синхронизация
 Supabase (Postgres + Storage). UUID, `updatedAt` + `deleted` везде; конфликты разрешаются
@@ -88,7 +88,7 @@ last-write-wins по сущности (страницы целиком). `Review
 ```
 
 ## Порядок работы
-1. ✅ `:core:scoring` на японском (JVM-тесты). ⏳ `:core:ink` и тестовый экран «пишешь — видишь процент».
+1. ✅ `:core:scoring` на японском (JVM-тесты), `:core:ink`, тестовый экран «пишешь — видишь процент» (стилус в приоритете, планшет).
 2. Колоды, карточки, FSRS, повторение в обоих режимах.
 3. Импорт Anki; готовые колоды (JMdict/KANJIDIC, CC-CEDICT, TOPIK).
 4. Синхронизация. 5. Китайский и корейский. 6. Тетради и дневник. 7. Арабский. 8. Рисование и планшетный UI.
