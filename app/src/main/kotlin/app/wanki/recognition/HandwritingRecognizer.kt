@@ -16,6 +16,7 @@ import com.google.mlkit.vision.digitalink.recognition.RecognitionContext
 import com.google.mlkit.vision.digitalink.recognition.WritingArea
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.tasks.await
@@ -66,8 +67,12 @@ class HandwritingRecognizer(val language: String, private val scope: CoroutineSc
     /** Whether the model can be used right now; if not, the download is started in the background. */
     private suspend fun readyNow(): Boolean {
         if (status == ModelStatus.READY) return true
+        // ML Kit queues calls behind a running download, so don't even ask while one is going on.
+        if (status == ModelStatus.DOWNLOADING || downloadLock.isLocked) return false
         val m = model ?: return false
-        val downloaded = runCatching { manager.isModelDownloaded(m).await() }.getOrDefault(false)
+        val downloaded = withTimeoutOrNull(QUICK_TIMEOUT_MS) {
+            runCatching { manager.isModelDownloaded(m).await() }.getOrDefault(false)
+        } ?: false
         if (downloaded) {
             status = ModelStatus.READY
             return true
@@ -102,7 +107,10 @@ class HandwritingRecognizer(val language: String, private val scope: CoroutineSc
             .setPreContext(preContext.takeLast(20))
             .setWritingArea(WritingArea(areaWidth.coerceAtLeast(1f), areaHeight.coerceAtLeast(1f)))
             .build()
-        return runCatching { r.recognize(ink.build(), context).await().candidates.map { it.text } }.getOrNull()
+        val timeout = if (waitForModel) LONG_TIMEOUT_MS else QUICK_TIMEOUT_MS * 2
+        return withTimeoutOrNull(timeout) {
+            runCatching { r.recognize(ink.build(), context).await().candidates.map { it.text } }.getOrNull()
+        }
     }
 
     override fun close() {
@@ -110,6 +118,10 @@ class HandwritingRecognizer(val language: String, private val scope: CoroutineSc
     }
 
     companion object {
+        /** Answer checking never waits longer than this for the recognizer. */
+        private const val QUICK_TIMEOUT_MS = 1_500L
+        private const val LONG_TIMEOUT_MS = 30_000L
+
         /** Our deck/notebook language codes → ML Kit language tags. */
         fun mlKitTag(language: String): String = when (language) {
             "zh" -> "zh-Hani-CN"
