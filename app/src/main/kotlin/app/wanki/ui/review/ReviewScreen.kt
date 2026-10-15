@@ -1,5 +1,8 @@
 package app.wanki.ui.review
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -18,6 +21,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -180,7 +184,19 @@ class ReviewState(private val graph: AppGraph, private val deckId: String) {
         return scheduler.preview(graph.repository.srsState(c.card), System.currentTimeMillis(), c.card.seed)
     }
 
+    private var rating = false
+
     suspend fun rate(r: Rating) {
+        if (rating) return
+        rating = true
+        try {
+            rateNow(r)
+        } finally {
+            rating = false
+        }
+    }
+
+    private suspend fun rateNow(r: Rating) {
         val c = current ?: return
         val now = System.currentTimeMillis()
         val g = grade
@@ -356,6 +372,7 @@ private fun Verdict(state: ReviewState) {
                 append(when (c.passed) { true -> "верно"; false -> "неверно"; null -> "?" })
                 c.score?.let { append(" %.0f%%".format(it)) }
                 if (reasons.isNotEmpty()) append(" — ").append(reasons.joinToString(", "))
+                if (c.result?.acceptedByRecognizer == true && c.result?.failReasons?.isEmpty() == true) append(" · форма необычная, но знак узнаётся")
                 if (c.result?.needsHandwritingPractice == true) append(" · почерк в тренировку")
                 if (c.result == null && c.candidates != null) append(" (распознано: ${c.candidates.take(3).joinToString(" ")})")
             }
@@ -373,31 +390,58 @@ private fun reasonText(r: FailReason, confused: String?, missing: Int) = when (r
     FailReason.LOW_SCORE -> "форма далека от правильной"
 }
 
+/** After a correct written answer the suggested rating is applied by itself after this pause. */
+private const val AUTO_ADVANCE_MS = 2200
+
 @Composable
 private fun RatingRow(state: ReviewState) {
     val scope = rememberCoroutineScope()
-    val intervals = remember(state.current?.card?.id, state.phase) { state.intervals() }
+    val cardId = state.current?.card?.id
+    val intervals = remember(cardId, state.phase) { state.intervals() }
     val suggested = state.suggested()
+    // Correct answers move on by themselves; mistakes wait so the review can be studied.
+    val autoRating = if (state.grade?.passed == true) suggested else null
+    var paused by remember(cardId, state.phase) { mutableStateOf(false) }
+    val progress = remember(cardId, state.phase) { Animatable(0f) }
+    LaunchedEffect(autoRating, paused, cardId) {
+        if (autoRating == null || paused) return@LaunchedEffect
+        progress.animateTo(1f, tween(AUTO_ADVANCE_MS, easing = LinearEasing))
+        state.rate(autoRating)
+    }
+
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Rating.entries.forEach { r ->
-            val label = when (r) {
-                Rating.AGAIN -> "Снова"
-                Rating.HARD -> "Трудно"
-                Rating.GOOD -> "Хорошо"
-                Rating.EASY -> "Легко"
-            }
             val colors = if (r == suggested) ButtonDefaults.buttonColors() else ButtonDefaults.filledTonalButtonColors()
             Button(onClick = { scope.launch { state.rate(r) } }, colors = colors, modifier = Modifier.weight(1f).height(64.dp)) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(label, maxLines = 1)
+                    Text(r.label(), maxLines = 1)
                     Text(formatInterval(intervals[r] ?: 0), style = MaterialTheme.typography.labelSmall)
                 }
             }
         }
     }
-    if (suggested != null) {
+    if (autoRating != null && !paused) {
+        Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+            LinearProgressIndicator(progress = { progress.value }, modifier = Modifier.fillMaxWidth().height(4.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "Дальше с оценкой «${autoRating.label()}» — или выберите другую",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                TextButton(onClick = { paused = true }) { Text("Пауза") }
+            }
+        }
+    } else if (suggested != null) {
         Text("Подсвечена оценка по результату проверки", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
+}
+
+private fun Rating.label() = when (this) {
+    Rating.AGAIN -> "Снова"
+    Rating.HARD -> "Трудно"
+    Rating.GOOD -> "Хорошо"
+    Rating.EASY -> "Легко"
 }
 
 private fun formatInterval(ms: Long): String {
