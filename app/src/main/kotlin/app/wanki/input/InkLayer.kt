@@ -44,8 +44,7 @@ class InkLayer(initial: List<InkStroke> = emptyList()) {
     fun renderable(s: InkStroke): Stroke? = render.getOrPut(s) { StrokeConversion.toInk(s) }
     fun bounds(s: InkStroke): InkRect? = boundsCache.getOrPut(s) { s.bounds() }
 
-    internal fun addFinished(s: InkStroke, rendered: Stroke) {
-        render[s] = rendered
+    fun add(s: InkStroke) {
         strokes += s
         push(Edit.Added(listOf(s)))
     }

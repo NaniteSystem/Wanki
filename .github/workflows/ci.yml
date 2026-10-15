@@ -107,7 +107,7 @@ jobs:
           out=/tmp/pub/${{ matrix.device }}
           mkdir -p "$out"
           cp -r screens/. "$out"/ 2>/dev/null || true
-          grep -E "AndroidRuntime|FATAL|app.wanki|TestRunner" logcat.txt | tail -n 400 > "$out/logcat-filtered.txt" || true
+          grep -E "AndroidRuntime|FATAL EXCEPTION|WankiInk|TestRunner|System.err" logcat.txt | tail -n 400 > "$out/logcat-filtered.txt" || true
           find app/build/outputs/androidTest-results -name "*.xml" -exec cp {} "$out"/ \; 2>/dev/null || true
           echo "${{ github.sha }}" > "$out/commit.txt"
           cd /tmp/pub
