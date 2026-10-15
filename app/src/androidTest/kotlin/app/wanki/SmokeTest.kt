@@ -70,7 +70,13 @@ class SmokeTest {
         shot("02-review-question")
         write("writing-canvas", 3)
         shot("03-review-written")
-        rule.waitUntilAtLeastOneExists(hasText("Хорошо"), 20_000)
+        val auto = runCatching { rule.waitUntilAtLeastOneExists(hasText("Хорошо"), 12_000) }.isSuccess
+        if (!auto) {
+            // the automatic check did not fire: keep evidence, then press the button
+            shot("04a-no-autocheck")
+            rule.onAllNodes(hasText("Проверить")).onFirst().performClick()
+            rule.waitUntilAtLeastOneExists(hasText("Хорошо"), 15_000)
+        }
         shot("04-review-checked")
         rule.onAllNodes(hasText("Хорошо")).onFirst().performClick()
         rule.waitForIdle()

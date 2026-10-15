@@ -17,7 +17,7 @@ class PageRecognizer(private val recognizer: HandwritingRecognizer) {
             val lineStrokes = line.map { writing[it] }
             val top = lineStrokes.mapNotNull { it.bounds()?.top }.min()
             val bottom = lineStrokes.mapNotNull { it.bounds()?.bottom }.max()
-            val text = recognizer.recognize(lineStrokes, pageWidth, (bottom - top) * 1.3f, out.toString())
+            val text = recognizer.recognize(lineStrokes, pageWidth, (bottom - top) * 1.3f, out.toString(), waitForModel = true)
                 ?: return null
             if (out.isNotEmpty()) out.append('\n')
             out.append(text.firstOrNull().orEmpty())

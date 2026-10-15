@@ -63,6 +63,10 @@ fun DecksScreen(onOpen: (String) -> Unit, onStudy: (String) -> Unit) {
     val reviewedToday by remember { graph.repository.observeReviewedToday() }.collectAsState(0)
     var creating by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { graph.repository.seedIfEmpty() }
+    // download recognition models for the decks' languages in the background
+    LaunchedEffect(decks.map { it.deck.language }.toSet()) {
+        decks.map { it.deck.language }.toSet().forEach { graph.recognizers.get(it).prefetch() }
+    }
 
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {

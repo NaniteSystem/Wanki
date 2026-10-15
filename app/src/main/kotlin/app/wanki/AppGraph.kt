@@ -16,13 +16,12 @@ import kotlinx.coroutines.SupervisorJob
 class AppGraph(context: Context) {
     val db = WankiDatabase.create(context)
     val settings = Settings(context)
-    val recognizers = RecognizerPool()
+    /** For work that must finish even when the screen that started it is gone (autosave, downloads). */
+    val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    val recognizers = RecognizerPool(appScope)
     val references = ReferenceRepository(context.assets)
     val repository = Repository(db)
     val grader = AnswerGrader(references, recognizers, settings)
-
-    /** For work that must finish even when the screen that started it is gone (autosave). */
-    val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 }
 
 class WankiApp : Application() {

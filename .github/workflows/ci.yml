@@ -47,6 +47,8 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
@@ -96,3 +98,21 @@ jobs:
             logcat.txt
             app/build/reports/androidTests/
           retention-days: 14
+
+      # Artifacts are not reachable from every environment, so screenshots, the filtered logcat and
+      # test results are also pushed to a throwaway branch per device (force-pushed every run).
+      - name: Publish screenshots to a branch
+        if: always() && github.event_name == 'push'
+        run: |
+          out=/tmp/pub/${{ matrix.device }}
+          mkdir -p "$out"
+          cp -r screens/. "$out"/ 2>/dev/null || true
+          grep -E "AndroidRuntime|FATAL|app.wanki|TestRunner" logcat.txt | tail -n 400 > "$out/logcat-filtered.txt" || true
+          find app/build/outputs/androidTest-results -name "*.xml" -exec cp {} "$out"/ \; 2>/dev/null || true
+          echo "${{ github.sha }}" > "$out/commit.txt"
+          cd /tmp/pub
+          git init -q
+          git checkout -q -b ci-screenshots-${{ matrix.device }}
+          git add -A
+          git -c user.name=ci -c user.email=ci@localhost commit -qm "Emulator screenshots for ${{ github.sha }}"
+          git push -qf "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" HEAD:ci-screenshots-${{ matrix.device }}

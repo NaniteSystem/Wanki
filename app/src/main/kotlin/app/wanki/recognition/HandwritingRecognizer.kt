@@ -14,6 +14,8 @@ import com.google.mlkit.vision.digitalink.recognition.DigitalInkRecognizerOption
 import com.google.mlkit.vision.digitalink.recognition.Ink
 import com.google.mlkit.vision.digitalink.recognition.RecognitionContext
 import com.google.mlkit.vision.digitalink.recognition.WritingArea
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.tasks.await
@@ -24,7 +26,7 @@ enum class ModelStatus { UNKNOWN, DOWNLOADING, READY, UNAVAILABLE }
  * ML Kit Digital Ink for one language. The model is downloaded on first use; until it is there
  * every call returns null and callers fall back (geometry-only scoring, self-rating, no search).
  */
-class HandwritingRecognizer(val language: String) : AutoCloseable {
+class HandwritingRecognizer(val language: String, private val scope: CoroutineScope) : AutoCloseable {
     private val model: DigitalInkRecognitionModel? = runCatching {
         DigitalInkRecognitionModelIdentifier.fromLanguageTag(mlKitTag(language))
             ?.let { DigitalInkRecognitionModel.builder(it).build() }
@@ -56,15 +58,39 @@ class HandwritingRecognizer(val language: String) : AutoCloseable {
         }
     }
 
-    /** Ranked candidates, or null when recognition is unavailable. */
+    /** Starts the model download in the background if needed; never blocks. */
+    fun prefetch() {
+        if (model != null && status != ModelStatus.READY) scope.launch { ensureModel() }
+    }
+
+    /** Whether the model can be used right now; if not, the download is started in the background. */
+    private suspend fun readyNow(): Boolean {
+        if (status == ModelStatus.READY) return true
+        val m = model ?: return false
+        val downloaded = runCatching { manager.isModelDownloaded(m).await() }.getOrDefault(false)
+        if (downloaded) {
+            status = ModelStatus.READY
+            return true
+        }
+        prefetch()
+        return false
+    }
+
+    /**
+     * Ranked candidates, or null when recognition is unavailable. Answer checking must not wait
+     * for a first-time model download, so by default a missing model just yields null
+     * ([waitForModel] = true is for background work such as page recognition).
+     */
     suspend fun recognize(
         strokes: List<InkStroke>,
         areaWidth: Float,
         areaHeight: Float,
         preContext: String = "",
+        waitForModel: Boolean = false,
     ): List<String>? {
         val r = recognizer ?: return null
-        if (strokes.isEmpty() || !ensureModel()) return null
+        if (strokes.isEmpty()) return null
+        if (!(if (waitForModel) ensureModel() else readyNow())) return null
         val ink = Ink.builder()
         for (s in strokes) {
             if (s.points.isEmpty()) continue
@@ -94,9 +120,9 @@ class HandwritingRecognizer(val language: String) : AutoCloseable {
 }
 
 /** One recognizer per language, created lazily and kept for the app's lifetime. */
-class RecognizerPool {
+class RecognizerPool(private val scope: CoroutineScope) {
     private val map = HashMap<String, HandwritingRecognizer>()
 
     @Synchronized
-    fun get(language: String): HandwritingRecognizer = map.getOrPut(language) { HandwritingRecognizer(language) }
+    fun get(language: String): HandwritingRecognizer = map.getOrPut(language) { HandwritingRecognizer(language, scope) }
 }

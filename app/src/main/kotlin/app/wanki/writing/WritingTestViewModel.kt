@@ -54,7 +54,7 @@ class WritingTestViewModel(app: Application) : AndroidViewModel(app) {
     val reference: CharReference? get() = repo.get(char)
 
     init {
-        viewModelScope.launch { recognizer.ensureModel() }
+        recognizer.prefetch()
     }
 
     fun select(i: Int) {
