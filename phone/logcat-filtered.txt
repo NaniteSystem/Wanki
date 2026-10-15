@@ -1,0 +1,44 @@
+10-15 19:51:21.375   962   962 I AndroidRuntime: VM exiting with result code 0, cleanup skipped.
+10-15 19:52:18.953  4718  4718 D AndroidRuntime: >>>>>> START com.android.internal.os.RuntimeInit uid 2000 <<<<<<
+10-15 19:52:18.985  4718  4718 I AndroidRuntime: Using default boot image
+10-15 19:52:18.985  4718  4718 I AndroidRuntime: Leaving lock profiling enabled
+10-15 19:52:19.306  4718  4718 D AndroidRuntime: Calling main entry com.android.commands.am.Am
+10-15 19:52:22.312  4743  4779 I TestRunner: run started: 1 tests
+10-15 19:52:22.315  4743  4779 I TestRunner: started: walkThroughAllSections(app.wanki.SmokeTest)
+10-15 19:52:31.904  4743  4743 D WankiInk: down type=1 enabled=true layer=true stylusActive=false
+10-15 19:52:31.936  4743  4743 D WankiInk: stroke start tool=1
+10-15 19:52:31.969  4743  4743 D WankiInk: stroke committed: 17 points, layer=1
+10-15 19:52:31.971  4743  4743 D WankiInk: down type=1 enabled=true layer=true stylusActive=false
+10-15 19:52:31.972  4743  4743 D WankiInk: stroke start tool=1
+10-15 19:52:31.997  4743  4743 D WankiInk: stroke committed: 17 points, layer=2
+10-15 19:52:31.999  4743  4743 D WankiInk: down type=1 enabled=true layer=true stylusActive=false
+10-15 19:52:32.000  4743  4743 D WankiInk: stroke start tool=1
+10-15 19:52:32.017  4743  4743 D WankiInk: stroke committed: 17 points, layer=3
+10-15 19:52:41.969  4743  4743 D WankiInk: down type=1 enabled=true layer=true stylusActive=false
+10-15 19:52:41.972  4743  4743 D WankiInk: stroke start tool=1
+10-15 19:52:41.991  4743  4743 D WankiInk: stroke committed: 17 points, layer=1
+10-15 19:52:41.992  4743  4743 D WankiInk: down type=1 enabled=true layer=true stylusActive=false
+10-15 19:52:41.993  4743  4743 D WankiInk: stroke start tool=1
+10-15 19:52:42.007  4743  4743 D WankiInk: stroke committed: 17 points, layer=2
+10-15 19:52:42.010  4743  4743 D WankiInk: down type=1 enabled=true layer=true stylusActive=false
+10-15 19:52:42.011  4743  4743 D WankiInk: stroke start tool=1
+10-15 19:52:42.025  4743  4743 D WankiInk: stroke committed: 17 points, layer=3
+10-15 19:52:42.026  4743  4743 D WankiInk: down type=1 enabled=true layer=true stylusActive=false
+10-15 19:52:42.026  4743  4743 D WankiInk: stroke start tool=1
+10-15 19:52:42.060  4743  4743 D WankiInk: stroke committed: 17 points, layer=4
+10-15 19:52:43.817  4743  4743 D WankiInk: down type=1 enabled=true layer=true stylusActive=false
+10-15 19:52:51.447  4743  4743 D WankiInk: down type=1 enabled=true layer=true stylusActive=false
+10-15 19:52:51.454  4743  4743 D WankiInk: stroke start tool=1
+10-15 19:52:51.467  4743  4743 D WankiInk: stroke committed: 17 points, layer=1
+10-15 19:52:51.475  4743  4743 D WankiInk: down type=1 enabled=true layer=true stylusActive=false
+10-15 19:52:51.477  4743  4743 D WankiInk: stroke start tool=1
+10-15 19:52:51.491  4743  4743 D WankiInk: stroke committed: 17 points, layer=2
+10-15 19:52:56.069  4743  4743 D WankiInk: down type=1 enabled=true layer=true stylusActive=false
+10-15 19:52:56.073  4743  4743 D WankiInk: stroke start tool=1
+10-15 19:52:56.090  4743  4743 D WankiInk: stroke committed: 17 points, layer=1
+10-15 19:52:56.100  4743  4743 D WankiInk: down type=1 enabled=true layer=true stylusActive=false
+10-15 19:52:56.102  4743  4743 D WankiInk: stroke start tool=1
+10-15 19:52:56.131  4743  4743 D WankiInk: stroke committed: 17 points, layer=2
+10-15 19:53:05.001  4743  4779 I TestRunner: finished: walkThroughAllSections(app.wanki.SmokeTest)
+10-15 19:53:05.107  4743  4779 I TestRunner: run finished: 1 tests, 0 failed, 0 ignored
+10-15 19:53:05.297  4718  4718 I AndroidRuntime: VM exiting with result code 0.
