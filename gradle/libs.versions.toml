@@ -29,7 +29,7 @@ androidx-ink-strokes = { module = "androidx.ink:ink-strokes", version.ref = "ink
 mlkit-digital-ink = { module = "com.google.mlkit:digital-ink-recognition", version.ref = "mlkitDigitalInk" }
 kotlinx-coroutines-play-services = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-play-services", version.ref = "coroutines" }
 
-[plugins]
-kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
-kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
-android-application = { id = "com.android.application", version.ref = "agp" }
+# Gradle plugins, put on the root buildscript classpath (see build.gradle.kts)
+kotlin-gradle-plugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlin" }
+kotlin-compose-gradle-plugin = { module = "org.jetbrains.kotlin:compose-compiler-gradle-plugin", version.ref = "kotlin" }
+android-gradle-plugin = { module = "com.android.tools.build:gradle", version.ref = "agp" }
