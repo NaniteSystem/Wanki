@@ -18,7 +18,7 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import app.wanki.writing.WritingTestScreen
+import app.wanki.ui.MainShell
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -27,7 +27,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             WankiTheme {
                 Surface(Modifier.fillMaxSize()) {
-                    Box(Modifier.safeDrawingPadding()) { WritingTestScreen() }
+                    Box(Modifier.safeDrawingPadding()) { MainShell() }
                 }
             }
         }

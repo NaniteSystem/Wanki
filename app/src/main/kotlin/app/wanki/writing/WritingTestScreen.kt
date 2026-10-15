@@ -40,11 +40,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.ink.brush.Brush
-import androidx.ink.brush.StockBrushes
 import androidx.lifecycle.viewmodel.compose.viewModel
-import app.wanki.ink.FingerMode
-import app.wanki.ink.InkCanvas
+import app.wanki.input.InkSurface
+import app.wanki.input.StylusTracker
+import app.wanki.input.ToolSelection
+import app.wanki.recognition.ModelStatus
 import app.wanki.scoring.FailReason
 import app.wanki.scoring.Rating
 import app.wanki.scoring.RecognitionOutcome
@@ -73,12 +73,7 @@ private fun CanvasPane(vm: WritingTestViewModel, modifier: Modifier) {
     var canvasSize by remember { mutableStateOf(IntSize.Zero) }
     val inkColor = MaterialTheme.colorScheme.onSurface
     val brush = remember(canvasSize.width, inkColor) {
-        Brush.createWithColorIntArgb(
-            family = StockBrushes.pressurePen(),
-            colorIntArgb = inkColor.toArgb(),
-            size = (canvasSize.width / 36f).coerceAtLeast(6f),
-            epsilon = 0.1f,
-        )
+        ToolSelection(color = inkColor.toArgb(), size = (canvasSize.width / 36f).coerceAtLeast(6f))
     }
     val attempt = vm.attempt
     val ref = vm.reference
@@ -90,31 +85,30 @@ private fun CanvasPane(vm: WritingTestViewModel, modifier: Modifier) {
                 tonalElevation = 1.dp,
                 modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp)),
             ) {
-                InkCanvas(
-                    state = vm.canvas,
-                    brush = brush,
-                    fingerMode = vm.fingerMode,
+                InkSurface(
+                    layer = vm.layer,
+                    tool = brush,
                     enabled = attempt == null && !vm.checking,
                     showInk = attempt == null,
                     modifier = Modifier.fillMaxSize().onSizeChanged { canvasSize = it },
-                    underlay = {
+                    background = {
                         drawTianzige()
                         if (vm.showGhost && attempt == null && ref != null) drawReference(ref)
                     },
                     overlay = {
-                        if (attempt != null && ref != null) drawReview(ref, attempt.result, vm.canvas.strokes)
+                        if (attempt != null && ref != null) drawReview(ref, attempt.result, vm.layer.strokes)
                     },
                 )
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            OutlinedButton(onClick = vm.canvas::undo, enabled = attempt == null && !vm.canvas.isEmpty) { Text("Отменить") }
+            OutlinedButton(onClick = vm.layer::undo, enabled = attempt == null && !vm.layer.isEmpty) { Text("Отменить") }
             OutlinedButton(onClick = vm::reset) { Text("Очистить") }
             FilterChip(selected = vm.showGhost, onClick = vm::toggleGhost, label = { Text("Призрак") })
             if (attempt == null) {
                 Button(
                     onClick = { vm.check(canvasSize.width.toFloat(), canvasSize.height.toFloat()) },
-                    enabled = !vm.canvas.isEmpty && !vm.checking,
+                    enabled = !vm.layer.isEmpty && !vm.checking,
                 ) { Text(if (vm.checking) "Проверка…" else "Проверить") }
             } else {
                 Button(onClick = vm::next) { Text("Дальше") }
@@ -143,30 +137,16 @@ private fun PromptPane(vm: WritingTestViewModel, modifier: Modifier) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilterChip(selected = vm.hideTarget, onClick = { vm.hideTarget = !vm.hideTarget }, label = { Text("Скрыть знак") })
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("Пальцы:", style = MaterialTheme.typography.labelLarge)
-            FingerMode.entries.forEach { mode ->
-                FilterChip(
-                    selected = vm.fingerMode == mode,
-                    onClick = { vm.fingerMode = mode },
-                    label = {
-                        Text(
-                            when (mode) {
-                                FingerMode.AUTO -> if (vm.canvas.stylusSeen) "авто (стилус)" else "авто"
-                                FingerMode.STYLUS_ONLY -> "только стилус"
-                                FingerMode.ANY -> "всегда"
-                            },
-                        )
-                    },
-                )
-            }
-        }
         Text(
-            "Распознавание: " + when (vm.recognizerStatus) {
-                RecognizerStatus.CHECKING -> "проверка модели…"
-                RecognizerStatus.DOWNLOADING -> "загрузка модели…"
-                RecognizerStatus.READY -> "готово"
-                RecognizerStatus.UNAVAILABLE -> "недоступно (оценка только по геометрии)"
+            if (StylusTracker.stylusSeen) "Стилус обнаружен: пальцы не рисуют, пока перо рядом" else "Рисуйте пальцем или стилусом — переключать ничего не нужно",
+            style = MaterialTheme.typography.bodySmall,
+        )
+        Text(
+            "Распознавание: " + when (vm.recognizer.status) {
+                ModelStatus.UNKNOWN -> "проверка модели…"
+                ModelStatus.DOWNLOADING -> "загрузка модели…"
+                ModelStatus.READY -> "готово"
+                ModelStatus.UNAVAILABLE -> "недоступно (оценка только по геометрии)"
             },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,

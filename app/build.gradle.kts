@@ -1,6 +1,7 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("com.google.devtools.ksp")
 }
 
 android {
@@ -29,9 +30,14 @@ android {
     }
 }
 
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
+}
+
 dependencies {
     implementation(project(":core:scoring"))
     implementation(project(":core:ink"))
+    implementation(project(":core:srs"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
@@ -50,6 +56,10 @@ dependencies {
     implementation(libs.androidx.ink.geometry)
     implementation(libs.androidx.ink.rendering)
     implementation(libs.androidx.ink.strokes)
+
+    implementation(libs.androidx.room.runtime)
+    implementation(libs.androidx.room.ktx)
+    ksp(libs.androidx.room.compiler)
 
     implementation(libs.mlkit.digital.ink)
     implementation(libs.kotlinx.coroutines.play.services)

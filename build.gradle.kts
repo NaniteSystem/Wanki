@@ -25,6 +25,7 @@ buildscript {
         if (android) {
             classpath(libs.android.gradle.plugin)
             classpath(libs.kotlin.compose.gradle.plugin)
+            classpath(libs.ksp.gradle.plugin)
         }
     }
 }
