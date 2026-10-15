@@ -90,6 +90,10 @@ class SmokeTest {
         rule.waitForIdle()
         shot("05-review-next")
         rule.onAllNodes(hasText("‹ Закрыть")).onFirst().performClick()
+        rule.onNode(hasText("Статистика")).performClick()
+        rule.waitUntilAtLeastOneExists(hasText("Прогноз"), 10_000)
+        shot("05b-stats")
+        back()
 
         // Notebook: create, write on the page
         tab("Тетради")

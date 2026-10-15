@@ -6,6 +6,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -474,9 +475,13 @@ private fun RatingRow(state: ReviewState) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Rating.entries.forEach { r ->
             val colors = if (r == suggested) ButtonDefaults.buttonColors() else ButtonDefaults.filledTonalButtonColors()
-            Button(onClick = { scope.launch { state.rate(r) } }, colors = colors, modifier = Modifier.weight(1f).height(64.dp)) {
+            Button(
+                onClick = { scope.launch { state.rate(r) } }, colors = colors,
+                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp),
+                modifier = Modifier.weight(1f).height(64.dp),
+            ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(r.label(), maxLines = 1)
+                    Text(r.label(), maxLines = 1, softWrap = false, style = MaterialTheme.typography.labelLarge)
                     Text(formatInterval(intervals[r] ?: 0), style = MaterialTheme.typography.labelSmall)
                 }
             }
