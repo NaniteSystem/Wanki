@@ -103,8 +103,13 @@ class HandwritingScorer(val config: ScoringConfig = ScoringConfig()) {
                 .minByOrNull { (_, d) -> d }
                 ?.first?.char
         }
-        val capped = recognition == RecognitionOutcome.NOT_RECOGNIZED || confusedWith != null
-        val score = if (capped) min(raw, config.passThreshold - 1) else raw
+        val failReasons = buildSet {
+            if (missing > 0 && config.failOnMissingStroke) add(FailReason.MISSING_STROKES)
+            if (extra > 0 && config.failOnExtraStroke) add(FailReason.EXTRA_STROKES)
+            if (recognition == RecognitionOutcome.NOT_RECOGNIZED) add(FailReason.NOT_RECOGNIZED)
+            if (confusedWith != null) add(FailReason.CONFUSED_WITH_LOOKALIKE)
+        }
+        val score = if (failReasons.isNotEmpty()) min(raw, config.passThreshold - 1) else raw
         val passed = score >= config.passThreshold
 
         val feedback = ArrayList<UserStrokeFeedback>()
@@ -134,6 +139,7 @@ class HandwritingScorer(val config: ScoringConfig = ScoringConfig()) {
             metrics = metrics,
             recognition = recognition,
             confusedWith = confusedWith,
+            failReasons = if (passed) emptySet() else failReasons + FailReason.LOW_SCORE.takeIf { raw < config.passThreshold }.let(::setOfNotNull),
             beauty = beauty,
             strokes = feedback,
             missingRefStrokes = refPolys.indices.filter { it !in matchedRefs },

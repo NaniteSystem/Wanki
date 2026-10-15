@@ -19,6 +19,17 @@ enum class RecognitionOutcome {
     NOT_RECOGNIZED,
 }
 
+enum class FailReason {
+    /** A reference stroke was not written (a character missing a stroke is a different character). */
+    MISSING_STROKES,
+    /** A stroke that is not in the reference was written. */
+    EXTRA_STROKES,
+    NOT_RECOGNIZED,
+    CONFUSED_WITH_LOOKALIKE,
+    /** The weighted score itself is below the threshold. */
+    LOW_SCORE,
+}
+
 /** Colour category for the attempt review screen. */
 enum class StrokeStatus {
     /** green */
@@ -51,15 +62,17 @@ data class BeautyResult(
 
 data class ScoreResult(
     val char: String,
-    /** Final score 0..100, after the recognition gate. */
+    /** Final score 0..100; any [FailReason] other than LOW_SCORE caps it at threshold − 1. */
     val score: Double,
-    /** Score before the recognition gate. */
+    /** Weighted score before the hard caps (missing/extra strokes, recognition, look-alikes). */
     val rawScore: Double,
     val passed: Boolean,
     val metrics: MetricScores,
     val recognition: RecognitionOutcome,
     /** A look-alike character the attempt matches better than the target (the score is then capped). */
     val confusedWith: String? = null,
+    /** Why the attempt did not pass; empty when [passed]. */
+    val failReasons: Set<FailReason> = emptySet(),
     /** Handwriting quality; only computed when [passed]. */
     val beauty: BeautyResult?,
     val strokes: List<UserStrokeFeedback>,

@@ -43,5 +43,9 @@ data class ScoringConfig(
     val recognitionTopK: Int = 3,
     /** Relative [HandwritingScorer.fitDistance] advantage a look-alike needs to count as "a different character". */
     val competitorMargin: Double = 0.0,
+    /** A missing stroke makes it a different character: cap below the threshold. */
+    val failOnMissingStroke: Boolean = true,
+    /** Same for a stroke that is not in the reference (木 + stroke = 本, 王 + dot = 玉). */
+    val failOnExtraStroke: Boolean = true,
     val resamplePoints: Int = 32,
 )

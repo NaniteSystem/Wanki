@@ -68,7 +68,35 @@ class HandwritingScorerTest {
         assertEquals(listOf(4), r.missingRefStrokes)
         assertEquals(StrokeStatus.EXTRA, r.strokes.last().status)
         assertNull(r.strokes.last().refIndex)
-        assertTrue(r.score < 85, "score=${r.score}")
+        assertEquals(setOf(FailReason.MISSING_STROKES, FailReason.EXTRA_STROKES), r.failReasons)
+        assertEquals(59.0, r.score, 1e-9)
+    }
+
+    @Test
+    fun `one missing stroke fails even when everything else is perfect`() {
+        for (c in listOf("日", "本", "書", "語")) {
+            val t = Fixtures.kanji(c)
+            val r = scorer.score(t, Simulate.drop(Fixtures.perfect(t), t.strokes.lastIndex))
+            assertFalse(r.passed, "$c: ${r.score}")
+            assertTrue(FailReason.MISSING_STROKES in r.failReasons)
+            assertTrue(r.rawScore > 74, "raw still reflects the rest: ${r.rawScore}")
+        }
+    }
+
+    @Test
+    fun `stroke-count look-alikes fail without any recognizer`() {
+        // 木 for 本 (one missing), 玉 for 王 (one extra)
+        val hon = scorer.score(Fixtures.kanji("本"), Fixtures.perfect(Fixtures.kanji("木")))
+        assertEquals(setOf(FailReason.MISSING_STROKES), hon.failReasons)
+        val ou = scorer.score(Fixtures.kanji("王"), Fixtures.perfect(Fixtures.kanji("玉")))
+        assertEquals(setOf(FailReason.EXTRA_STROKES), ou.failReasons)
+    }
+
+    @Test
+    fun `stroke count rules can be relaxed`() {
+        val lax = HandwritingScorer(ScoringConfig(failOnMissingStroke = false, failOnExtraStroke = false))
+        val r = lax.score(ref, Simulate.drop(perfect, 4))
+        assertTrue(r.passed, "score=${r.score}")
     }
 
     @Test
@@ -84,6 +112,7 @@ class HandwritingScorerTest {
         assertEquals(RecognitionOutcome.NOT_RECOGNIZED, r.recognition)
         assertEquals(59.0, r.score, 1e-9)
         assertTrue(r.rawScore > 99)
+        assertEquals(setOf(FailReason.NOT_RECOGNIZED), r.failReasons)
         assertFalse(r.passed)
 
         val ok = scorer.score(ref, perfect, recognitionCandidates = listOf("石", "右"))
@@ -93,7 +122,8 @@ class HandwritingScorerTest {
 
     @Test
     fun `look-alike character is rejected by the competitor check`() {
-        for ((target, written) in listOf("右" to "左", "土" to "士", "末" to "未", "王" to "玉", "本" to "木")) {
+        // same stroke count, so only geometry can tell them apart
+        for ((target, written) in listOf("右" to "左", "土" to "士", "末" to "未")) {
             val t = Fixtures.kanji(target)
             val w = Fixtures.kanji(written)
             val attempt = Simulate.wobble(Fixtures.perfect(w), 3.0, 5)
@@ -102,6 +132,7 @@ class HandwritingScorerTest {
             val r = scorer.score(t, attempt, competitors = listOf(w))
             assertFalse(r.passed, "$written for $target: ${r.score}")
             assertEquals(written, r.confusedWith)
+            assertEquals(setOf(FailReason.CONFUSED_WITH_LOOKALIKE), r.failReasons)
         }
     }
 
