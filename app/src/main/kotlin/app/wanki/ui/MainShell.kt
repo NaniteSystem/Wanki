@@ -18,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import app.wanki.ui.board.BoardScreen
+import app.wanki.ui.board.BoardsScreen
 import app.wanki.ui.decks.DeckScreen
 import app.wanki.ui.decks.DecksScreen
 import app.wanki.ui.diary.DiaryDayScreen
@@ -40,7 +41,8 @@ sealed interface Route {
     data class Note(val id: String?) : Route
     data object Diary : Route
     data class DiaryDay(val epochDay: Long) : Route
-    data object Board : Route
+    data object Boards : Route
+    data class Board(val id: String) : Route
     data object Settings : Route
     data object WritingLab : Route
 }
@@ -52,7 +54,7 @@ private val tabs = listOf(
     Tab(Route.Notebooks, "▥", "Тетради"),
     Tab(Route.Notes, "✎", "Заметки"),
     Tab(Route.Diary, "◷", "Дневник"),
-    Tab(Route.Board, "◻", "Доска"),
+    Tab(Route.Boards, "◻", "Доски"),
     Tab(Route.Settings, "⚙", "Настройки"),
 )
 
@@ -76,7 +78,7 @@ fun MainShell() {
         val wide = maxWidth >= 600.dp
         // Screens pushed on top of a tab (review, a page) take the whole screen; tab roots keep the bar.
         val immersive = nav.stack.size > 1 &&
-            (nav.current is Route.Review || nav.current is Route.Notebook || nav.current is Route.DiaryDay)
+            (nav.current is Route.Review || nav.current is Route.Notebook || nav.current is Route.DiaryDay || nav.current is Route.Board)
         if (wide) {
             Row(Modifier.fillMaxSize()) {
                 NavigationRail {
@@ -125,7 +127,8 @@ private fun Content(nav: Navigator) {
         is Route.Note -> NoteEditorScreen(r.id, onBack = { nav.back() })
         Route.Diary -> DiaryScreen(onOpenDay = { nav.open(Route.DiaryDay(it)) })
         is Route.DiaryDay -> DiaryDayScreen(r.epochDay, onBack = { nav.back() })
-        Route.Board -> BoardScreen()
+        Route.Boards -> BoardsScreen(onOpen = { nav.open(Route.Board(it)) })
+        is Route.Board -> BoardScreen(r.id, onBack = { nav.back() })
         Route.Settings -> SettingsScreen(onOpenLab = { nav.open(Route.WritingLab) })
         Route.WritingLab -> WritingTestScreen()
     }

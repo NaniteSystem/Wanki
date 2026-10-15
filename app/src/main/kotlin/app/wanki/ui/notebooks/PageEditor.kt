@@ -40,8 +40,10 @@ import app.wanki.input.InkSurface
 import app.wanki.input.ToolSelection
 import app.wanki.input.Viewport
 import app.wanki.recognition.ModelStatus
-import app.wanki.recognition.PageRecognizer
 import app.wanki.ui.common.InkToolbar
+import app.wanki.ui.common.SelectionBar
+import app.wanki.ui.common.TextActionsDialog
+import app.wanki.ui.common.copyToClipboard
 import app.wanki.ui.common.PageGeometry
 import app.wanki.ui.common.drawBoard
 import app.wanki.ui.common.drawPage
@@ -71,7 +73,18 @@ class PageEditorState(
     private var recognizedVersion = -1
 
     val template: PageTemplate get() = runCatching { PageTemplate.valueOf(page.template) }.getOrDefault(PageTemplate.BLANK)
-    val recognizer get() = graph.recognizers.get(notebook.language)
+
+    /** Model status across the languages this page is recognized with. */
+    val modelStatus: ModelStatus
+        get() {
+            val statuses = graph.textRecognition.candidateLanguages(notebook.language).map { graph.recognizers.get(it).status }
+            return when {
+                statuses.any { it == ModelStatus.DOWNLOADING } -> ModelStatus.DOWNLOADING
+                statuses.any { it == ModelStatus.READY } -> ModelStatus.READY
+                statuses.all { it == ModelStatus.UNAVAILABLE } -> ModelStatus.UNAVAILABLE
+                else -> ModelStatus.UNKNOWN
+            }
+        }
 
     suspend fun load() {
         val strokes = graph.repository.loadInk(page.id)
@@ -94,8 +107,7 @@ class PageEditorState(
         val v = layer.version
         val strokes: List<InkStroke> = layer.strokes.toList()
         recognizing = true
-        val width = if (infinite) (strokes.mapNotNull { it.bounds() }.let { b -> if (b.isEmpty()) 1000f else b.maxOf { it.right } - b.minOf { it.left } }) else PageGeometry.WIDTH
-        val text = PageRecognizer(recognizer).recognize(strokes, width)
+        val text = graph.textRecognition.recognize(strokes, notebook.language)?.text
         recognizing = false
         if (text != null) {
             saveIfDirty()
@@ -121,8 +133,10 @@ fun PageEditor(
     modifier: Modifier = Modifier,
     header: @Composable () -> Unit = {},
 ) {
-    val graph = LocalContext.current.graph
+    val context = LocalContext.current
+    val graph = context.graph
     var showText by remember { mutableStateOf(false) }
+    var translateAll by remember { mutableStateOf(false) }
     var templateMenu by remember { mutableStateOf(false) }
 
     LaunchedEffect(state) { state.load() }
@@ -158,6 +172,9 @@ fun PageEditor(
             TextButton(onClick = { showText = !showText }) { Text(if (showText) "Скрыть текст" else "Текст") }
         }
         InkToolbar(state.tool, { state.tool = it }, state.layer, Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+        if (state.layer.hasSelection) {
+            SelectionBar(state.layer, state.notebook.language, Modifier.padding(horizontal = 8.dp, vertical = 2.dp))
+        }
         Row(Modifier.weight(1f).fillMaxWidth()) {
             InkSurface(
                 layer = state.layer,
@@ -174,7 +191,7 @@ fun PageEditor(
                 Surface(tonalElevation = 1.dp, modifier = Modifier.width(280.dp).fillMaxSize()) {
                     Column(Modifier.padding(12.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("Распознанный текст", style = MaterialTheme.typography.titleSmall)
-                        val status = state.recognizer.status
+                        val status = state.modelStatus
                         Text(
                             when {
                                 state.recognizing -> "распознаю…"
@@ -188,9 +205,21 @@ fun PageEditor(
                         SelectionContainer {
                             Text(state.recognizedText.ifBlank { "—" }, modifier = Modifier.heightIn(min = 40.dp))
                         }
+                        if (state.recognizedText.isNotBlank()) {
+                            Row {
+                                TextButton(onClick = { copyToClipboard(context, state.recognizedText) }) { Text("Копировать") }
+                                TextButton(onClick = { translateAll = true }) { Text("Перевести") }
+                            }
+                        }
+                        Text(
+                            "Чтобы взять часть текста — обведите её инструментом «Лассо».",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                 }
             }
         }
     }
+    if (translateAll) TextActionsDialog(initialText = state.recognizedText, onDismiss = { translateAll = false })
 }

@@ -41,7 +41,7 @@ import app.wanki.data.PageEntity
 import app.wanki.data.PageSearchHit
 import app.wanki.data.PageTemplate
 import app.wanki.graph
-import app.wanki.ui.common.Languages
+import app.wanki.ui.common.NotebookLanguages
 import app.wanki.ui.common.ScreenHeader
 import app.wanki.ui.common.label
 import app.wanki.ui.common.languageName
@@ -134,7 +134,7 @@ private fun snippet(text: String, query: String): String {
 private fun CreateNotebookDialog(onDismiss: () -> Unit, onCreate: (String, PageTemplate, String) -> Unit) {
     var title by remember { mutableStateOf("") }
     var template by remember { mutableStateOf(PageTemplate.LINED) }
-    var lang by remember { mutableStateOf("ja") }
+    var lang by remember { mutableStateOf("auto") }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Новая тетрадь") },
@@ -147,7 +147,7 @@ private fun CreateNotebookDialog(onDismiss: () -> Unit, onCreate: (String, PageT
                 }
                 Text("Язык записей (для распознавания)", style = MaterialTheme.typography.labelLarge)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Languages.forEach { (code, name) -> FilterChip(lang == code, { lang = code }, { Text(name) }) }
+                    NotebookLanguages.forEach { (code, name) -> FilterChip(lang == code, { lang = code }, { Text(name) }) }
                 }
             }
         },

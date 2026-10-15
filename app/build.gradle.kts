@@ -69,5 +69,7 @@ dependencies {
     ksp(libs.androidx.room.compiler)
 
     implementation(libs.mlkit.digital.ink)
+    implementation(libs.mlkit.language.id)
+    implementation(libs.mlkit.translate)
     implementation(libs.kotlinx.coroutines.play.services)
 }

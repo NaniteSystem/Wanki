@@ -134,7 +134,30 @@ class Repository(private val db: WankiDatabase) {
     suspend fun setPageTemplate(page: PageEntity, template: PageTemplate) =
         notebooks.upsertPage(page.copy(template = template.name, updatedAt = System.currentTimeMillis()))
 
-    suspend fun board(): Pair<NotebookEntity, PageEntity> = singlePageNotebook(NotebookKind.BOARD, "Доска", PageTemplate.DOTS)
+    suspend fun createBoard(title: String): NotebookEntity {
+        val n = NotebookEntity(title = title.trim().ifBlank { "Доска" }, kind = NotebookKind.BOARD.name, template = PageTemplate.DOTS.name)
+        db.withTransaction {
+            notebooks.upsert(n)
+            notebooks.upsertPage(PageEntity(notebookId = n.id, pageIndex = 0, template = n.template))
+        }
+        return n
+    }
+
+    /** A board is a notebook with a single infinite page. */
+    suspend fun boardPage(boardId: String): Pair<NotebookEntity, PageEntity>? {
+        val n = notebooks.get(boardId) ?: return null
+        val page = notebooks.pages(n.id).firstOrNull()
+            ?: PageEntity(notebookId = n.id, pageIndex = 0, template = n.template).also { notebooks.upsertPage(it) }
+        return n to page
+    }
+
+    suspend fun renameNotebook(id: String, title: String) {
+        notebooks.get(id)?.let { notebooks.upsert(it.copy(title = title.trim(), updatedAt = System.currentTimeMillis())) }
+    }
+
+    suspend fun deleteNotebook(id: String) {
+        notebooks.get(id)?.let { notebooks.upsert(it.copy(deleted = true, updatedAt = System.currentTimeMillis())) }
+    }
 
     suspend fun diary(): NotebookEntity = singlePageNotebook(NotebookKind.DIARY, "Дневник", PageTemplate.LINED).first
 
@@ -192,6 +215,15 @@ class Repository(private val db: WankiDatabase) {
     suspend fun textNote(id: String) = textNotes.get(id)
     suspend fun saveTextNote(note: TextNoteEntity) = textNotes.upsert(note.copy(updatedAt = System.currentTimeMillis()))
     suspend fun deleteTextNote(id: String) = textNotes.delete(id)
+    suspend fun noteBlocks(noteId: String) = textNotes.blocks(noteId)
+
+    /** Saves a note with its blocks; [TextNoteEntity.body] keeps the plain text (typed + recognized) for search. */
+    suspend fun saveNoteWithBlocks(note: TextNoteEntity, blocks: List<NoteBlockEntity>) = db.withTransaction {
+        val body = blocks.joinToString("\n") { if (it.type == NoteBlockType.TEXT.name) it.text else it.recognizedText }.trim()
+        textNotes.upsert(note.copy(body = body, updatedAt = System.currentTimeMillis()))
+        textNotes.upsertBlocks(blocks.mapIndexed { i, b -> b.copy(noteId = note.id, blockIndex = i) })
+        textNotes.deleteBlocksExcept(note.id, blocks.map { it.id })
+    }
 
     // --- first run ---------------------------------------------------------------------------
 

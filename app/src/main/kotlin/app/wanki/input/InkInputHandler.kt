@@ -48,6 +48,7 @@ internal class InkInputHandler(
     private var drawPointer = -1
     private var drawStroke: InProgressStrokeId? = null
     private var erasePointer = -1
+    private var lassoPointer = -1
 
     // finger navigation
     private var panPointer = -1
@@ -96,7 +97,11 @@ internal class InkInputHandler(
             endNavigation()
             val erase = type == MotionEvent.TOOL_TYPE_ERASER || tool.isEraser ||
                 (e.buttonState and MotionEvent.BUTTON_STYLUS_PRIMARY) != 0
-            if (erase) startErase(id, e.getX(i), e.getY(i)) else startDraw(v, e, id)
+            when {
+                erase -> startErase(id, e.getX(i), e.getY(i))
+                tool.isLasso -> startLasso(id, e.getX(i), e.getY(i))
+                else -> startDraw(v, e, id)
+            }
             return
         }
         if (!isFinger(type)) return
@@ -113,7 +118,11 @@ internal class InkInputHandler(
             if (nav) startPan(id, e.getX(i), e.getY(i))
             return
         }
-        if (tool.isEraser) startErase(id, e.getX(i), e.getY(i)) else startDraw(v, e, id)
+        when {
+            tool.isEraser -> startErase(id, e.getX(i), e.getY(i))
+            tool.isLasso -> startLasso(id, e.getX(i), e.getY(i))
+            else -> startDraw(v, e, id)
+        }
     }
 
     private fun isFingerPointer(e: MotionEvent, pointerId: Int): Boolean {
@@ -122,6 +131,11 @@ internal class InkInputHandler(
     }
 
     private fun onMove(e: MotionEvent) {
+        if (lassoPointer >= 0) {
+            val i = e.findPointerIndex(lassoPointer)
+            if (i >= 0) layer?.let { l -> l.lasso = l.lasso.orEmpty() + world(e.getX(i), e.getY(i)) }
+            return
+        }
         if (erasePointer >= 0) {
             val i = e.findPointerIndex(erasePointer)
             if (i >= 0) erase(e.getX(i), e.getY(i))
@@ -149,6 +163,13 @@ internal class InkInputHandler(
 
     private fun onUp(e: MotionEvent) {
         val id = e.getPointerId(e.actionIndex)
+        if (id == lassoPointer) {
+            lassoPointer = -1
+            layer?.let { l ->
+                l.selectInside(l.lasso.orEmpty())
+                l.lasso = null
+            }
+        }
         if (id == erasePointer) erasePointer = -1
         if (id == drawPointer) {
             drawStroke?.let { s ->
@@ -170,12 +191,27 @@ internal class InkInputHandler(
 
     private fun cancelAll(e: MotionEvent) {
         cancelDraw(e)
+        lassoPointer = -1
+        layer?.lasso = null
         erasePointer = -1
         endNavigation()
     }
 
+    private fun world(x: Float, y: Float): androidx.compose.ui.geometry.Offset {
+        val vp = viewport
+        return androidx.compose.ui.geometry.Offset(vp?.toWorldX(x) ?: x, vp?.toWorldY(y) ?: y)
+    }
+
+    private fun startLasso(pointerId: Int, x: Float, y: Float) {
+        lassoPointer = pointerId
+        layer?.let { it.clearSelection(); it.lasso = listOf(world(x, y)) }
+    }
+
     private fun startDraw(v: View, e: MotionEvent, pointerId: Int) {
         val l = layer ?: return
+        // inside a scrolling list (note blocks) the stroke must not turn into a scroll
+        v.parent?.requestDisallowInterceptTouchEvent(true)
+        l.clearSelection()
         v.requestUnbufferedDispatch(e)
         val brush = tool.brush()
         val toWorld: Matrix = viewport?.screenToWorld() ?: Matrix()

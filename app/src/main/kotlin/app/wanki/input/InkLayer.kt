@@ -3,6 +3,8 @@ package app.wanki.input
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.runtime.setValue
 import androidx.ink.strokes.Stroke
 import app.wanki.ink.InkDrawing
@@ -35,7 +37,44 @@ class InkLayer(initial: List<InkStroke> = emptyList()) {
         data class Replaced(val before: List<InkStroke>, val after: List<InkStroke>) : Edit
     }
 
+    /** Lasso being drawn (world coordinates), and the strokes it selected. */
+    var lasso by mutableStateOf<List<Offset>?>(null)
+    val selection = mutableStateListOf<InkStroke>()
+
     val isEmpty: Boolean get() = strokes.isEmpty()
+    val hasSelection: Boolean get() = selection.isNotEmpty()
+
+    /** Selects strokes with most of their points inside the polygon. */
+    fun selectInside(polygon: List<Offset>) {
+        selection.clear()
+        if (polygon.size < 3) return
+        selection.addAll(strokes.filter { s -> s.points.isNotEmpty() && s.points.count { inside(polygon, it.x, it.y) } >= s.points.size * 0.6 })
+    }
+
+    fun clearSelection() = selection.clear()
+
+    fun selectionBounds(): InkRect? = selection.mapNotNull { bounds(it) }.reduceOrNull { a, b -> a.union(b) }
+
+    /** Removes the selected strokes (undoable). */
+    fun deleteSelection() {
+        val hit = strokes.withIndex().filter { (_, s) -> selection.any { it === s } }
+        if (hit.isEmpty()) return
+        hit.asReversed().forEach { strokes.removeAt(it.index) }
+        push(Edit.Removed(hit.map { it.index to it.value }))
+        selection.clear()
+    }
+
+    private fun inside(poly: List<Offset>, x: Float, y: Float): Boolean {
+        var c = false
+        var j = poly.lastIndex
+        for (i in poly.indices) {
+            val a = poly[i]
+            val b = poly[j]
+            if ((a.y > y) != (b.y > y) && x < (b.x - a.x) * (y - a.y) / (b.y - a.y) + a.x) c = !c
+            j = i
+        }
+        return c
+    }
     val canUndo: Boolean get() = version >= 0 && undoStack.isNotEmpty()
     val canRedo: Boolean get() = version >= 0 && redoStack.isNotEmpty()
 

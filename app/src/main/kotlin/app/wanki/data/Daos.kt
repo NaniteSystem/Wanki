@@ -177,4 +177,13 @@ interface TextNoteDao {
 
     @Query("UPDATE text_notes SET deleted = 1, updatedAt = :now WHERE id = :id")
     suspend fun delete(id: String, now: Long = System.currentTimeMillis())
+
+    @Query("SELECT * FROM note_blocks WHERE noteId = :noteId ORDER BY blockIndex")
+    suspend fun blocks(noteId: String): List<NoteBlockEntity>
+
+    @Upsert
+    suspend fun upsertBlocks(blocks: List<NoteBlockEntity>)
+
+    @Query("DELETE FROM note_blocks WHERE noteId = :noteId AND id NOT IN (:keep)")
+    suspend fun deleteBlocksExcept(noteId: String, keep: List<String>)
 }

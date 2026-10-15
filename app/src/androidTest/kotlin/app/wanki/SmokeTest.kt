@@ -14,6 +14,9 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipe
+import androidx.compose.ui.test.down
+import androidx.compose.ui.test.moveTo
+import androidx.compose.ui.test.up
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Rule
@@ -90,15 +93,35 @@ class SmokeTest {
         rule.waitUntilAtLeastOneExists(hasTestTag("page-canvas"), 10_000)
         write("page-canvas", 4)
         shot("06-notebook-page")
+        // lasso around the writing → text actions
+        rule.onNode(hasText("Лассо")).performClick()
+        rule.onNode(hasTestTag("page-canvas")).performTouchInput {
+            down(Offset(width * 0.05f, height * 0.15f))
+            moveTo(Offset(width * 0.95f, height * 0.15f))
+            moveTo(Offset(width * 0.95f, height * 0.95f))
+            moveTo(Offset(width * 0.05f, height * 0.95f))
+            moveTo(Offset(width * 0.05f, height * 0.16f))
+            up()
+        }
+        rule.waitUntilAtLeastOneExists(hasText("Текст и перевод"), 5_000)
+        shot("07-notebook-lasso")
+        rule.onNode(hasText("Текст и перевод")).performClick()
+        rule.waitForIdle()
+        shot("07b-text-dialog")
+        rule.onNode(hasText("Закрыть")).performClick()
         rule.onAllNodes(hasText("Текст")).onFirst().performClick()
-        shot("07-notebook-text")
+        shot("07c-notebook-text")
         back()
 
-        // Board
-        tab("Доска")
+        // Boards: create one, draw on it
+        tab("Доски")
+        rule.onNode(hasText("+ Доска")).performClick()
+        rule.onNode(hasText("Создать")).performClick()
         rule.waitUntilAtLeastOneExists(hasTestTag("page-canvas"), 10_000)
         write("page-canvas", 2)
         shot("08-board")
+        back()
+        shot("08b-boards")
 
         // Diary
         tab("Дневник")
@@ -114,6 +137,8 @@ class SmokeTest {
         tab("Заметки")
         rule.onNode(hasText("+ Заметка")).performClick()
         rule.onNode(hasText("Заголовок")).performTextInput("Проверка")
+        rule.onNode(hasText("+ От руки")).performClick()
+        rule.waitForIdle()
         shot("11-note")
         back()
 

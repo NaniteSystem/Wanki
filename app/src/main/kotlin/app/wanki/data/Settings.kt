@@ -16,10 +16,26 @@ class Settings(context: Context) {
     /** Pause after the last stroke before a written answer is checked automatically. */
     var autoCheckDelayMs by pref("autoCheckDelayMs", 1500f)
 
+    /** Languages tried when a notebook's language is "auto" (comma-separated codes). */
+    var autoLanguages by stringPref("autoLanguages", "ru,en,ja")
+    /** Translation target. */
+    var translateTo by stringPref("translateTo", "ru")
+
+    val autoLanguageList: List<String> get() = autoLanguages.split(',').map { it.trim() }.filter { it.isNotEmpty() }
+
     fun scoringConfig() = ScoringConfig(
         passThreshold = passThreshold.toDouble(),
         orderStrictness = orderStrictness.toDouble(),
     )
+
+    private fun stringPref(key: String, default: String) = object : kotlin.properties.ReadWriteProperty<Any?, String> {
+        private val state = mutableStateOf(prefs.getString(key, default) ?: default)
+        override fun getValue(thisRef: Any?, property: kotlin.reflect.KProperty<*>): String = state.value
+        override fun setValue(thisRef: Any?, property: kotlin.reflect.KProperty<*>, value: String) {
+            state.value = value
+            prefs.edit().putString(key, value).apply()
+        }
+    }
 
     private fun pref(key: String, default: Float) = object : kotlin.properties.ReadWriteProperty<Any?, Float> {
         private val state = mutableStateOf(prefs.getFloat(key, default))

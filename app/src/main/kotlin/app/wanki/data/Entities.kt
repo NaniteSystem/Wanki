@@ -97,7 +97,8 @@ data class NotebookEntity(
     @PrimaryKey val id: String = newId(),
     val title: String,
     val kind: String = NotebookKind.NOTEBOOK.name,
-    val language: String = "ja",
+    /** A language code, or "auto" to detect among the user's languages. */
+    val language: String = "auto",
     val template: String = PageTemplate.LINED.name,
     val updatedAt: Long = System.currentTimeMillis(),
     val deleted: Boolean = false,
@@ -131,6 +132,23 @@ data class TextNoteEntity(
     val body: String,
     val updatedAt: Long = System.currentTimeMillis(),
     val deleted: Boolean = false,
+)
+
+enum class NoteBlockType { TEXT, INK }
+
+/** A note is a sequence of text and handwriting blocks. */
+@Entity(tableName = "note_blocks", indices = [Index("noteId")])
+data class NoteBlockEntity(
+    @PrimaryKey val id: String = newId(),
+    val noteId: String,
+    val blockIndex: Int,
+    val type: String,
+    val text: String = "",
+    /** InkCodec blob for INK blocks */
+    val strokes: ByteArray? = null,
+    val heightDp: Float = 320f,
+    val recognizedText: String = "",
+    val updatedAt: Long = System.currentTimeMillis(),
 )
 
 data class DeckWithCounts(

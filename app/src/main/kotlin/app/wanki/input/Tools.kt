@@ -3,7 +3,7 @@ package app.wanki.input
 import app.wanki.ink.BrushKind
 import app.wanki.ink.InkBrush
 
-enum class ToolKind { PEN, MARKER, HIGHLIGHTER, ERASER }
+enum class ToolKind { PEN, MARKER, HIGHLIGHTER, ERASER, LASSO }
 
 /** What the toolbar has selected. The pen's eraser end and its side button always erase. */
 data class ToolSelection(
@@ -13,9 +13,10 @@ data class ToolSelection(
     val size: Float = 4f,
 ) {
     val isEraser: Boolean get() = kind == ToolKind.ERASER
+    val isLasso: Boolean get() = kind == ToolKind.LASSO
 
     fun brush(): InkBrush = when (kind) {
-        ToolKind.PEN, ToolKind.ERASER -> InkBrush(BrushKind.PEN, color, size)
+        ToolKind.PEN, ToolKind.ERASER, ToolKind.LASSO -> InkBrush(BrushKind.PEN, color, size)
         ToolKind.MARKER -> InkBrush(BrushKind.MARKER, color, size * 1.6f)
         ToolKind.HIGHLIGHTER -> InkBrush(BrushKind.HIGHLIGHTER, (color and 0x00FFFFFF) or 0x66000000, size * 5f)
     }

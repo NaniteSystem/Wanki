@@ -65,6 +65,7 @@ fun InkSurface(
                         layer.renderable(s)?.let { renderer.draw(canvas, it, matrix) }
                     }
                 }
+                drawSelection(layer, scale)
             }
             overlay()
         }
@@ -89,6 +90,35 @@ fun InkSurface(
                     it.onStrokeFinished = { finished() }
                 }
             },
+        )
+    }
+}
+
+private val SelectionColor = androidx.compose.ui.graphics.Color(0xFF1E5BD8)
+
+/** Lasso path while drawing it, then a dashed frame around the selection (world coordinates). */
+private fun DrawScope.drawSelection(layer: InkLayer, scale: Float) {
+    val w = 2f / scale
+    val dash = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(10f / scale, 8f / scale))
+    layer.lasso?.takeIf { it.size > 1 }?.let { pts ->
+        val path = androidx.compose.ui.graphics.Path().apply {
+            moveTo(pts[0].x, pts[0].y)
+            for (p in pts.drop(1)) lineTo(p.x, p.y)
+        }
+        drawPath(path, SelectionColor, style = androidx.compose.ui.graphics.drawscope.Stroke(w, pathEffect = dash))
+    }
+    layer.selectionBounds()?.let { b ->
+        val pad = 8f / scale
+        drawRect(
+            SelectionColor.copy(alpha = 0.08f),
+            androidx.compose.ui.geometry.Offset(b.left - pad, b.top - pad),
+            androidx.compose.ui.geometry.Size(b.width + 2 * pad, b.height + 2 * pad),
+        )
+        drawRect(
+            SelectionColor,
+            androidx.compose.ui.geometry.Offset(b.left - pad, b.top - pad),
+            androidx.compose.ui.geometry.Size(b.width + 2 * pad, b.height + 2 * pad),
+            style = androidx.compose.ui.graphics.drawscope.Stroke(w, pathEffect = dash),
         )
     }
 }

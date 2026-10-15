@@ -6,6 +6,8 @@ import app.wanki.data.Repository
 import app.wanki.data.Settings
 import app.wanki.data.WankiDatabase
 import app.wanki.recognition.RecognizerPool
+import app.wanki.recognition.TextRecognition
+import app.wanki.recognition.TranslationService
 import app.wanki.refs.ReferenceRepository
 import app.wanki.review.AnswerGrader
 import kotlinx.coroutines.CoroutineScope
@@ -22,6 +24,8 @@ class AppGraph(context: Context) {
     val references = ReferenceRepository(context.assets)
     val repository = Repository(db)
     val grader = AnswerGrader(references, recognizers, settings)
+    val textRecognition = TextRecognition(recognizers, settings)
+    val translation = TranslationService(textRecognition)
 }
 
 class WankiApp : Application() {

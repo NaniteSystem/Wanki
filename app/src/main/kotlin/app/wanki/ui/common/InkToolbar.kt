@@ -33,6 +33,7 @@ fun InkToolbar(
     onTool: (ToolSelection) -> Unit,
     layer: InkLayer,
     modifier: Modifier = Modifier,
+    tools: List<ToolKind> = ToolKind.entries,
     trailing: @Composable () -> Unit = {},
 ) {
     Surface(tonalElevation = 2.dp, shape = MaterialTheme.shapes.large, modifier = modifier) {
@@ -41,7 +42,7 @@ fun InkToolbar(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            ToolKind.entries.forEach { kind ->
+            tools.forEach { kind ->
                 FilterChip(
                     selected = tool.kind == kind,
                     onClick = { onTool(tool.copy(kind = kind)) },
@@ -52,6 +53,7 @@ fun InkToolbar(
                                 ToolKind.MARKER -> "Маркер"
                                 ToolKind.HIGHLIGHTER -> "Выделитель"
                                 ToolKind.ERASER -> "Ластик"
+                                ToolKind.LASSO -> "Лассо"
                             },
                         )
                     },

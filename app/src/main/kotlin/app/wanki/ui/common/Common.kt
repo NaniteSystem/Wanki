@@ -41,4 +41,10 @@ val Languages = listOf(
     "en" to "Английский", "ru" to "Русский",
 )
 
-fun languageName(code: String) = Languages.firstOrNull { it.first == code }?.second ?: code
+/** For notebooks: any language, detected automatically, or a fixed one. */
+val NotebookLanguages = listOf("auto" to "Любой (автоопределение)") + Languages
+
+/** Translation targets offered in the UI. */
+val TranslateTargets = listOf("ru" to "русский", "en" to "английский", "ja" to "японский", "zh" to "китайский", "ko" to "корейский", "ar" to "арабский", "de" to "немецкий", "fr" to "французский", "es" to "испанский")
+
+fun languageName(code: String) = NotebookLanguages.firstOrNull { it.first == code }?.second ?: code
