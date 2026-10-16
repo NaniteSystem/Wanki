@@ -27,6 +27,9 @@ data class DeckEntity(
     val newPerDay: Int = 20,
     val updatedAt: Long = System.currentTimeMillis(),
     val deleted: Boolean = false,
+    @ColumnInfo(defaultValue = "200") val reviewsPerDay: Int = 200,
+    /** Subdecks hidden in the deck list (UI state, does not bump [updatedAt]). */
+    @ColumnInfo(defaultValue = "0") val collapsed: Boolean = false,
 )
 
 /** Anki-compatible: fields are joined with 0x1F. Only the "basic" note type for now. */
@@ -69,7 +72,15 @@ data class CardEntity(
     val seed: Long = UUID.randomUUID().mostSignificantBits,
     val updatedAt: Long = System.currentTimeMillis(),
     val deleted: Boolean = false,
-)
+    /** Suspended cards are never shown until unsuspended. */
+    @ColumnInfo(defaultValue = "0") val suspended: Boolean = false,
+    /** Buried ("not today") until this moment. */
+    @ColumnInfo(defaultValue = "0") val buriedUntil: Long = 0,
+    /** Order in which new cards are introduced (import / creation order). */
+    @ColumnInfo(defaultValue = "0") val position: Long = 0,
+) {
+    val isNew: Boolean get() = lastReview == null
+}
 
 @Entity(tableName = "review_logs", indices = [Index("cardId")])
 data class ReviewLogEntity(
@@ -82,6 +93,26 @@ data class ReviewLogEntity(
     val beauty: Double? = null,
     val durationMs: Long = 0,
     val usedHint: Boolean = false,
+    /** The card's state before this review: NEW, LEARNING, REVIEW, RELEARNING (null in old logs). */
+    val cardState: String? = null,
+)
+
+const val STATE_NEW = "NEW"
+
+enum class ScoreSource { REVIEW, PRACTICE }
+
+/** Handwriting result for one written character (a word gives one row per cell). */
+@Entity(tableName = "char_scores", indices = [Index("glyph"), Index("reviewLogId")])
+data class CharScoreEntity(
+    @PrimaryKey val id: String = newId(),
+    val glyph: String,
+    val language: String,
+    val at: Long,
+    val score: Double?,
+    val beauty: Double?,
+    val source: String,
+    val cardId: String? = null,
+    val reviewLogId: String? = null,
 )
 
 @Entity(tableName = "ink_attempts", indices = [Index("reviewLogId")])
@@ -151,13 +182,6 @@ data class NoteBlockEntity(
     val updatedAt: Long = System.currentTimeMillis(),
 )
 
-data class DeckWithCounts(
-    @Embedded val deck: DeckEntity,
-    @ColumnInfo(name = "dueCount") val dueCount: Int,
-    @ColumnInfo(name = "newCount") val newCount: Int,
-    @ColumnInfo(name = "totalCount") val totalCount: Int,
-)
-
 data class CardWithNote(
     @Embedded val card: CardEntity,
     @Embedded(prefix = "note_") val note: NoteEntity,
@@ -181,7 +205,8 @@ data class DayCount(val day: Long, val n: Int, val ok: Int)
 
 data class DueDay(val day: Long, val n: Int)
 
-data class CardStateCount(val state: String, val isNew: Boolean, val n: Int)
+data class CardStateCount(val state: String, val isNew: Boolean, val suspended: Boolean, val n: Int)
 
-/** Handwriting average per card (for the "weakest characters" table). */
-data class CharStat(val fields: String, val beauty: Double?, val score: Double?, val n: Int)
+data class RetentionCount(val n: Int, val ok: Int?)
+
+data class DayBeauty(val day: Long, val beauty: Double, val n: Int)

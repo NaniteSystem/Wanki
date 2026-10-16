@@ -17,7 +17,8 @@ import java.util.zip.ZipInputStream
 /**
  * Imports Anki decks (.apkg / .colpkg). Supports the legacy collection (anki2/anki21) and the
  * current one (anki21b, zstd-compressed). Notes become basic cards: first field → question,
- * second → answer; CJK answers become handwriting cards. Scheduling and media are not imported.
+ * second → answer; CJK answers become handwriting cards; "Parent::Child" decks become nested decks.
+ * Scheduling and media are not imported.
  */
 class AnkiImporter(private val context: Context, private val repository: Repository) {
     data class Result(val decks: Int, val cards: Int, val skipped: Int)
@@ -94,8 +95,8 @@ class AnkiImporter(private val context: Context, private val repository: Reposit
             skipped += deckNotes.size - usable.size
             if (usable.isEmpty()) continue
             val handwriting = usable.count { WritingLayout.forAnswer(it.back) is WritingLayout.Cells }
-            val deck = repository.createDeck(
-                name,
+            val deck = repository.deckByPath(
+                name.split("::"),
                 AnkiText.guessLanguage(usable.take(200).map { it.back }),
                 if (handwriting * 2 >= usable.size) AnswerMode.HANDWRITING else AnswerMode.CLASSIC,
             )

@@ -15,6 +15,9 @@ import app.wanki.scoring.ScoreResult
 import app.wanki.scoring.StrokeStatus
 import app.wanki.scoring.geom.Point
 
+/** Writing areas stay paper-colored in the dark theme, so ink colors keep their meaning. */
+val WritingPaper = Color(0xFFFAF8F2)
+
 object ReviewColors {
     val correct = Color(0xFF2E9E5B)
     val orderOrDirection = Color(0xFFE0A100)

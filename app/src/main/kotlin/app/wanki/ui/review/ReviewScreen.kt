@@ -1,15 +1,17 @@
 package app.wanki.ui.review
 
-import app.wanki.ui.common.ui
-import app.wanki.ui.common.rememberUiScope
+import android.widget.Toast
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -21,12 +23,14 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -40,12 +44,20 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.wanki.AppGraph
@@ -64,14 +76,19 @@ import app.wanki.scoring.FailReason
 import app.wanki.scoring.RatingPolicy
 import app.wanki.srs.FsrsScheduler
 import app.wanki.srs.Rating
+import app.wanki.ui.common.MenuButton
+import app.wanki.ui.common.rememberUiScope
+import app.wanki.ui.common.ui
 import app.wanki.writing.Cell
+import app.wanki.writing.HintColor
 import app.wanki.writing.ReviewColors
+import app.wanki.writing.StrokeOrderAnimation
+import app.wanki.writing.WritingPaper
 import app.wanki.writing.drawReference
 import app.wanki.writing.drawReview
-import app.wanki.writing.drawTianzige
-import app.wanki.writing.HintColor
-import app.wanki.writing.StrokeOrderAnimation
 import app.wanki.writing.drawStrokeHint
+import app.wanki.writing.drawTianzige
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -81,6 +98,8 @@ enum class Phase { QUESTION, ANSWER }
 class ReviewState(private val graph: AppGraph, private val deckId: String) {
     var deck by mutableStateOf<DeckEntity?>(null)
         private set
+    /** Every deck by id: cards of subdecks are answered in their own deck's language. */
+    private var decks: Map<String, DeckEntity> = emptyMap()
     val queue = mutableStateListOf<CardWithNote>()
     var loaded by mutableStateOf(false)
         private set
@@ -119,9 +138,12 @@ class ReviewState(private val graph: AppGraph, private val deckId: String) {
     val answer: String get() = current?.let { it.note.field(it.card.writeFieldOrd) }.orEmpty()
     val question: String get() = current?.let { it.note.field(if (it.card.writeFieldOrd == 0) 1 else 0) }.orEmpty()
     val layout: WritingLayout get() = WritingLayout.forAnswer(answer)
+    val language: String get() = current?.let { decks[it.card.deckId]?.language } ?: deck?.language ?: "ja"
 
     suspend fun load() {
-        deck = graph.repository.deck(deckId)
+        val tree = graph.repository.deckTree()
+        decks = tree.byId
+        deck = decks[deckId]
         queue.clear()
         queue.addAll(graph.repository.reviewQueue(deckId))
         loaded = true
@@ -167,16 +189,16 @@ class ReviewState(private val graph: AppGraph, private val deckId: String) {
 
     suspend fun check(cellSide: Float, width: Float, height: Float) {
         if (grading || phase != Phase.QUESTION || layer.isEmpty) return
-        val deck = deck ?: return
+        val lang = language
         grading = true
         answeredAt = System.currentTimeMillis()
         writingSize = width to height
         val strokes = layer.strokes.toList()
         grade = when (val l = layout) {
             is WritingLayout.Cells -> graph.grader.gradeCells(
-                l.chars, AnswerGrader.splitIntoCells(strokes, l.chars.size, cellSide), cellSide, deck.language,
+                l.chars, AnswerGrader.splitIntoCells(strokes, l.chars.size, cellSide), cellSide, lang,
             )
-            WritingLayout.Line -> graph.grader.gradeLine(answer, strokes, width, height, deck.language)
+            WritingLayout.Line -> graph.grader.gradeLine(answer, strokes, width, height, lang)
         }
         grading = false
         phase = Phase.ANSWER
@@ -223,7 +245,10 @@ class ReviewState(private val graph: AppGraph, private val deckId: String) {
         val answered = graph.repository.answer(
             card = c.card, rating = r, scheduler = scheduler, mode = mode,
             score = g?.score, beauty = g?.beauty, durationMs = (if (answeredAt > 0) answeredAt else now) - shownAt,
-            usedHint = usedHint, ink = if (written) layer.drawing() else null, now = now,
+            usedHint = usedHint, ink = if (written) layer.drawing() else null,
+            language = language,
+            charScores = if (written) g?.cells?.filter { it.result != null }?.map { Repository.CharScore(it.char, it.score, it.result?.beauty?.score) }.orEmpty() else emptyList(),
+            now = now,
         )
         val updated = answered.after
         lastAnswer = c to answered
@@ -236,6 +261,30 @@ class ReviewState(private val graph: AppGraph, private val deckId: String) {
     /** The last rated card with its answer, for "undo" (as in Anki). */
     var lastAnswer by mutableStateOf<Pair<CardWithNote, Repository.Answered>?>(null)
         private set
+
+    /** "Not today": the card leaves this session and comes back tomorrow. */
+    suspend fun buryCurrent() {
+        val c = current ?: return
+        graph.repository.buryUntilTomorrow(listOf(c.card.id))
+        queue.removeAll { it.card.id == c.card.id }
+        resetCard()
+    }
+
+    suspend fun suspendCurrent() {
+        val c = current ?: return
+        graph.repository.setSuspended(listOf(c.card.id), true)
+        queue.removeAll { it.card.id == c.card.id }
+        resetCard()
+    }
+
+    /** Quick edit of the current card's fields; the answer in progress is kept. */
+    suspend fun editCurrent(front: String, back: String, tags: String) {
+        val c = current ?: return
+        graph.repository.saveCard(c, front, back, tags, c.card.deckId, AnswerMode.valueOf(c.card.answerMode), c.card.writeFieldOrd)
+        graph.repository.card(c.card.id)?.let { fresh -> if (current?.card?.id == fresh.card.id) queue[0] = fresh }
+    }
+
+    fun speakAnswer(): Boolean = graph.speaker.speak(answer, language)
 
     suspend fun undoLast() {
         val (c, a) = lastAnswer ?: return
@@ -255,20 +304,74 @@ fun ReviewScreen(deckId: String, onClose: () -> Unit) {
     val scope = rememberUiScope()
     LaunchedEffect(deckId) { ui { state.load() } }
 
-    Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onClose) { Text("‹ Закрыть") }
-            Column(Modifier.weight(1f)) {
-                Text(state.deck?.name.orEmpty(), style = MaterialTheme.typography.titleMedium, maxLines = 1)
-                Text("осталось ${state.queue.size} · повторено ${state.reviewed}", style = MaterialTheme.typography.labelMedium)
+    val context = LocalContext.current
+    var editing by remember { mutableStateOf(false) }
+    val focus = remember { FocusRequester() }
+    LaunchedEffect(state.loaded) { runCatching { focus.requestFocus() } }
+    // read the answer aloud when it appears (setting)
+    LaunchedEffect(state.current?.card?.id, state.phase) {
+        if (state.phase == Phase.ANSWER && graph.settings.autoSpeak) state.speakAnswer()
+    }
+    fun speak() {
+        if (!state.speakAnswer()) Toast.makeText(context, "Нет голоса для этого языка: установите его в настройках синтеза речи", Toast.LENGTH_LONG).show()
+    }
+
+    Column(
+        Modifier.fillMaxSize().focusRequester(focus).focusable().onPreviewKeyEvent { e ->
+            if (e.type != KeyEventType.KeyDown || state.current == null) return@onPreviewKeyEvent false
+            reviewKey(e.key, state, scope)
+        },
+    ) {
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val wide = maxWidth >= 600.dp
+            val modeChips: @Composable () -> Unit = {
+                if (state.current != null) {
+                    FilterChip(state.mode == AnswerMode.CLASSIC, { scope.launch { state.switchMode(AnswerMode.CLASSIC) } }, { Text("Классика") })
+                    Spacer(Modifier.width(6.dp))
+                    FilterChip(state.mode == AnswerMode.HANDWRITING, { scope.launch { state.switchMode(AnswerMode.HANDWRITING) } }, { Text("Письмо") })
+                }
             }
-            if (state.lastAnswer != null) {
-                TextButton(onClick = { scope.launch { state.undoLast() } }) { Text("↶ Отменить оценку") }
+            val undo: @Composable () -> Unit = {
+                if (state.lastAnswer != null) {
+                    TextButton(onClick = { scope.launch { state.undoLast() } }) { Text("↶ Отменить оценку", maxLines = 1) }
+                }
             }
-            if (state.current != null) {
-                FilterChip(state.mode == AnswerMode.CLASSIC, { scope.launch { state.switchMode(AnswerMode.CLASSIC) } }, { Text("Классика") })
-                Spacer(Modifier.width(6.dp))
-                FilterChip(state.mode == AnswerMode.HANDWRITING, { scope.launch { state.switchMode(AnswerMode.HANDWRITING) } }, { Text("Письмо") })
+            val menu: @Composable () -> Unit = {
+                if (state.current != null) {
+                    MenuButton(
+                        "⋮",
+                        listOf(
+                            "Изменить карточку" to { editing = true },
+                            "Озвучить ответ" to ::speak,
+                            "Отложить до завтра" to { scope.launch { state.buryCurrent() } },
+                            "Приостановить карточку" to { scope.launch { state.suspendCurrent() } },
+                        ),
+                    )
+                }
+            }
+            Column {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = onClose) { Text("‹ Закрыть") }
+                    Column(Modifier.weight(1f)) {
+                        Text(state.deck?.name.orEmpty(), style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(
+                            "осталось ${state.queue.size} · повторено ${state.reviewed}",
+                            style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    if (wide) {
+                        undo()
+                        modeChips()
+                    }
+                    menu()
+                }
+                if (!wide && state.current != null) {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        modeChips()
+                        Spacer(Modifier.weight(1f))
+                        undo()
+                    }
+                }
             }
         }
         val card = state.current
@@ -286,6 +389,56 @@ fun ReviewScreen(deckId: String, onClose: () -> Unit) {
             }
         }
     }
+    if (editing) {
+        state.current?.let { c ->
+            QuickEditDialog(c, onDismiss = { editing = false }) { f, b, t ->
+                editing = false
+                scope.launch { state.editCurrent(f, b, t) }
+            }
+        }
+    }
+}
+
+/** Hardware keyboard: Space/Enter shows the answer or takes the suggested rating, 1–4 rate, Z undoes. */
+private fun reviewKey(key: Key, state: ReviewState, scope: CoroutineScope): Boolean {
+    val rating = when (key) {
+        Key.One, Key.NumPad1 -> Rating.AGAIN
+        Key.Two, Key.NumPad2 -> Rating.HARD
+        Key.Three, Key.NumPad3 -> Rating.GOOD
+        Key.Four, Key.NumPad4 -> Rating.EASY
+        else -> null
+    }
+    return when {
+        rating != null && state.phase == Phase.ANSWER -> { scope.launch { state.rate(rating) }; true }
+        (key == Key.Spacebar || key == Key.Enter) && state.phase == Phase.QUESTION && state.mode == AnswerMode.CLASSIC -> { state.reveal(); true }
+        (key == Key.Spacebar || key == Key.Enter) && state.phase == Phase.ANSWER -> {
+            val r = state.suggested() ?: Rating.GOOD
+            scope.launch { state.rate(r) }
+            true
+        }
+        key == Key.Z && state.lastAnswer != null -> { scope.launch { state.undoLast() }; true }
+        else -> false
+    }
+}
+
+@Composable
+private fun QuickEditDialog(c: CardWithNote, onDismiss: () -> Unit, onSave: (String, String, String) -> Unit) {
+    var front by remember(c.card.id) { mutableStateOf(c.note.field(0)) }
+    var back by remember(c.card.id) { mutableStateOf(c.note.field(1)) }
+    var tags by remember(c.card.id) { mutableStateOf(c.note.tags) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Изменить карточку") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(front, { front = it }, label = { Text("Вопрос") })
+                OutlinedTextField(back, { back = it }, label = { Text("Ответ") })
+                OutlinedTextField(tags, { tags = it }, label = { Text("Теги") }, singleLine = true)
+            }
+        },
+        confirmButton = { TextButton(enabled = front.isNotBlank() && back.isNotBlank(), onClick = { onSave(front, back, tags) }) { Text("Сохранить") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } },
+    )
 }
 
 @Composable
@@ -293,10 +446,22 @@ private fun ClassicAnswer(state: ReviewState) {
     if (state.phase == Phase.QUESTION) {
         Button(onClick = state::reveal, modifier = Modifier.fillMaxWidth().height(56.dp)) { Text("Показать ответ") }
     } else {
-        Text(state.answer, fontSize = 40.sp, textAlign = TextAlign.Center, fontWeight = FontWeight.Medium)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(state.answer, fontSize = 40.sp, textAlign = TextAlign.Center, fontWeight = FontWeight.Medium)
+            SpeakButton(state)
+        }
     }
 }
 
+@Composable
+private fun SpeakButton(state: ReviewState) {
+    val context = LocalContext.current
+    TextButton(onClick = {
+        if (!state.speakAnswer()) Toast.makeText(context, "Нет голоса для этого языка", Toast.LENGTH_SHORT).show()
+    }) { Text("🔊") }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun WritingAnswer(state: ReviewState) {
     val graph = LocalContext.current.graph
@@ -333,7 +498,7 @@ private fun WritingAnswer(state: ReviewState) {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { refs.forEach { StrokeOrderAnimation(it, Modifier.size(96.dp)) } }
                 }
             }
-            Surface(shape = RoundedCornerShape(12.dp), tonalElevation = 1.dp, modifier = Modifier.size(widthDp, heightDp).testTag("writing-canvas")) {
+            Surface(shape = RoundedCornerShape(12.dp), color = WritingPaper, modifier = Modifier.size(widthDp, heightDp).testTag("writing-canvas")) {
                 Box {
                     InkSurface(
                         layer = state.layer,
@@ -382,7 +547,10 @@ private fun WritingAnswer(state: ReviewState) {
                 }
             }
             if (state.phase == Phase.QUESTION) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
                     FilterChip(
                         state.showHint, state::toggleHint,
                         { Text(when (state.hintLevel) { 0 -> "Подсказка"; 1 -> "Весь знак"; else -> "Скрыть" }) },
@@ -411,7 +579,10 @@ private fun Verdict(state: ReviewState) {
     val g = state.grade
     val graph = LocalContext.current.graph
     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(state.answer, fontSize = 40.sp, fontWeight = FontWeight.Medium)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(state.answer, fontSize = 40.sp, fontWeight = FontWeight.Medium)
+            SpeakButton(state)
+        }
         // stroke order of the answer, animated (tap to replay)
         val refs = (state.layout as? WritingLayout.Cells)?.chars?.mapNotNull { graph.references.get(it) }.orEmpty()
         if (refs.isNotEmpty()) {

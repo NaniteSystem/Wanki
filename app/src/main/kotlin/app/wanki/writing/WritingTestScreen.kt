@@ -82,7 +82,7 @@ private fun CanvasPane(vm: WritingTestViewModel, modifier: Modifier) {
         Box(Modifier.weight(1f, fill = false).aspectRatio(1f), contentAlignment = Alignment.Center) {
             Surface(
                 shape = RoundedCornerShape(12.dp),
-                tonalElevation = 1.dp,
+                color = WritingPaper,
                 modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp)),
             ) {
                 InkSurface(

@@ -12,7 +12,7 @@ Anki-подобное приложение для Android с режимом пи
 | `:core:scoring` — нормализация, сопоставление штрихов, метрики, оценка почерка | ✅ JVM, тесты на KanjiVG |
 | `:core:ink` — модель штрихов (x, y, t, давление, наклон, поворот) и бинарный формат | ✅ JVM, тесты |
 | `:core:srs` — FSRS-6 (порт py-fsrs, сверен на 1524 повторениях) | ✅ JVM, тесты |
-| `:app` — колоды и повторение, тетради, дневник, доска, заметки, настройки; Room; ML Kit | ✅ сборка + смоук-тест на эмуляторе в CI |
+| `:app` — колоды (вложенные, лимиты), повторение, браузер и редактор карточек, тренировка почерка, статистика, тетради, дневник, доска, заметки, настройки, напоминания, резервные копии; Room; ML Kit | ✅ сборка, JVM- и инструментальные тесты, смоук-тест на эмуляторе в CI |
 | `:core:sync`, `:import:anki` | ещё нет |
 
 Скриншоты смоук-теста с эмулятора CI кладёт в ветки `ci-screenshots-phone` / `ci-screenshots-tablet`.
@@ -23,9 +23,14 @@ Anki-подобное приложение для Android с режимом пи
 ## Сборка
 
 ```
-./gradlew test                 # JVM-модули
-./gradlew :app:assembleDebug   # нужен Android SDK (ANDROID_HOME или local.properties)
+./gradlew test                          # JVM-модули и unit-тесты приложения
+./gradlew :app:assembleDebug            # нужен Android SDK (ANDROID_HOME или local.properties)
+./gradlew :app:connectedDebugAndroidTest  # миграции, репозиторий и смоук-тест на устройстве/эмуляторе
+./gradlew :app:assembleRelease          # R8, только ARM-библиотеки
 ```
+
+Release подписывается ключом из `local.properties` или переменных окружения (`WANKI_KEYSTORE`,
+`WANKI_KEYSTORE_PASSWORD`, `WANKI_KEY_ALIAS`, `WANKI_KEY_PASSWORD`); без них — отладочным ключом.
 
 Без Android SDK собираются только JVM-модули. CI (GitHub Actions) гоняет тесты и выкладывает
 debug-APK как артефакт сборки (`wanki-debug-apk`).

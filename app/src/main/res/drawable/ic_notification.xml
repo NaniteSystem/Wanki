@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 人, as in the launcher icon (status bar icons are white silhouettes). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group android:translateX="-2" android:translateY="-1">
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M60,18C62,40 53,67 31,87C29,89 26,87 28,85C45,66 52,43 51,20C51,16 60,15 60,18Z" />
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M55,46C64,62 75,76 91,84C95,86 94,91 90,91C72,89 59,73 50,52C48,48 53,43 55,46Z" />
+    </group>
+</vector>

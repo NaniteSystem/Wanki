@@ -160,10 +160,11 @@ fun TextActionsDialog(initialText: String?, failed: Boolean = false, onDismiss: 
 @Composable
 fun MakeCardDialog(front: String, back: String, onDismiss: () -> Unit) {
     val graph = LocalContext.current.graph
-    val decks by remember { graph.repository.observeDecks() }.collectAsState(emptyList())
+    val tree by remember { graph.repository.observeDeckTree() }.collectAsState(null)
     var f by remember { mutableStateOf(front) }
     var b by remember { mutableStateOf(back) }
     var deckId by remember { mutableStateOf<String?>(null) }
+    var picking by remember { mutableStateOf(false) }
     var done by remember { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -172,9 +173,8 @@ fun MakeCardDialog(front: String, back: String, onDismiss: () -> Unit) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedTextField(f, { f = it }, label = { Text("Вопрос") })
                 OutlinedTextField(b, { b = it }, label = { Text("Ответ") })
-                Text("Колода", style = MaterialTheme.typography.labelLarge)
-                decks.forEach { d ->
-                    FilterChip(deckId == d.deck.id, { deckId = d.deck.id }, { Text(d.deck.name) })
+                OutlinedButton(onClick = { picking = true }, enabled = tree != null) {
+                    Text("Колода: " + (deckId?.let { id -> tree?.path(id) } ?: "выбрать"))
                 }
                 if (done) Text("Карточка добавлена", color = MaterialTheme.colorScheme.primary)
             }
@@ -191,4 +191,8 @@ fun MakeCardDialog(front: String, back: String, onDismiss: () -> Unit) {
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Закрыть") } },
     )
+    val t = tree
+    if (picking && t != null) {
+        DeckPickerDialog(t, "Колода", deckId, onPick = { d -> if (d != null) deckId = d.id; picking = false }, onDismiss = { picking = false })
+    }
 }

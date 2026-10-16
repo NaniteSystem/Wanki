@@ -1,14 +1,15 @@
 package app.wanki.data
 
 import android.content.Context
-import androidx.compose.runtime.getValue
+import android.content.SharedPreferences
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import app.wanki.scoring.ScoringConfig
+import kotlin.properties.ReadWriteProperty
+import kotlin.reflect.KProperty
 
 /** User settings (SharedPreferences), observable from Compose. */
 class Settings(context: Context) {
-    private val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+    private val prefs = context.getSharedPreferences(NAME, Context.MODE_PRIVATE)
 
     var passThreshold by pref("passThreshold", 60f)
     var orderStrictness by pref("orderStrictness", 1f)
@@ -17,9 +18,19 @@ class Settings(context: Context) {
     var autoCheckDelayMs by pref("autoCheckDelayMs", 1500f)
 
     /** Languages tried when a notebook's language is "auto" (comma-separated codes). */
-    var autoLanguages by stringPref("autoLanguages", "ru,en,ja")
+    var autoLanguages by pref("autoLanguages", "ru,en,ja")
     /** Translation target. */
-    var translateTo by stringPref("translateTo", "ru")
+    var translateTo by pref("translateTo", "ru")
+
+    /** Read the answer aloud when it is shown. */
+    var autoSpeak by pref("autoSpeak", false)
+    /** "system", "light" or "dark". */
+    var theme by pref("theme", "system")
+    var reminderEnabled by pref("reminderEnabled", false)
+    /** Daily reminder time, minutes after midnight. */
+    var reminderMinutes by pref("reminderMinutes", 19 * 60)
+    /** Last automatic or manual backup, epoch ms. */
+    var lastBackupAt by pref("lastBackupAt", 0L)
 
     val autoLanguageList: List<String> get() = autoLanguages.split(',').map { it.trim() }.filter { it.isNotEmpty() }
 
@@ -28,21 +39,43 @@ class Settings(context: Context) {
         orderStrictness = orderStrictness.toDouble(),
     )
 
-    private fun stringPref(key: String, default: String) = object : kotlin.properties.ReadWriteProperty<Any?, String> {
-        private val state = mutableStateOf(prefs.getString(key, default) ?: default)
-        override fun getValue(thisRef: Any?, property: kotlin.reflect.KProperty<*>): String = state.value
-        override fun setValue(thisRef: Any?, property: kotlin.reflect.KProperty<*>, value: String) {
+    /** Every stored value, for backups. */
+    fun export(): Map<String, *> = prefs.all
+
+    @Suppress("UNCHECKED_CAST")
+    private fun <T> pref(key: String, default: T): ReadWriteProperty<Any?, T> = object : ReadWriteProperty<Any?, T> {
+        private val state = mutableStateOf(read(prefs, key, default))
+        override fun getValue(thisRef: Any?, property: KProperty<*>): T = state.value
+        override fun setValue(thisRef: Any?, property: KProperty<*>, value: T) {
             state.value = value
-            prefs.edit().putString(key, value).apply()
+            prefs.edit().also { write(it, key, value) }.apply()
         }
     }
 
-    private fun pref(key: String, default: Float) = object : kotlin.properties.ReadWriteProperty<Any?, Float> {
-        private val state = mutableStateOf(prefs.getFloat(key, default))
-        override fun getValue(thisRef: Any?, property: kotlin.reflect.KProperty<*>): Float = state.value
-        override fun setValue(thisRef: Any?, property: kotlin.reflect.KProperty<*>, value: Float) {
-            state.value = value
-            prefs.edit().putFloat(key, value).apply()
+    companion object {
+        const val NAME = "settings"
+
+        @Suppress("UNCHECKED_CAST")
+        private fun <T> read(prefs: SharedPreferences, key: String, default: T): T = runCatching {
+            when (default) {
+                is Float -> prefs.getFloat(key, default) as T
+                is Int -> prefs.getInt(key, default) as T
+                is Long -> prefs.getLong(key, default) as T
+                is Boolean -> prefs.getBoolean(key, default) as T
+                is String -> (prefs.getString(key, default) ?: default) as T
+                else -> default
+            }
+        }.getOrDefault(default)
+
+        fun write(editor: SharedPreferences.Editor, key: String, value: Any?) {
+            when (value) {
+                is Float -> editor.putFloat(key, value)
+                is Int -> editor.putInt(key, value)
+                is Long -> editor.putLong(key, value)
+                is Boolean -> editor.putBoolean(key, value)
+                is String -> editor.putString(key, value)
+                null -> editor.remove(key)
+            }
         }
     }
 }

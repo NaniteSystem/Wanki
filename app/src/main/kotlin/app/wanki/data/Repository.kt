@@ -1,14 +1,18 @@
 package app.wanki.data
 
 import androidx.room.withTransaction
+import androidx.sqlite.db.SimpleSQLiteQuery
 import app.wanki.ink.InkCodec
 import app.wanki.ink.InkDrawing
 import app.wanki.ink.InkStroke
+import app.wanki.practice.CharQuality
+import app.wanki.practice.WeakChars
 import app.wanki.srs.CardState
 import app.wanki.srs.FsrsScheduler
 import app.wanki.srs.Rating
 import app.wanki.srs.SrsState
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 import java.time.LocalDate
 import java.time.ZoneId
 
@@ -20,54 +24,141 @@ class Repository(private val db: WankiDatabase) {
     private val reviews = db.reviews()
     private val notebooks = db.notebooks()
     private val textNotes = db.textNotes()
+    private val charScores = db.charScores()
 
     // --- decks & cards ---------------------------------------------------------------------
 
-    fun observeDecks(now: Long = System.currentTimeMillis()): Flow<List<DeckWithCounts>> = decks.observeWithCounts(now)
-    fun observeDeck(id: String) = decks.observe(id)
-    fun observeCards(deckId: String) = cards.observeInDeck(deckId)
+    /** Decks as a tree with what can be studied today; [now] decides what is due. */
+    fun observeDeckTree(now: Long = System.currentTimeMillis()): Flow<DeckTree> =
+        combine(decks.observeAll(), cards.observeCounts(now, now + LEARN_AHEAD_MS), reviews.observeToday(startOfToday())) { d, c, t ->
+            DeckTree(d, c, t)
+        }
 
-    suspend fun createDeck(name: String, language: String, mode: AnswerMode): DeckEntity {
-        val d = DeckEntity(name = name.trim(), language = language, defaultAnswerMode = mode.name)
+    suspend fun deckTree(now: Long = System.currentTimeMillis()): DeckTree =
+        DeckTree(decks.all(), cards.counts(now, now + LEARN_AHEAD_MS), reviews.today(startOfToday()))
+
+    fun observeDeck(id: String) = decks.observe(id)
+    suspend fun deck(id: String) = decks.get(id)
+
+    suspend fun createDeck(name: String, language: String, mode: AnswerMode, parentId: String? = null): DeckEntity {
+        val d = DeckEntity(name = name.trim(), language = language, defaultAnswerMode = mode.name, parentId = parentId)
         decks.upsert(d)
         return d
     }
 
-    suspend fun addCard(deckId: String, front: String, back: String, mode: AnswerMode, tags: String = "") {
-        val note = NoteEntity.basic(front.trim(), back.trim(), tags)
-        db.withTransaction {
+    /** Finds or creates nested decks by path (Anki's "Parent::Child"); returns the innermost. */
+    suspend fun deckByPath(path: List<String>, language: String, mode: AnswerMode): DeckEntity = db.withTransaction {
+        var parent: DeckEntity? = null
+        for (name in path.map { it.trim() }.filter { it.isNotEmpty() }.ifEmpty { listOf("Колода") }) {
+            parent = decks.findChild(parent?.id, name) ?: createDeck(name, language, mode, parent?.id)
+        }
+        parent!!
+    }
+
+    suspend fun updateDeck(deck: DeckEntity) =
+        decks.upsert(deck.copy(name = deck.name.trim().ifBlank { "Колода" }, updatedAt = System.currentTimeMillis()))
+
+    suspend fun setCollapsed(id: String, collapsed: Boolean) = decks.setCollapsed(id, collapsed)
+
+    /** Deletes the deck with its subdecks and cards. */
+    suspend fun deleteDeck(id: String) = db.withTransaction {
+        val ids = DeckTree(decks.all()).subtree(id)
+        decks.delete(ids)
+        cards.deleteInDecks(ids)
+        notes.deleteOrphans()
+    }
+
+    /** Sets the deck's default answer mode and switches all its cards to it. */
+    suspend fun setDeckMode(deck: DeckEntity, mode: AnswerMode) = db.withTransaction {
+        decks.upsert(deck.copy(defaultAnswerMode = mode.name, updatedAt = System.currentTimeMillis()))
+        cards.setModeInDeck(deck.id, mode.name)
+    }
+
+    fun observeCards(query: CardQuery, now: Long = System.currentTimeMillis()): Flow<List<CardWithNote>> =
+        cards.observeQuery(query.select(now).room())
+
+    fun observeCardCount(query: CardQuery, now: Long = System.currentTimeMillis()): Flow<Int> =
+        cards.observeCount(query.count(now).room())
+
+    suspend fun cardIds(query: CardQuery, now: Long = System.currentTimeMillis()): List<String> = cards.ids(query.ids(now).room())
+
+    fun observeCard(id: String) = cards.observe(id)
+    suspend fun card(id: String) = cards.get(id)
+
+    suspend fun addCard(deckId: String, front: String, back: String, mode: AnswerMode, tags: String = ""): CardEntity {
+        val note = NoteEntity.basic(front.trim(), back.trim(), tags.trim())
+        return db.withTransaction {
+            val card = CardEntity(noteId = note.id, deckId = deckId, answerMode = mode.name, position = cards.maxPosition() + 1)
             notes.upsert(note)
-            cards.upsert(CardEntity(noteId = note.id, deckId = deckId, answerMode = mode.name))
+            cards.upsert(card)
+            card
         }
     }
 
     data class NewCard(val front: String, val back: String, val mode: AnswerMode, val tags: String = "")
 
-    /** Bulk insert (imports), one transaction; [CardEntity.updatedAt] keeps the import order for new cards. */
+    /** Bulk insert (imports) in one transaction; new cards come up in the given order. */
     suspend fun addCards(deckId: String, items: List<NewCard>) = db.withTransaction {
         val t0 = System.currentTimeMillis()
-        items.forEachIndexed { i, it ->
-            val note = NoteEntity.basic(it.front.trim(), it.back.trim(), it.tags)
-            notes.upsert(note)
-            cards.upsert(CardEntity(noteId = note.id, deckId = deckId, answerMode = it.mode.name, updatedAt = t0 + i))
+        val p0 = cards.maxPosition()
+        for (chunk in items.withIndex().chunked(500)) {
+            val ns = chunk.map { (_, it) -> NoteEntity.basic(it.front.trim(), it.back.trim(), it.tags.trim()) }
+            notes.upsertAll(ns)
+            cards.upsertAll(chunk.mapIndexed { j, (i, it) ->
+                CardEntity(noteId = ns[j].id, deckId = deckId, answerMode = it.mode.name, updatedAt = t0, position = p0 + 1 + i)
+            })
+        }
+    }
+
+    /** Saves the card editor: note fields and tags, deck, answer mode and which side is written. */
+    suspend fun saveCard(c: CardWithNote, front: String, back: String, tags: String, deckId: String, mode: AnswerMode, writeFieldOrd: Int) {
+        val now = System.currentTimeMillis()
+        val fields = c.note.fields.split(NoteEntity.FIELD_SEPARATOR).toMutableList()
+        while (fields.size < 2) fields += ""
+        fields[0] = front.trim()
+        fields[1] = back.trim()
+        db.withTransaction {
+            notes.upsert(c.note.copy(fields = fields.joinToString(NoteEntity.FIELD_SEPARATOR.toString()), tags = tags.trim(), updatedAt = now))
+            cards.upsert(c.card.copy(deckId = deckId, answerMode = mode.name, writeFieldOrd = writeFieldOrd, updatedAt = now))
         }
     }
 
     suspend fun setAnswerMode(card: CardEntity, mode: AnswerMode) =
         cards.upsert(card.copy(answerMode = mode.name, updatedAt = System.currentTimeMillis()))
 
-    suspend fun deleteCard(id: String) = cards.delete(id)
+    suspend fun setAnswerMode(ids: List<String>, mode: AnswerMode) = ids.chunked(500).forEach { cards.setMode(it, mode.name) }
+    suspend fun setSuspended(ids: List<String>, suspended: Boolean) = ids.chunked(500).forEach { cards.setSuspended(it, suspended) }
+    suspend fun buryUntilTomorrow(ids: List<String>) = ids.chunked(500).forEach { cards.bury(it, startOfTomorrow()) }
+    suspend fun resetCards(ids: List<String>) = ids.chunked(500).forEach { cards.reset(it) }
+    suspend fun moveCards(ids: List<String>, deckId: String) = ids.chunked(500).forEach { cards.move(it, deckId) }
 
-    /** Due learning and review cards first, then new cards within the deck's daily limit. */
-    suspend fun reviewQueue(deckId: String, now: Long = System.currentTimeMillis()): List<CardWithNote> {
-        val deck = decks.get(deckId) ?: return emptyList()
-        val due = cards.due(deckId, now, now + LEARN_AHEAD_MS, 500)
-        val introduced = cards.introducedSince(deckId, startOfToday())
-        val fresh = cards.newCards(deckId, (deck.newPerDay - introduced).coerceAtLeast(0))
-        return due + fresh
+    suspend fun deleteCards(ids: List<String>) = db.withTransaction {
+        ids.chunked(500).forEach { cards.delete(it) }
+        notes.deleteOrphans()
     }
 
-    suspend fun deck(id: String) = decks.get(id)
+    suspend fun deleteCard(id: String) = deleteCards(listOf(id))
+
+    /** Review history of a card, oldest first, with the handwriting of each written answer. */
+    suspend fun cardHistory(cardId: String): List<Pair<ReviewLogEntity, InkAttemptEntity?>> {
+        val logs = reviews.forCard(cardId)
+        val attempts = logs.map { it.id }.chunked(500).flatMap { reviews.attempts(it) }.associateBy { it.reviewLogId }
+        return logs.map { it to attempts[it.id] }
+    }
+
+    /**
+     * Learning cards due within the learn-ahead window, then due reviews and new cards within
+     * the daily limits of the deck and its subdecks.
+     */
+    suspend fun reviewQueue(deckId: String, now: Long = System.currentTimeMillis()): List<CardWithNote> {
+        val tree = deckTree(now)
+        val ids = tree.subtree(deckId)
+        if (ids.isEmpty()) return emptyList()
+        val learning = ids.chunked(500).flatMap { cards.dueLearning(it, now, now + LEARN_AHEAD_MS) }.sortedBy { it.card.due }
+        val due = tree.reviewQuota(deckId).flatMap { (id, n) -> cards.dueReviews(id, now, n) }.sortedBy { it.card.due }
+        val fresh = tree.newQuota(deckId).flatMap { (id, n) -> cards.newCards(id, now, n) }
+        return learning + due + fresh
+    }
 
     fun scheduler(retention: Double) = FsrsScheduler(desiredRetention = retention)
 
@@ -82,7 +173,10 @@ class Repository(private val db: WankiDatabase) {
         lapses = c.lapses,
     )
 
-    /** Schedules the card, writes the review log and the handwriting attempt in one transaction. */
+    /** Handwriting result of one written character. */
+    data class CharScore(val glyph: String, val score: Double?, val beauty: Double?)
+
+    /** Schedules the card, writes the review log, handwriting attempt and per-character scores in one transaction. */
     suspend fun answer(
         card: CardEntity,
         rating: Rating,
@@ -93,6 +187,8 @@ class Repository(private val db: WankiDatabase) {
         durationMs: Long,
         usedHint: Boolean,
         ink: InkDrawing?,
+        language: String = "",
+        charScores: List<CharScore> = emptyList(),
         now: Long = System.currentTimeMillis(),
     ): Answered {
         val next = scheduler.review(srsState(card), rating, now, card.seed)
@@ -103,12 +199,21 @@ class Repository(private val db: WankiDatabase) {
         val log = ReviewLogEntity(
             cardId = card.id, reviewedAt = now, rating = rating.value, mode = mode.name,
             score = score, beauty = beauty, durationMs = durationMs, usedHint = usedHint,
+            cardState = if (card.isNew) STATE_NEW else card.state,
         )
         db.withTransaction {
             cards.upsert(updated)
             reviews.insert(log)
             if (ink != null && ink.strokes.isNotEmpty()) {
                 reviews.insertAttempt(InkAttemptEntity(reviewLogId = log.id, strokes = InkCodec.encode(ink)))
+            }
+            if (charScores.isNotEmpty()) {
+                this@Repository.charScores.insert(charScores.map {
+                    CharScoreEntity(
+                        glyph = it.glyph, language = language, at = now, score = it.score, beauty = it.beauty,
+                        source = ScoreSource.REVIEW.name, cardId = card.id, reviewLogId = log.id,
+                    )
+                })
             }
         }
         return Answered(card, updated, log.id)
@@ -120,16 +225,39 @@ class Repository(private val db: WankiDatabase) {
     suspend fun undo(a: Answered) = db.withTransaction {
         cards.upsert(a.before.copy(updatedAt = System.currentTimeMillis()))
         reviews.deleteAttempts(a.logId)
+        charScores.deleteForLog(a.logId)
         reviews.deleteLog(a.logId)
     }
 
     fun observeReviewedToday(): Flow<Int> = reviews.observeCountSince(startOfToday())
 
+    // --- handwriting practice ----------------------------------------------------------------
+
+    /** Every practised or reviewed character with its recent handwriting quality, weakest first. */
+    suspend fun charQuality(): List<CharQuality> = WeakChars.quality(charScores.recent())
+
+    /** Changes whenever a handwriting result is stored, to refresh the practice queue. */
+    fun observeCharScoreCount(): Flow<Int> = charScores.observeCount()
+
+    suspend fun charHistory(glyph: String): List<CharScoreEntity> = charScores.forGlyph(glyph)
+
+    suspend fun savePractice(glyph: String, language: String, score: Double?, beauty: Double?) =
+        charScores.insert(listOf(CharScoreEntity(
+            glyph = glyph, language = language, at = System.currentTimeMillis(), score = score, beauty = beauty,
+            source = ScoreSource.PRACTICE.name,
+        )))
+
+    // --- statistics --------------------------------------------------------------------------
+
     data class Stats(
         val perDay: Map<Long, DayCount>,
         val forecast: List<Int>,
         val states: List<CardStateCount>,
-        val weakest: List<CharStat>,
+        val chars: List<CharQuality>,
+        /** Share of review cards remembered over the last 30 days; null without data. */
+        val retention: Double?,
+        val retentionN: Int,
+        val beautyPerDay: List<DayBeauty>,
         val today: Long,
     )
 
@@ -144,7 +272,19 @@ class Repository(private val db: WankiDatabase) {
         val due = cards.duePerDay(until, offset)
         val forecast = IntArray(forecastDays)
         for (d in due) forecast[(d.day - today).toInt().coerceIn(0, forecastDays - 1)] += d.n // overdue counts as today
-        return Stats(perDay, forecast.toList(), cards.stateCounts(), reviews.weakestHandwriting(), today)
+        val month = LocalDate.now(zone).minusDays(30).atStartOfDay(zone).toInstant().toEpochMilli()
+        val r = reviews.retention(month)
+        val halfYear = LocalDate.now(zone).minusDays(182).atStartOfDay(zone).toInstant().toEpochMilli()
+        return Stats(
+            perDay = perDay,
+            forecast = forecast.toList(),
+            states = cards.stateCounts(),
+            chars = charQuality(),
+            retention = if (r.n > 0) (r.ok ?: 0).toDouble() / r.n else null,
+            retentionN = r.n,
+            beautyPerDay = charScores.beautyPerDay(halfYear, offset),
+            today = today,
+        )
     }
 
     // --- notebooks, diary, board -------------------------------------------------------------
@@ -299,5 +439,8 @@ class Repository(private val db: WankiDatabase) {
         const val LEARN_AHEAD_MS = 20 * 60_000L
 
         fun startOfToday(): Long = LocalDate.now().atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+        fun startOfTomorrow(): Long = LocalDate.now().plusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+
+        private fun CardQuery.Sql.room() = SimpleSQLiteQuery(sql, args.toTypedArray())
     }
 }

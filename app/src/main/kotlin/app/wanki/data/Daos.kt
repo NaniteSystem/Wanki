@@ -4,21 +4,25 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.RawQuery
 import androidx.room.Upsert
+import androidx.sqlite.db.SupportSQLiteQuery
 import kotlinx.coroutines.flow.Flow
+
+/** Columns for [CardWithNote] from `cards c JOIN notes n`. */
+const val CARD_WITH_NOTE_COLUMNS = "c.*, n.id AS note_id, n.noteTypeId AS note_noteTypeId, n.fields AS note_fields, " +
+    "n.tags AS note_tags, n.updatedAt AS note_updatedAt, n.deleted AS note_deleted"
+
+/** A card can be studied: not deleted, not suspended, not buried. */
+private const val ACTIVE = "c.deleted = 0 AND c.suspended = 0 AND c.buriedUntil <= :now"
 
 @Dao
 interface DeckDao {
-    @Query(
-        """
-        SELECT d.*,
-          (SELECT COUNT(*) FROM cards c WHERE c.deckId = d.id AND c.deleted = 0 AND c.lastReview IS NOT NULL AND c.due <= :now) AS dueCount,
-          (SELECT COUNT(*) FROM cards c WHERE c.deckId = d.id AND c.deleted = 0 AND c.lastReview IS NULL) AS newCount,
-          (SELECT COUNT(*) FROM cards c WHERE c.deckId = d.id AND c.deleted = 0) AS totalCount
-        FROM decks d WHERE d.deleted = 0 ORDER BY d.name COLLATE NOCASE
-        """,
-    )
-    fun observeWithCounts(now: Long): Flow<List<DeckWithCounts>>
+    @Query("SELECT * FROM decks WHERE deleted = 0 ORDER BY name COLLATE NOCASE")
+    fun observeAll(): Flow<List<DeckEntity>>
+
+    @Query("SELECT * FROM decks WHERE deleted = 0 ORDER BY name COLLATE NOCASE")
+    suspend fun all(): List<DeckEntity>
 
     @Query("SELECT * FROM decks WHERE id = :id")
     suspend fun get(id: String): DeckEntity?
@@ -29,77 +33,169 @@ interface DeckDao {
     @Query("SELECT COUNT(*) FROM decks")
     suspend fun count(): Int
 
+    @Query(
+        """
+        SELECT * FROM decks WHERE deleted = 0 AND name = :name
+          AND ((:parentId IS NULL AND parentId IS NULL) OR parentId = :parentId) LIMIT 1
+        """,
+    )
+    suspend fun findChild(parentId: String?, name: String): DeckEntity?
+
     @Upsert
     suspend fun upsert(deck: DeckEntity)
+
+    @Query("UPDATE decks SET collapsed = :collapsed WHERE id = :id")
+    suspend fun setCollapsed(id: String, collapsed: Boolean)
+
+    @Query("UPDATE decks SET deleted = 1, updatedAt = :now WHERE id IN (:ids)")
+    suspend fun delete(ids: List<String>, now: Long = System.currentTimeMillis())
 }
 
 @Dao
 interface CardDao {
+    @Query("SELECT $CARD_WITH_NOTE_COLUMNS FROM cards c JOIN notes n ON n.id = c.noteId WHERE c.id = :id")
+    suspend fun get(id: String): CardWithNote?
+
+    @Query("SELECT $CARD_WITH_NOTE_COLUMNS FROM cards c JOIN notes n ON n.id = c.noteId WHERE c.id = :id")
+    fun observe(id: String): Flow<CardWithNote?>
+
+    /** Browser search, built by [CardQuery]. */
+    @RawQuery(observedEntities = [CardEntity::class, NoteEntity::class])
+    fun observeQuery(query: SupportSQLiteQuery): Flow<List<CardWithNote>>
+
+    @RawQuery(observedEntities = [CardEntity::class, NoteEntity::class])
+    fun observeCount(query: SupportSQLiteQuery): Flow<Int>
+
+    @RawQuery
+    suspend fun ids(query: SupportSQLiteQuery): List<String>
+
     @Query(
         """
-        SELECT c.*, n.id AS note_id, n.noteTypeId AS note_noteTypeId, n.fields AS note_fields, n.tags AS note_tags,
-               n.updatedAt AS note_updatedAt, n.deleted AS note_deleted
-        FROM cards c JOIN notes n ON n.id = c.noteId
-        WHERE c.deckId = :deckId AND c.deleted = 0 ORDER BY c.updatedAt DESC
+        SELECT c.deckId AS deckId,
+          SUM(CASE WHEN $ACTIVE AND c.lastReview IS NULL THEN 1 ELSE 0 END) AS newCount,
+          SUM(CASE WHEN $ACTIVE AND c.lastReview IS NOT NULL AND c.state != 'REVIEW' AND c.due <= :learnAhead THEN 1 ELSE 0 END) AS learnCount,
+          SUM(CASE WHEN $ACTIVE AND c.lastReview IS NOT NULL AND c.state = 'REVIEW' AND c.due <= :now THEN 1 ELSE 0 END) AS reviewCount,
+          COUNT(*) AS total
+        FROM cards c WHERE c.deleted = 0 GROUP BY c.deckId
         """,
     )
-    fun observeInDeck(deckId: String): Flow<List<CardWithNote>>
+    fun observeCounts(now: Long, learnAhead: Long): Flow<List<DeckCardCounts>>
 
-    /** Learning/relearning cards due soon and review cards due now, earliest first. */
     @Query(
         """
-        SELECT c.*, n.id AS note_id, n.noteTypeId AS note_noteTypeId, n.fields AS note_fields, n.tags AS note_tags,
-               n.updatedAt AS note_updatedAt, n.deleted AS note_deleted
-        FROM cards c JOIN notes n ON n.id = c.noteId
-        WHERE c.deckId = :deckId AND c.deleted = 0 AND c.lastReview IS NOT NULL
-          AND c.due <= CASE WHEN c.state = 'REVIEW' THEN :now ELSE :learnAhead END
+        SELECT c.deckId AS deckId,
+          SUM(CASE WHEN $ACTIVE AND c.lastReview IS NULL THEN 1 ELSE 0 END) AS newCount,
+          SUM(CASE WHEN $ACTIVE AND c.lastReview IS NOT NULL AND c.state != 'REVIEW' AND c.due <= :learnAhead THEN 1 ELSE 0 END) AS learnCount,
+          SUM(CASE WHEN $ACTIVE AND c.lastReview IS NOT NULL AND c.state = 'REVIEW' AND c.due <= :now THEN 1 ELSE 0 END) AS reviewCount,
+          COUNT(*) AS total
+        FROM cards c WHERE c.deleted = 0 GROUP BY c.deckId
+        """,
+    )
+    suspend fun counts(now: Long, learnAhead: Long): List<DeckCardCounts>
+
+    /** Learning/relearning cards of these decks due within the learn-ahead window, earliest first. */
+    @Query(
+        """
+        SELECT $CARD_WITH_NOTE_COLUMNS FROM cards c JOIN notes n ON n.id = c.noteId
+        WHERE c.deckId IN (:deckIds) AND $ACTIVE AND c.lastReview IS NOT NULL AND c.state != 'REVIEW' AND c.due <= :learnAhead
+        ORDER BY c.due
+        """,
+    )
+    suspend fun dueLearning(deckIds: List<String>, now: Long, learnAhead: Long): List<CardWithNote>
+
+    @Query(
+        """
+        SELECT $CARD_WITH_NOTE_COLUMNS FROM cards c JOIN notes n ON n.id = c.noteId
+        WHERE c.deckId = :deckId AND $ACTIVE AND c.lastReview IS NOT NULL AND c.state = 'REVIEW' AND c.due <= :now
         ORDER BY c.due LIMIT :limit
         """,
     )
-    suspend fun due(deckId: String, now: Long, learnAhead: Long, limit: Int): List<CardWithNote>
+    suspend fun dueReviews(deckId: String, now: Long, limit: Int): List<CardWithNote>
 
     @Query(
         """
-        SELECT c.*, n.id AS note_id, n.noteTypeId AS note_noteTypeId, n.fields AS note_fields, n.tags AS note_tags,
-               n.updatedAt AS note_updatedAt, n.deleted AS note_deleted
-        FROM cards c JOIN notes n ON n.id = c.noteId
-        WHERE c.deckId = :deckId AND c.deleted = 0 AND c.lastReview IS NULL
-        ORDER BY c.updatedAt LIMIT :limit
+        SELECT $CARD_WITH_NOTE_COLUMNS FROM cards c JOIN notes n ON n.id = c.noteId
+        WHERE c.deckId = :deckId AND $ACTIVE AND c.lastReview IS NULL
+        ORDER BY c.position LIMIT :limit
         """,
     )
-    suspend fun newCards(deckId: String, limit: Int): List<CardWithNote>
-
-    /** Cards of the deck first reviewed since [dayStart] (counts against the new-card limit). */
-    @Query(
-        """
-        SELECT COUNT(*) FROM cards c WHERE c.deckId = :deckId
-          AND (SELECT MIN(r.reviewedAt) FROM review_logs r WHERE r.cardId = c.id) >= :dayStart
-        """,
-    )
-    suspend fun introducedSince(deckId: String, dayStart: Long): Int
+    suspend fun newCards(deckId: String, now: Long, limit: Int): List<CardWithNote>
 
     @Upsert
     suspend fun upsert(card: CardEntity)
 
+    @Upsert
+    suspend fun upsertAll(cards: List<CardEntity>)
+
+    @Query("SELECT COALESCE(MAX(position), 0) FROM cards")
+    suspend fun maxPosition(): Long
+
     @Query(
         """
         SELECT (due + :offset) / 86400000 AS day, COUNT(*) AS n FROM cards
-        WHERE deleted = 0 AND lastReview IS NOT NULL AND due < :until GROUP BY day ORDER BY day
+        WHERE deleted = 0 AND suspended = 0 AND lastReview IS NOT NULL AND due < :until GROUP BY day ORDER BY day
         """,
     )
     suspend fun duePerDay(until: Long, offset: Long): List<DueDay>
 
-    @Query("SELECT state, lastReview IS NULL AS isNew, COUNT(*) AS n FROM cards WHERE deleted = 0 GROUP BY state, isNew")
+    @Query(
+        """
+        SELECT state, lastReview IS NULL AS isNew, suspended, COUNT(*) AS n FROM cards
+        WHERE deleted = 0 GROUP BY state, isNew, suspended
+        """,
+    )
     suspend fun stateCounts(): List<CardStateCount>
 
-    @Query("UPDATE cards SET deleted = 1, updatedAt = :now WHERE id = :id")
-    suspend fun delete(id: String, now: Long = System.currentTimeMillis())
+    @Query("UPDATE cards SET suspended = :suspended, updatedAt = :now WHERE id IN (:ids)")
+    suspend fun setSuspended(ids: List<String>, suspended: Boolean, now: Long = System.currentTimeMillis())
+
+    @Query("UPDATE cards SET buriedUntil = :until, updatedAt = :now WHERE id IN (:ids)")
+    suspend fun bury(ids: List<String>, until: Long, now: Long = System.currentTimeMillis())
+
+    @Query("UPDATE cards SET deckId = :deckId, updatedAt = :now WHERE id IN (:ids)")
+    suspend fun move(ids: List<String>, deckId: String, now: Long = System.currentTimeMillis())
+
+    @Query("UPDATE cards SET answerMode = :mode, updatedAt = :now WHERE id IN (:ids)")
+    suspend fun setMode(ids: List<String>, mode: String, now: Long = System.currentTimeMillis())
+
+    @Query("UPDATE cards SET answerMode = :mode, updatedAt = :now WHERE deckId = :deckId AND deleted = 0")
+    suspend fun setModeInDeck(deckId: String, mode: String, now: Long = System.currentTimeMillis())
+
+    /** Back to new: the schedule is forgotten, the review history stays. */
+    @Query(
+        """
+        UPDATE cards SET state = 'LEARNING', step = 0, stability = NULL, difficulty = NULL, due = 0, lastReview = NULL,
+          reps = 0, lapses = 0, buriedUntil = 0, updatedAt = :now WHERE id IN (:ids)
+        """,
+    )
+    suspend fun reset(ids: List<String>, now: Long = System.currentTimeMillis())
+
+    @Query("UPDATE cards SET deleted = 1, updatedAt = :now WHERE id IN (:ids)")
+    suspend fun delete(ids: List<String>, now: Long = System.currentTimeMillis())
+
+    @Query("UPDATE cards SET deleted = 1, updatedAt = :now WHERE deckId IN (:deckIds) AND deleted = 0")
+    suspend fun deleteInDecks(deckIds: List<String>, now: Long = System.currentTimeMillis())
 }
 
 @Dao
 interface NoteDao {
     @Upsert
     suspend fun upsert(note: NoteEntity)
+
+    @Upsert
+    suspend fun upsertAll(notes: List<NoteEntity>)
+
+    @Query("SELECT * FROM notes WHERE id = :id")
+    suspend fun get(id: String): NoteEntity?
+
+    /** Notes left without live cards are deleted too. */
+    @Query(
+        """
+        UPDATE notes SET deleted = 1, updatedAt = :now
+        WHERE deleted = 0 AND NOT EXISTS (SELECT 1 FROM cards c WHERE c.noteId = notes.id AND c.deleted = 0)
+        """,
+    )
+    suspend fun deleteOrphans(now: Long = System.currentTimeMillis())
 }
 
 @Dao
@@ -119,6 +215,29 @@ interface ReviewDao {
     @Query("SELECT * FROM review_logs WHERE cardId = :cardId ORDER BY reviewedAt")
     suspend fun forCard(cardId: String): List<ReviewLogEntity>
 
+    @Query("SELECT * FROM ink_attempts WHERE reviewLogId IN (:logIds)")
+    suspend fun attempts(logIds: List<String>): List<InkAttemptEntity>
+
+    @Query(
+        """
+        SELECT c.deckId AS deckId,
+          SUM(CASE WHEN r.cardState = 'NEW' THEN 1 ELSE 0 END) AS newDone,
+          SUM(CASE WHEN r.cardState = 'REVIEW' THEN 1 ELSE 0 END) AS reviewDone
+        FROM review_logs r JOIN cards c ON c.id = r.cardId WHERE r.reviewedAt >= :dayStart GROUP BY c.deckId
+        """,
+    )
+    fun observeToday(dayStart: Long): Flow<List<DeckTodayCounts>>
+
+    @Query(
+        """
+        SELECT c.deckId AS deckId,
+          SUM(CASE WHEN r.cardState = 'NEW' THEN 1 ELSE 0 END) AS newDone,
+          SUM(CASE WHEN r.cardState = 'REVIEW' THEN 1 ELSE 0 END) AS reviewDone
+        FROM review_logs r JOIN cards c ON c.id = r.cardId WHERE r.reviewedAt >= :dayStart GROUP BY c.deckId
+        """,
+    )
+    suspend fun today(dayStart: Long): List<DeckTodayCounts>
+
     @Query(
         """
         SELECT (reviewedAt + :offset) / 86400000 AS day, COUNT(*) AS n,
@@ -128,17 +247,44 @@ interface ReviewDao {
     )
     suspend fun perDay(since: Long, offset: Long): List<DayCount>
 
+    /** Answers to cards that were in review (not learning): their success rate is the true retention. */
     @Query(
         """
-        SELECT nt.fields AS fields, AVG(r.beauty) AS beauty, AVG(r.score) AS score, COUNT(*) AS n
-        FROM review_logs r JOIN cards c ON c.id = r.cardId JOIN notes nt ON nt.id = c.noteId
-        WHERE r.beauty IS NOT NULL AND c.deleted = 0 GROUP BY c.id ORDER BY beauty ASC LIMIT 12
+        SELECT COUNT(*) AS n, SUM(CASE WHEN rating > 1 THEN 1 ELSE 0 END) AS ok
+        FROM review_logs WHERE reviewedAt >= :since AND cardState = 'REVIEW'
         """,
     )
-    suspend fun weakestHandwriting(): List<CharStat>
+    suspend fun retention(since: Long): RetentionCount
 
     @Query("SELECT COUNT(*) FROM review_logs WHERE reviewedAt >= :since")
     fun observeCountSince(since: Long): Flow<Int>
+}
+
+@Dao
+interface CharScoreDao {
+    @Insert
+    suspend fun insert(rows: List<CharScoreEntity>)
+
+    @Query("DELETE FROM char_scores WHERE reviewLogId = :logId")
+    suspend fun deleteForLog(logId: String)
+
+    /** Latest handwriting results, newest first. */
+    @Query("SELECT * FROM char_scores WHERE beauty IS NOT NULL ORDER BY at DESC LIMIT :limit")
+    suspend fun recent(limit: Int = 5000): List<CharScoreEntity>
+
+    @Query("SELECT * FROM char_scores WHERE glyph = :glyph ORDER BY at DESC")
+    suspend fun forGlyph(glyph: String): List<CharScoreEntity>
+
+    @Query(
+        """
+        SELECT (at + :offset) / 86400000 AS day, AVG(beauty) AS beauty, COUNT(*) AS n
+        FROM char_scores WHERE beauty IS NOT NULL AND at >= :since GROUP BY day ORDER BY day
+        """,
+    )
+    suspend fun beautyPerDay(since: Long, offset: Long): List<DayBeauty>
+
+    @Query("SELECT COUNT(*) FROM char_scores")
+    fun observeCount(): Flow<Int>
 }
 
 @Dao

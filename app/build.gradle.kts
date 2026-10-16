@@ -1,8 +1,17 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.devtools.ksp")
 }
+
+// Release signing: WANKI_KEYSTORE, WANKI_KEYSTORE_PASSWORD, WANKI_KEY_ALIAS, WANKI_KEY_PASSWORD from
+// local.properties or the environment. Without them the release build is signed with the debug key.
+val localProps = Properties().apply {
+    rootProject.file("local.properties").takeIf { it.exists() }?.inputStream()?.use { load(it) }
+}
+fun secret(name: String): String? = localProps.getProperty(name) ?: System.getenv(name)
 
 android {
     namespace = "app.wanki"
@@ -17,9 +26,26 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        val store = secret("WANKI_KEYSTORE")
+        if (store != null) {
+            create("release") {
+                storeFile = file(store)
+                storePassword = secret("WANKI_KEYSTORE_PASSWORD")
+                keyAlias = secret("WANKI_KEY_ALIAS")
+                keyPassword = secret("WANKI_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
+            // phones and tablets are ARM; x86 libraries (emulators) stay in the debug build
+            ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
         }
     }
     compileOptions {
@@ -29,6 +55,8 @@ android {
     buildFeatures {
         compose = true
     }
+    // exported Room schemas, for migration tests
+    sourceSets.getByName("androidTest").assets.directories.add("$projectDir/schemas")
 }
 
 ksp {
@@ -59,6 +87,7 @@ dependencies {
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.room.testing)
 
     implementation(libs.androidx.ink.authoring)
     implementation(libs.androidx.ink.brush)
@@ -76,4 +105,10 @@ dependencies {
     // Anki .apkg (new format) is a zstd-compressed SQLite database; the AAR carries the Android JNI libs
     implementation("com.github.luben:zstd-jni:${libs.versions.zstd.get()}@aar")
     implementation(libs.kotlinx.coroutines.play.services)
+
+    constraints {
+        // room-testing reads schemas with serialization-json 1.8; test classpaths are pinned to the
+        // app's versions, so the app's (transitive) serialization-core must match it
+        implementation("org.jetbrains.kotlinx:kotlinx-serialization-core:1.8.1")
+    }
 }

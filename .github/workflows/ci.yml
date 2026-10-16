@@ -24,7 +24,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
 
       - name: Unit tests (JVM modules)
-        run: ./gradlew :core:scoring:test :core:ink:test --console=plain
+        run: ./gradlew :core:scoring:test :core:ink:test :core:srs:test --console=plain
 
       - name: Build debug APK and app unit tests
         run: ./gradlew :app:assembleDebug :app:testDebugUnitTest --console=plain

@@ -1,10 +1,11 @@
 package app.wanki.ui.stats
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -15,6 +16,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -27,17 +29,19 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import app.wanki.data.NoteEntity
 import app.wanki.data.Repository
 import app.wanki.graph
 import app.wanki.ui.common.ScreenHeader
 import app.wanki.ui.common.ui
+import app.wanki.ui.decks.DueColor
+import app.wanki.ui.decks.LearnColor
+import app.wanki.ui.decks.NewColor
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -46,7 +50,7 @@ import kotlin.math.max
 private val dayFormat = DateTimeFormatter.ofPattern("d MMM", Locale.forLanguageTag("ru"))
 
 @Composable
-fun StatsScreen(onBack: () -> Unit) {
+fun StatsScreen(onBack: () -> Unit, onPractice: () -> Unit = {}) {
     val graph = LocalContext.current.graph
     val stats by produceState<Repository.Stats?>(null) { value = ui { graph.repository.stats() } }
     Column(Modifier.fillMaxSize()) {
@@ -59,7 +63,9 @@ fun StatsScreen(onBack: () -> Unit) {
             Tiles(s)
             Section("Активность", "Повторения по дням за последние 20 недель") { Heatmap(s) }
             Section("Прогноз", "Сколько карточек придёт на повторение в ближайшие 30 дней") { Forecast(s) }
-            Section("Почерк", "Знаки с самым слабым почерком — их стоит потренировать") { Weakest(s) }
+            Section("Карточки", "Сколько карточек в каждом состоянии") { States(s) }
+            Section("Кривая почерка", "Средняя оценка почерка по неделям за полгода") { BeautyCurve(s) }
+            Section("Почерк", "Знаки с самым слабым почерком (по последним попыткам) — их стоит потренировать") { Weakest(s, onPractice) }
         }
     }
 }
@@ -84,10 +90,11 @@ private fun Tiles(s: Repository.Stats) {
     var d = if ((s.perDay[s.today]?.n ?: 0) > 0) s.today else s.today - 1
     while ((s.perDay[d]?.n ?: 0) > 0) { streak++; d-- }
     val cards = s.states.sumOf { it.n }
-    val fresh = s.states.filter { it.isNew }.sumOf { it.n }
+    val fresh = s.states.filter { it.isNew && !it.suspended }.sumOf { it.n }
     FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Tile("$today", "сегодня повторено")
         Tile(if (total30 > 0) "${ok30 * 100 / total30}%" else "—", "верных ответов за 30 дней")
+        Tile(s.retention?.let { "%.0f%%".format(it * 100) } ?: "—", "удержание за 30 дней" + if (s.retentionN > 0) " (${s.retentionN})" else "")
         Tile("$streak", "дней подряд")
         Tile("$cards", "карточек, из них новых $fresh")
     }
@@ -188,26 +195,88 @@ private fun Forecast(s: Repository.Stats) {
 }
 
 @Composable
-private fun Weakest(s: Repository.Stats) {
-    if (s.weakest.isEmpty()) {
+private fun States(s: Repository.Stats) {
+    val fresh = s.states.filter { it.isNew && !it.suspended }.sumOf { it.n }
+    val learning = s.states.filter { !it.isNew && !it.suspended && it.state != "REVIEW" }.sumOf { it.n }
+    val review = s.states.filter { !it.isNew && !it.suspended && it.state == "REVIEW" }.sumOf { it.n }
+    val suspended = s.states.filter { it.suspended }.sumOf { it.n }
+    val total = max(1, fresh + learning + review + suspended)
+    val parts = listOf(
+        Triple("Новые", fresh, NewColor), Triple("Изучаемые", learning, LearnColor),
+        Triple("Выученные", review, DueColor), Triple("Приостановленные", suspended, Color(0xFFB0A060)),
+    )
+    Canvas(Modifier.fillMaxWidth().height(18.dp)) {
+        var x = 0f
+        for ((_, n, c) in parts) {
+            val w = size.width * n / total
+            if (w > 0) drawRect(c, Offset(x, 0f), Size(w, size.height))
+            x += w
+        }
+    }
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        parts.forEach { (label, n, c) -> Text("$label: $n", color = c, style = MaterialTheme.typography.bodyMedium) }
+    }
+}
+
+/** Weekly average handwriting score (weeks start on Monday). */
+@Composable
+private fun BeautyCurve(s: Repository.Stats) {
+    val weeks = remember(s) {
+        s.beautyPerDay.groupBy { d -> LocalDate.ofEpochDay(d.day).let { it.toEpochDay() - (it.dayOfWeek.value - 1) } }
+            .map { (week, days) -> week to days.sumOf { it.beauty * it.n } / days.sumOf { it.n } }
+            .sortedBy { it.first }
+    }
+    if (weeks.size < 2) {
+        Text("Кривая появится, когда наберутся оценки почерка хотя бы за две недели.", style = MaterialTheme.typography.bodySmall)
+        return
+    }
+    val color = MaterialTheme.colorScheme.primary
+    val axis = MaterialTheme.colorScheme.outlineVariant
+    val target = MaterialTheme.colorScheme.tertiary
+    Canvas(Modifier.fillMaxWidth().height(140.dp)) {
+        val lo = 40.0
+        val hi = 100.0
+        fun y(v: Double) = (size.height * (1 - (v.coerceIn(lo, hi) - lo) / (hi - lo))).toFloat()
+        val first = weeks.first().first
+        val span = max(1L, weeks.last().first - first).toFloat()
+        fun x(week: Long) = size.width * (week - first) / span
+        drawLine(axis, Offset(0f, size.height), Offset(size.width, size.height), 1.dp.toPx())
+        drawLine(target, Offset(0f, y(75.0)), Offset(size.width, y(75.0)), 1.dp.toPx(),
+            pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(8f, 8f)))
+        for (i in 1 until weeks.size) {
+            drawLine(color, Offset(x(weeks[i - 1].first), y(weeks[i - 1].second)), Offset(x(weeks[i].first), y(weeks[i].second)), 2.dp.toPx())
+        }
+        weeks.forEach { (w, v) -> drawCircle(color, 3.dp.toPx(), Offset(x(w), y(v))) }
+    }
+    Text(
+        "Последняя неделя: %.0f · пунктир — 75, порог тренировки".format(weeks.last().second),
+        style = MaterialTheme.typography.bodySmall,
+    )
+}
+
+@Composable
+private fun Weakest(s: Repository.Stats, onPractice: () -> Unit) {
+    if (s.chars.isEmpty()) {
         Text("Пока нет данных: оценка почерка появляется после верных письменных ответов.", style = MaterialTheme.typography.bodySmall)
         return
     }
     Column {
         Row(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-            Text("Ответ", Modifier.weight(1f), style = MaterialTheme.typography.labelMedium)
+            Text("Знак", Modifier.weight(1f), style = MaterialTheme.typography.labelMedium)
             Text("Почерк", Modifier.weight(0.5f), style = MaterialTheme.typography.labelMedium)
             Text("Попыток", Modifier.weight(0.5f), style = MaterialTheme.typography.labelMedium)
         }
         HorizontalDivider()
-        s.weakest.forEach { w ->
-            val answer = w.fields.split(NoteEntity.FIELD_SEPARATOR).getOrElse(1) { "" }
+        s.chars.take(15).forEach { w ->
             Row(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-                Text(answer, Modifier.weight(1f), fontSize = 20.sp)
-                Text(w.beauty?.let { "%.0f".format(it) + if (it < 75) " ⚑" else "" } ?: "—", Modifier.weight(0.5f))
-                Text("${w.n}", Modifier.weight(0.5f))
+                Text(w.glyph, Modifier.weight(1f), fontSize = 20.sp)
+                Text("%.0f".format(w.average) + if (w.weak) " ⚑" else "", Modifier.weight(0.5f))
+                Text("${w.attempts}", Modifier.weight(0.5f))
             }
         }
-        Text("⚑ — ниже 75: в очередь тренировки почерка", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("⚑ — стабильно ниже 75: в очереди тренировки почерка", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (s.chars.any { it.weak }) {
+            OutlinedButton(onClick = onPractice, modifier = Modifier.padding(top = 8.dp)) { Text("Тренировать почерк") }
+        }
     }
 }

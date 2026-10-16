@@ -1,21 +1,23 @@
 package app.wanki
 
 import android.graphics.Bitmap
+import android.util.Log
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.down
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
-import androidx.compose.ui.test.junit4.createAndroidComposeRule
-import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.isRoot
+import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.moveTo
+import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipe
-import androidx.compose.ui.test.down
-import androidx.compose.ui.test.moveTo
 import androidx.compose.ui.test.up
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -43,8 +45,13 @@ class SmokeTest {
         // a dialog is a second window (root): save the screen and the dialog separately
         val roots = rule.onAllNodes(isRoot()).fetchSemanticsNodes().size
         for (i in 0 until roots) {
-            val bmp = rule.onAllNodes(isRoot())[i].captureToImage().asAndroidBitmap()
             val file = if (i == 0) "$name.png" else "$name-window$i.png"
+            // screenshots are evidence, not assertions: PixelCopy can time out on a busy emulator
+            val bmp = (1..3).firstNotNullOfOrNull {
+                runCatching { rule.onAllNodes(isRoot())[i].captureToImage().asAndroidBitmap() }
+                    .onFailure { e -> Log.w("WankiSmoke", "screenshot $file failed: ${e.message}"); rule.waitForIdle() }
+                    .getOrNull()
+            } ?: continue
             File(shotsDir, file).outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
         }
     }
@@ -93,6 +100,36 @@ class SmokeTest {
         rule.onNode(hasText("Статистика")).performClick()
         rule.waitUntilAtLeastOneExists(hasText("Прогноз"), 10_000)
         shot("05b-stats")
+        back()
+
+        // Card browser: search, open a card in the editor
+        rule.onNode(hasText("Поиск")).performClick()
+        rule.waitUntilAtLeastOneExists(hasTestTag("card-search"), 10_000)
+        rule.onNode(hasTestTag("card-search")).performTextInput("日")
+        rule.waitUntilAtLeastOneExists(hasText("Япония"), 10_000)
+        shot("05c-browser")
+        rule.onNode(hasText("Япония")).performClick()
+        rule.waitUntilAtLeastOneExists(hasText("История ответов"), 10_000)
+        shot("05d-card-editor")
+        back()
+        back()
+
+        // A deck with its cards, then its settings
+        rule.onNode(hasText("Хирагана (демо)")).performClick()
+        rule.waitUntilAtLeastOneExists(hasTestTag("deck-options"), 10_000)
+        shot("05e-deck")
+        rule.onNode(hasTestTag("deck-options")).performClick()
+        rule.waitUntilAtLeastOneExists(hasText("Лимиты на день"), 10_000)
+        shot("05f-deck-options")
+        back()
+        back()
+
+        // Handwriting practice from the menu (the queue may be empty on a fresh install)
+        rule.onNode(hasText("⋮")).performClick()
+        rule.onNode(hasText("Тренировка почерка")).performClick()
+        rule.waitUntilAtLeastOneExists(hasText("Тренировка почерка"), 10_000)
+        rule.waitForIdle()
+        shot("05g-practice")
         back()
 
         // Notebook: create, write on the page
@@ -153,7 +190,7 @@ class SmokeTest {
 
         tab("Настройки")
         shot("12-settings")
-        rule.onNode(hasText("Лаборатория письма (подробный разбор оценки)")).performClick()
+        rule.onNode(hasText("Лаборатория письма (подробный разбор оценки)")).performScrollTo().performClick()
         rule.waitForIdle()
         shot("13-lab")
     }

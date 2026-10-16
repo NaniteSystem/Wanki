@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationRail
@@ -17,8 +18,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import app.wanki.practice.PracticeScreen
 import app.wanki.ui.board.BoardScreen
 import app.wanki.ui.board.BoardsScreen
+import app.wanki.ui.browser.BrowserScreen
+import app.wanki.ui.browser.CardEditorScreen
+import app.wanki.ui.decks.DeckOptionsScreen
 import app.wanki.ui.decks.DeckScreen
 import app.wanki.ui.decks.DecksScreen
 import app.wanki.ui.diary.DiaryDayScreen
@@ -35,7 +40,12 @@ import app.wanki.writing.WritingTestScreen
 sealed interface Route {
     data object Decks : Route
     data class Deck(val id: String) : Route
+    data class DeckOptions(val id: String) : Route
     data class Review(val deckId: String) : Route
+    data object Browser : Route
+    data class CardEditor(val id: String) : Route
+    /** Handwriting practice: the weak-character queue, or one [glyph]. */
+    data class Practice(val glyph: String? = null, val language: String = "ja") : Route
     data object Notebooks : Route
     data class Notebook(val id: String, val pageId: String? = null) : Route
     data object Notes : Route
@@ -80,7 +90,8 @@ fun MainShell() {
         val wide = maxWidth >= 600.dp
         // Screens pushed on top of a tab (review, a page) take the whole screen; tab roots keep the bar.
         val immersive = nav.stack.size > 1 &&
-            (nav.current is Route.Review || nav.current is Route.Notebook || nav.current is Route.DiaryDay || nav.current is Route.Board)
+            (nav.current is Route.Review || nav.current is Route.Practice || nav.current is Route.Notebook ||
+                nav.current is Route.DiaryDay || nav.current is Route.Board)
         if (wide) {
             Row(Modifier.fillMaxSize()) {
                 NavigationRail {
@@ -107,7 +118,7 @@ fun MainShell() {
                                 selected = nav.root == t.route,
                                 onClick = { nav.switchTab(t.route) },
                                 icon = { Text(t.glyph) },
-                                label = { Text(t.label, maxLines = 1) },
+                                label = { Text(t.label, maxLines = 1, softWrap = false, style = MaterialTheme.typography.labelSmall) },
                             )
                         }
                     }
@@ -120,10 +131,27 @@ fun MainShell() {
 @Composable
 private fun Content(nav: Navigator) {
     when (val r = nav.current) {
-        Route.Decks -> DecksScreen(onOpen = { nav.open(Route.Deck(it)) }, onStudy = { nav.open(Route.Review(it)) }, onStats = { nav.open(Route.Stats) })
-        Route.Stats -> StatsScreen(onBack = { nav.back() })
-        is Route.Deck -> DeckScreen(r.id, onBack = { nav.back() }, onStudy = { nav.open(Route.Review(r.id)) })
+        Route.Decks -> DecksScreen(
+            onOpen = { nav.open(Route.Deck(it)) },
+            onStudy = { nav.open(Route.Review(it)) },
+            onStats = { nav.open(Route.Stats) },
+            onBrowse = { nav.open(Route.Browser) },
+            onPractice = { nav.open(Route.Practice()) },
+        )
+        Route.Stats -> StatsScreen(onBack = { nav.back() }, onPractice = { nav.open(Route.Practice()) })
+        is Route.Deck -> DeckScreen(
+            r.id,
+            onBack = { nav.back() },
+            onStudy = { nav.open(Route.Review(it)) },
+            onOpenDeck = { nav.open(Route.Deck(it)) },
+            onOptions = { nav.open(Route.DeckOptions(r.id)) },
+            onOpenCard = { nav.open(Route.CardEditor(it)) },
+        )
+        is Route.DeckOptions -> DeckOptionsScreen(r.id, onBack = { nav.back() }, onDeleted = { nav.back() })
         is Route.Review -> ReviewScreen(r.deckId, onClose = { nav.back() })
+        Route.Browser -> BrowserScreen(onBack = { nav.back() }, onOpenCard = { nav.open(Route.CardEditor(it)) })
+        is Route.CardEditor -> CardEditorScreen(r.id, onBack = { nav.back() }, onPractice = { g, lang -> nav.open(Route.Practice(g, lang)) })
+        is Route.Practice -> PracticeScreen(r.glyph, r.language, onBack = { nav.back() })
         Route.Notebooks -> NotebooksScreen(onOpen = { id, page -> nav.open(Route.Notebook(id, page)) })
         is Route.Notebook -> NotebookScreen(r.id, r.pageId, onBack = { nav.back() })
         Route.Notes -> NotesScreen(onOpen = { nav.open(Route.Note(it)) })

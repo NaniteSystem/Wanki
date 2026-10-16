@@ -2,17 +2,21 @@ package app.wanki
 
 import android.app.Application
 import android.content.Context
+import app.wanki.data.Backup
 import app.wanki.data.Repository
 import app.wanki.data.Settings
 import app.wanki.data.WankiDatabase
 import app.wanki.recognition.RecognizerPool
+import app.wanki.recognition.Speaker
 import app.wanki.recognition.TextRecognition
 import app.wanki.recognition.TranslationService
 import app.wanki.refs.ReferenceRepository
+import app.wanki.reminders.Reminders
 import app.wanki.review.AnswerGrader
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 /** Manual dependency container: one instance per process. */
 class AppGraph(context: Context) {
@@ -26,6 +30,8 @@ class AppGraph(context: Context) {
     val grader = AnswerGrader(references, recognizers, settings)
     val textRecognition = TextRecognition(recognizers, settings)
     val translation = TranslationService(textRecognition)
+    val speaker = Speaker(context)
+    val backup = Backup(context, db, settings)
 }
 
 class WankiApp : Application() {
@@ -35,6 +41,8 @@ class WankiApp : Application() {
     override fun onCreate() {
         super.onCreate()
         graph = AppGraph(this)
+        Reminders.schedule(this)
+        graph.appScope.launch { runCatching { graph.backup.autoBackupIfDue() } }
     }
 }
 

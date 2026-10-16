@@ -9,8 +9,10 @@ Plan and decisions: `docs/PLAN.md` (Russian). The user writes in Russian.
 - `core/ink` (JVM) — stroke model, `InkCodec` binary format, `LineSegmenter`, pen `Gestures`.
 - `core/srs` (JVM) — FSRS-6 port of py-fsrs, verified against reference data in tests.
 - `app` (Android, Compose, Room, androidx.ink, ML Kit Digital Ink / Language ID / Translate).
-  Packages: `input` (canvas + touch handling), `data` (Room), `recognition`, `review`,
-  `importer` (Anki .apkg), `ui/*` screens, `writing` (writing lab, review drawing).
+  Packages: `input` (canvas + touch handling), `data` (Room, `DeckTree` limits, `CardQuery` search,
+  `Backup`), `recognition` (ML Kit, TTS `Speaker`), `review`, `practice` (weak-character queue and
+  handwriting practice), `reminders`, `importer` (Anki .apkg, CSV/TSV), `ui/*` screens (`browser` =
+  card browser + editor), `writing` (writing lab, review drawing).
 
 ## Build & test
 ```
@@ -30,7 +32,15 @@ classpath (see build.gradle.kts) so AGP and KGP share a classloader.
 - Scoring rules agreed with the user: <60% = Again; missing/extra stroke = wrong unless it is
   handwriting style or the recognizer's first candidate is the target; handwriting quality never
   affects FSRS ratings.
-- Room schema changes need a migration (`WankiDatabase`), never destructive fallback.
+- Room schema changes need a migration (`WankiDatabase`), never destructive fallback. Schemas are
+  exported to `app/schemas` (commit them); `MigrationTest` checks each migration on a real SQLite.
+- Daily limits follow Anki: a deck's limit caps its whole subtree, learning cards are unlimited; the
+  card state before a review is logged (`cardState`) to count today's new/review cards.
+- Handwriting results are stored per character (`char_scores`); a character is "weak" when the
+  average beauty of its last 5 attempts is below 75. Practice never touches FSRS.
+- Writing canvases stay paper-colored (`WritingPaper`) in the dark theme.
+- Release builds use R8: anything found by reflection needs a keep rule (`app/proguard-rules.pro`).
+- Instrumented tests: run one emulator at a time locally (two at once make Compose screenshots flaky).
 
 ## CI
 GitHub Actions builds, runs tests, uploads the debug APK (`wanki-debug-apk`) and runs the smoke

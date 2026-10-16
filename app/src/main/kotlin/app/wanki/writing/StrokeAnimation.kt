@@ -64,6 +64,7 @@ fun StrokeOrderAnimation(ref: CharReference, modifier: Modifier = Modifier, stro
     }
     Canvas(modifier.clickable { restart++ }) {
         val cell = Cell(0f, 0f, min(size.width, size.height))
+        drawRect(WritingPaper, size = androidx.compose.ui.geometry.Size(cell.side, cell.side))
         drawTianzige(cell)
         drawReference(ref, cell, ReviewColors.reference)
         val width = 3f * (cell.side / ref.size.toFloat()) * 1.6f
