@@ -35,7 +35,10 @@ data class DeckEntity(
     val catalogVersion: String? = null,
 )
 
-/** Anki-compatible: fields are joined with 0x1F. Only the "basic" note type for now. */
+/**
+ * Anki-compatible: fields are joined with 0x1F. [noteTypeId] is "basic" (question, answer) or a
+ * [NoteTypeEntity] imported from Anki.
+ */
 @Entity(tableName = "notes")
 data class NoteEntity(
     @PrimaryKey val id: String = newId(),
@@ -53,6 +56,22 @@ data class NoteEntity(
             NoteEntity(fields = front + FIELD_SEPARATOR + back, tags = tags)
     }
 }
+
+/** A note type imported from Anki: field names and card templates (see app.wanki.anki.NoteType). */
+@Entity(tableName = "note_types")
+data class NoteTypeEntity(
+    @PrimaryKey val id: String,
+    val name: String,
+    /** JSON array of field names. */
+    val fields: String,
+    /** JSON array of {"name", "q", "a"}. */
+    val templates: String,
+    /** STANDARD or CLOZE. */
+    val kind: String,
+    val css: String = "",
+    val updatedAt: Long = System.currentTimeMillis(),
+    val deleted: Boolean = false,
+)
 
 @Entity(tableName = "cards", indices = [Index("deckId"), Index("noteId"), Index("due")])
 data class CardEntity(

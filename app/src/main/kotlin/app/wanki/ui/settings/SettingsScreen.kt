@@ -140,8 +140,8 @@ fun SettingsScreen(onOpenLab: () -> Unit) {
             HorizontalDivider()
             Text("Резервная копия", style = MaterialTheme.typography.titleMedium)
             Text(
-                "Копия содержит колоды, карточки, историю ответов, почерк, тетради, заметки и настройки. " +
-                    "Раз в день приложение само делает копию (хранятся последние ${Backup.KEEP}).",
+                "Копия содержит колоды, карточки, историю ответов, почерк, тетради, заметки, настройки и " +
+                    "медиафайлы карточек. Раз в день приложение само делает копию без медиафайлов (хранятся последние ${Backup.KEEP}).",
                 style = MaterialTheme.typography.bodySmall,
             )
             if (s.lastBackupAt > 0) {

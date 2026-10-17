@@ -76,7 +76,16 @@ class MigrationTest {
         }
     }
 
+    @Test
+    fun migrate4To5AddsNoteTypes() {
+        helper.createDatabase(DB5, 4).close()
+        val db = helper.runMigrationsAndValidate(DB5, 5, true, WankiDatabase.MIGRATION_4_5)
+        db.execSQL("INSERT INTO note_types VALUES ('anki-1', 'Basic', '[]', '[]', 'STANDARD', '', 0, 0)")
+        db.query("SELECT COUNT(*) FROM note_types").use { c -> c.moveToFirst(); assertEquals(1, c.getInt(0)) }
+    }
+
     private companion object {
+        const val DB5 = "migration-test-5"
         const val DB4 = "migration-test-4"
         const val DB = "migration-test"
     }

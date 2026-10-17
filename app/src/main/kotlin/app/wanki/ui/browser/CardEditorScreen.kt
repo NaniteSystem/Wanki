@@ -27,6 +27,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -41,10 +42,14 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import app.wanki.anki.CardRenderer
+import app.wanki.anki.NoteKind
+import app.wanki.anki.NoteType
 import app.wanki.data.AnswerMode
 import app.wanki.data.CardWithNote
 import app.wanki.data.DeckTree
 import app.wanki.data.InkAttemptEntity
+import app.wanki.data.NoteEntity
 import app.wanki.data.ReviewLogEntity
 import app.wanki.graph
 import app.wanki.ink.InkCodec
@@ -70,17 +75,23 @@ fun CardEditorScreen(cardId: String, onBack: () -> Unit, onPractice: (String, St
     val graph = LocalContext.current.graph
     val card by remember(cardId) { graph.repository.observeCard(cardId) }.collectAsState(null)
     val tree by remember { graph.repository.observeDeckTree() }.collectAsState(null)
+    val type by produceState<NoteType?>(null, card?.note?.noteTypeId) {
+        value = card?.note?.noteTypeId?.let { ui { graph.repository.noteType(it) } }
+    }
     val c = card ?: return
     val t = tree ?: return
-    CardEditor(c, t, onBack, onPractice)
+    CardEditor(c, type ?: return, t, onBack, onPractice)
 }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun CardEditor(c: CardWithNote, tree: DeckTree, onBack: () -> Unit, onPractice: (String, String) -> Unit) {
+private fun CardEditor(c: CardWithNote, type: NoteType, tree: DeckTree, onBack: () -> Unit, onPractice: (String, String) -> Unit) {
     val graph = LocalContext.current.graph
-    var front by remember(c.card.id) { mutableStateOf(c.note.field(0)) }
-    var back by remember(c.card.id) { mutableStateOf(c.note.field(1)) }
+    val original = remember(c.note.fields, type) {
+        val v = c.note.fields.split(NoteEntity.FIELD_SEPARATOR)
+        List(maxOf(v.size, type.fields.size)) { v.getOrElse(it) { "" } }
+    }
+    val values = remember(c.card.id, original) { mutableStateListOf(*original.toTypedArray()) }
     var tags by remember(c.card.id) { mutableStateOf(c.note.tags) }
     var deckId by remember(c.card.id) { mutableStateOf(c.card.deckId) }
     var mode by remember(c.card.id) { mutableStateOf(AnswerMode.valueOf(c.card.answerMode)) }
@@ -90,18 +101,18 @@ private fun CardEditor(c: CardWithNote, tree: DeckTree, onBack: () -> Unit, onPr
     val history by produceState(emptyList<Pair<ReviewLogEntity, InkAttemptEntity?>>(), c.card.reps, c.card.updatedAt) {
         value = ui { graph.repository.cardHistory(c.card.id) }
     }
-    val dirty = front != c.note.field(0) || back != c.note.field(1) || tags != c.note.tags || deckId != c.card.deckId ||
+    val dirty = values.toList() != original || tags != c.note.tags || deckId != c.card.deckId ||
         mode.name != c.card.answerMode || writeOrd != c.card.writeFieldOrd
+    val valid = values.any { it.isNotBlank() }
 
     fun saveAndClose() {
-        if (dirty && front.isNotBlank() && back.isNotBlank()) {
-            val f = front
-            val b = back
+        if (dirty && valid) {
+            val f = values.toList()
             val tg = tags
             val d = deckId
             val m = mode
             val w = writeOrd
-            graph.appScope.launch { graph.repository.saveCard(c, f, b, tg, d, m, w) }
+            graph.appScope.launch { graph.repository.saveCard(c, f, tg, d, m, w) }
         }
         onBack()
     }
@@ -109,14 +120,20 @@ private fun CardEditor(c: CardWithNote, tree: DeckTree, onBack: () -> Unit, onPr
 
     Column(Modifier.fillMaxSize()) {
         ScreenHeader("Карточка", onBack = ::saveAndClose, subtitle = tree.title(deckId)) {
-            Button(onClick = ::saveAndClose, enabled = front.isNotBlank() && back.isNotBlank()) { Text(if (dirty) "Сохранить" else "Готово") }
+            Button(onClick = ::saveAndClose, enabled = valid) { Text(if (dirty) "Сохранить" else "Готово") }
         }
         Column(
             Modifier.verticalScroll(rememberScrollState()).padding(16.dp).widthIn(max = 720.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            OutlinedTextField(front, { front = it }, label = { Text("Вопрос") }, modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(back, { back = it }, label = { Text("Ответ") }, modifier = Modifier.fillMaxWidth())
+            if (!type.isBasic) Text("Тип заметки: ${type.name}", style = MaterialTheme.typography.labelMedium)
+            values.indices.forEach { i ->
+                OutlinedTextField(
+                    values[i], { values[i] = it },
+                    label = { Text(type.fields.getOrElse(i) { "Поле ${i + 1}" }) },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
             OutlinedTextField(tags, { tags = it }, label = { Text("Теги через пробел") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Колода: " + tree.title(deckId), Modifier.weight(1f))
@@ -125,13 +142,21 @@ private fun CardEditor(c: CardWithNote, tree: DeckTree, onBack: () -> Unit, onPr
             Text("Как отвечать", style = MaterialTheme.typography.titleSmall)
             ModeChips(mode) { mode = it }
             if (mode == AnswerMode.HANDWRITING) {
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Писать:")
-                    FilterChip(writeOrd == 1, { writeOrd = 1 }, { Text("ответ") })
-                    FilterChip(writeOrd == 0, { writeOrd = 0 }, { Text("вопрос") })
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Писать:", Modifier.align(Alignment.CenterVertically))
+                    if (type.isBasic) {
+                        FilterChip(writeOrd == 1, { writeOrd = 1 }, { Text("ответ") })
+                        FilterChip(writeOrd == 0, { writeOrd = 0 }, { Text("вопрос") })
+                    } else if (type.kind != NoteKind.CLOZE) {
+                        type.fields.forEachIndexed { i, name -> FilterChip(writeOrd == i, { writeOrd = i }, { Text(name) }) }
+                    } else {
+                        Text("пропуски cloze", Modifier.align(Alignment.CenterVertically))
+                    }
                 }
                 val language = tree.byId[deckId]?.language ?: "ja"
-                ReferenceInfo(if (writeOrd == 0) front else back, language) { ch -> onPractice(ch, language) }
+                val edited = c.note.copy(fields = values.joinToString(NoteEntity.FIELD_SEPARATOR.toString()))
+                val written = CardRenderer.render(type, edited, c.card.templateOrd, writeOrd).writeAnswer
+                ReferenceInfo(written, language) { ch -> onPractice(ch, language) }
             }
             HorizontalDivider()
             Schedule(c)

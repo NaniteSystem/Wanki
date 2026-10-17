@@ -2,6 +2,9 @@ package app.wanki.data
 
 import androidx.room.withTransaction
 import androidx.sqlite.db.SimpleSQLiteQuery
+import app.wanki.anki.CardContent
+import app.wanki.anki.CardRenderer
+import app.wanki.anki.NoteType
 import app.wanki.catalog.CatalogDeck
 import app.wanki.catalog.CatalogRow
 import app.wanki.ink.InkCodec
@@ -168,18 +171,64 @@ class Repository(private val db: WankiDatabase) {
         }
     }
 
-    /** Saves the card editor: note fields and tags, deck, answer mode and which side is written. */
-    suspend fun saveCard(c: CardWithNote, front: String, back: String, tags: String, deckId: String, mode: AnswerMode, writeFieldOrd: Int) {
+    /** Saves the card editor: note fields and tags, deck, answer mode and which field is written. */
+    suspend fun saveCard(c: CardWithNote, fields: List<String>, tags: String, deckId: String, mode: AnswerMode, writeFieldOrd: Int) {
         val now = System.currentTimeMillis()
-        val fields = c.note.fields.split(NoteEntity.FIELD_SEPARATOR).toMutableList()
-        while (fields.size < 2) fields += ""
-        fields[0] = front.trim()
-        fields[1] = back.trim()
+        val values = c.note.fields.split(NoteEntity.FIELD_SEPARATOR).toMutableList()
+        fields.forEachIndexed { i, f -> if (i < values.size) values[i] = f.trim() else values += f.trim() }
+        while (values.size < 2) values += ""
         db.withTransaction {
-            notes.upsert(c.note.copy(fields = fields.joinToString(NoteEntity.FIELD_SEPARATOR.toString()), tags = tags.trim(), updatedAt = now))
+            notes.upsert(c.note.copy(fields = values.joinToString(NoteEntity.FIELD_SEPARATOR.toString()), tags = tags.trim(), updatedAt = now))
             cards.upsert(c.card.copy(deckId = deckId, answerMode = mode.name, writeFieldOrd = writeFieldOrd, updatedAt = now))
         }
     }
+
+    /** Basic cards: question and answer. */
+    suspend fun saveCard(c: CardWithNote, front: String, back: String, tags: String, deckId: String, mode: AnswerMode, writeFieldOrd: Int) =
+        saveCard(c, listOf(front, back), tags, deckId, mode, writeFieldOrd)
+
+    // --- note types and imported collections -----------------------------------------------------
+
+    @Volatile
+    private var noteTypeCache: Map<String, NoteType>? = null
+
+    /** Every note type by id, the built-in basic one included. */
+    suspend fun noteTypes(): Map<String, NoteType> = noteTypeCache
+        ?: (db.noteTypes().all().map(NoteType::from) + NoteType.BASIC).associateBy { it.id }.also { noteTypeCache = it }
+
+    suspend fun noteType(id: String): NoteType = noteTypes()[id] ?: NoteType.BASIC
+
+    /** What the card shows and what is written for it. */
+    suspend fun content(c: CardWithNote, deckPath: String = ""): CardContent =
+        CardRenderer.render(noteType(c.note.noteTypeId), c.note, c.card.templateOrd, c.card.writeFieldOrd, deckPath)
+
+    suspend fun saveNoteTypes(types: List<NoteType>) {
+        db.noteTypes().upsertAll(types.map { it.toEntity() })
+        noteTypeCache = null
+    }
+
+    data class ImportWritten(val cardsAdded: Int, val notesUpdated: Int, val reviews: Int)
+
+    /**
+     * Writes one batch of an import. Cards already here are left alone with their schedule and
+     * history (importing the same collection twice changes nothing); a note is refreshed only when
+     * the incoming copy is newer than the local one, so local edits survive.
+     */
+    suspend fun writeImported(newNotes: List<NoteEntity>, newCards: List<CardEntity>, newLogs: List<ReviewLogEntity>): ImportWritten =
+        db.withTransaction {
+            val existingNotes = newNotes.map { it.id }.chunked(500).flatMap { notes.getAll(it) }.associateBy { it.id }
+            val existingCards = newCards.map { it.id }.chunked(500).flatMap { cards.existing(it) }.toSet()
+            val noteWrites = newNotes.filter { n -> existingNotes[n.id].let { it == null || n.updatedAt > it.updatedAt } }
+            val cardWrites = newCards.filter { it.id !in existingCards }
+            val added = cardWrites.map { it.id }.toSet()
+            val logWrites = newLogs.filter { it.cardId in added }
+            noteWrites.chunked(500).forEach { notes.upsertAll(it) }
+            cardWrites.chunked(500).forEach { cards.upsertAll(it) }
+            logWrites.chunked(500).forEach { reviews.insertAll(it) }
+            ImportWritten(cardWrites.size, noteWrites.count { it.id in existingNotes }, logWrites.size)
+        }
+
+    suspend fun maxCardPosition(): Long = cards.maxPosition()
 
     suspend fun setAnswerMode(card: CardEntity, mode: AnswerMode) =
         cards.upsert(card.copy(answerMode = mode.name, updatedAt = System.currentTimeMillis()))

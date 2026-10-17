@@ -5,6 +5,7 @@ import android.content.Intent
 import android.database.sqlite.SQLiteDatabase
 import android.net.Uri
 import android.os.Build
+import app.wanki.media.MediaStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -18,7 +19,8 @@ import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
 
 /**
- * Backups: a zip with a consistent copy of the database, the settings and a manifest. Restoring
+ * Backups: a zip with a consistent copy of the database, the settings, the media folder (pictures
+ * and sounds of imported cards) and a manifest. Restoring
  * checks the archive first, then swaps the database files and restarts the app (Room migrates
  * an older database on open). Automatic copies go to files/backups, one a day, the last [KEEP].
  */
@@ -26,6 +28,7 @@ class Backup(private val context: Context, private val db: WankiDatabase, privat
     data class Info(val file: File, val at: Long, val size: Long)
 
     val dir: File get() = File(context.filesDir, "backups").apply { mkdirs() }
+    private val mediaDir: File get() = File(context.filesDir, MediaStore.DIR)
 
     fun autoBackups(): List<Info> =
         dir.listFiles { f -> f.name.endsWith(".zip") }.orEmpty()
@@ -34,7 +37,7 @@ class Backup(private val context: Context, private val db: WankiDatabase, privat
 
     suspend fun exportTo(uri: Uri) = withContext(Dispatchers.IO) {
         val out = context.contentResolver.openOutputStream(uri) ?: error("Не удалось создать файл")
-        out.use { write(it) }
+        out.use { write(it, includeMedia = true) }
         settings.lastBackupAt = System.currentTimeMillis()
     }
 
@@ -44,14 +47,15 @@ class Backup(private val context: Context, private val db: WankiDatabase, privat
         if (db.decks().count() == 0) return@withContext
         val name = "wanki-" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmm")) + ".zip"
         val tmp = File(dir, "$name.part")
-        tmp.outputStream().use { write(it) }
+        // daily copies leave the media out (they stay in place when such a copy is restored)
+        tmp.outputStream().use { write(it, includeMedia = false) }
         tmp.renameTo(File(dir, name))
         settings.lastBackupAt = now
         autoBackups().drop(KEEP).forEach { it.file.delete() }
     }
 
     /** Writes the backup archive. */
-    fun write(out: OutputStream) {
+    fun write(out: OutputStream, includeMedia: Boolean = true) {
         val snapshot = snapshot()
         try {
             ZipOutputStream(out.buffered()).use { zip ->
@@ -71,13 +75,22 @@ class Backup(private val context: Context, private val db: WankiDatabase, privat
                 zip.putNextEntry(ZipEntry(SETTINGS_ENTRY))
                 zip.write(settingsJson().toString(2).toByteArray())
                 zip.closeEntry()
+                if (includeMedia) mediaDir.listFiles { f -> f.isFile && !f.name.endsWith(".part") }.orEmpty().forEach { f ->
+                    zip.putNextEntry(ZipEntry(MEDIA_PREFIX + f.name))
+                    f.inputStream().use { it.copyTo(zip) }
+                    zip.closeEntry()
+                }
             }
         } finally {
             snapshot.delete()
         }
     }
 
-    data class Checked(val dbFile: File, val dbVersion: Int, val createdAt: Long, val cards: Int, val settings: JSONObject?)
+    data class Checked(
+        val dbFile: File, val dbVersion: Int, val createdAt: Long, val cards: Int, val settings: JSONObject?,
+        /** Media files of the backup (null for backups made before media were included). */
+        val media: File?,
+    )
 
     /** Unpacks and validates an archive without touching the current data. */
     suspend fun check(input: InputStream): Checked = withContext(Dispatchers.IO) {
@@ -85,13 +98,20 @@ class Backup(private val context: Context, private val db: WankiDatabase, privat
         var manifest: JSONObject? = null
         var prefs: JSONObject? = null
         val dbFile = File(work, "wanki.db")
+        val media = File(work, "media")
+        var hasMedia = false
         ZipInputStream(input.buffered()).use { zip ->
             while (true) {
                 val e = zip.nextEntry ?: break
-                when (e.name) {
-                    MANIFEST -> manifest = JSONObject(zip.readBytes().toString(Charsets.UTF_8))
-                    SETTINGS_ENTRY -> prefs = JSONObject(zip.readBytes().toString(Charsets.UTF_8))
-                    DB_ENTRY -> dbFile.outputStream().use { zip.copyTo(it) }
+                when {
+                    e.name == MANIFEST -> manifest = JSONObject(zip.readBytes().toString(Charsets.UTF_8))
+                    e.name == SETTINGS_ENTRY -> prefs = JSONObject(zip.readBytes().toString(Charsets.UTF_8))
+                    e.name == DB_ENTRY -> dbFile.outputStream().use { zip.copyTo(it) }
+                    e.name.startsWith(MEDIA_PREFIX) && !e.isDirectory -> {
+                        media.mkdirs()
+                        hasMedia = true
+                        File(media, MediaStore.safeName(e.name.removePrefix(MEDIA_PREFIX))).outputStream().use { zip.copyTo(it) }
+                    }
                 }
             }
         }
@@ -102,7 +122,7 @@ class Backup(private val context: Context, private val db: WankiDatabase, privat
             val version = sdb.version
             if (version < 1 || version > DB_VERSION) error("Копия сделана более новой версией Wanki (схема $version)")
             val cards = sdb.rawQuery("SELECT COUNT(*) FROM cards WHERE deleted = 0", null).use { c -> c.moveToFirst(); c.getInt(0) }
-            Checked(dbFile, version, m.optLong("createdAt"), cards, prefs)
+            Checked(dbFile, version, m.optLong("createdAt"), cards, prefs, media.takeIf { hasMedia })
         }
     }
 
@@ -113,6 +133,10 @@ class Backup(private val context: Context, private val db: WankiDatabase, privat
         for (suffix in listOf("", "-wal", "-shm", "-journal")) File(target.path + suffix).delete()
         checked.dbFile.copyTo(target, overwrite = true)
         checked.settings?.let(::restoreSettings)
+        checked.media?.let { from ->
+            mediaDir.deleteRecursively()
+            from.copyRecursively(mediaDir, overwrite = true)
+        }
         val launch = context.packageManager.getLaunchIntentForPackage(context.packageName)!!
         context.startActivity(Intent.makeRestartActivityTask(launch.component).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         Runtime.getRuntime().exit(0)
@@ -180,6 +204,7 @@ class Backup(private val context: Context, private val db: WankiDatabase, privat
         private const val MANIFEST = "manifest.json"
         private const val DB_ENTRY = "wanki.db"
         private const val SETTINGS_ENTRY = "settings.json"
+        private const val MEDIA_PREFIX = "media/"
         const val DB_VERSION = WankiDatabase.VERSION
     }
 }

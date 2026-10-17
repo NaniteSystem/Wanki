@@ -58,6 +58,7 @@ import app.wanki.ui.common.MenuButton
 import app.wanki.ui.common.ScreenHeader
 import app.wanki.ui.common.languageName
 import app.wanki.ui.common.ui
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 val NewColor = Color(0xFF1E5BD8)
@@ -92,8 +93,22 @@ fun DecksScreen(
         if (uri != null) {
             importStatus = "Импорт…"
             graph.appScope.launch {
-                importStatus = runCatching { AnkiImporter(context, graph.repository).import(uri) }.fold(
-                    { r -> "Импортировано: колод ${r.decks}, карточек ${r.cards}" + if (r.skipped > 0) " (пропущено ${r.skipped} без ответа)" else "" },
+                var running = true
+                val result = runCatching {
+                    AnkiImporter(context, graph.repository, graph.media).import(uri) { msg ->
+                        // progress comes from the import thread; a late message must not hide the result
+                        graph.appScope.launch(Dispatchers.Main) { if (running) importStatus = msg }
+                    }
+                }
+                running = false
+                importStatus = result.fold(
+                    { r ->
+                        "Импортировано: колод ${r.decks}, заметок ${r.notes}, новых карточек ${r.cards}" +
+                            (if (r.reviews > 0) ", повторений из истории ${r.reviews}" else "") +
+                            (if (r.media > 0) ", медиафайлов ${r.media}" else "") +
+                            (if (r.cards == 0 && r.notes > 0) ". Эти карточки уже были импортированы раньше." else "") +
+                            if (r.skipped > 0) " (пропущено ${r.skipped})" else ""
+                    },
                     { e -> "Не удалось импортировать: ${e.message ?: e.javaClass.simpleName}" },
                 )
                 now = System.currentTimeMillis()

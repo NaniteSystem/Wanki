@@ -61,9 +61,15 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.wanki.AppGraph
+import app.wanki.anki.CardBlock
+import app.wanki.anki.CardContent
+import app.wanki.anki.CardRenderer
+import app.wanki.anki.NoteType
 import app.wanki.data.AnswerMode
 import app.wanki.data.CardWithNote
 import app.wanki.data.DeckEntity
+import app.wanki.data.DeckTree
+import app.wanki.data.NoteEntity
 import app.wanki.data.Repository
 import app.wanki.graph
 import app.wanki.input.InkLayer
@@ -76,6 +82,7 @@ import app.wanki.scoring.FailReason
 import app.wanki.scoring.RatingPolicy
 import app.wanki.srs.FsrsScheduler
 import app.wanki.srs.Rating
+import app.wanki.ui.common.CardBlocks
 import app.wanki.ui.common.MenuButton
 import app.wanki.ui.common.rememberUiScope
 import app.wanki.ui.common.ui
@@ -100,6 +107,9 @@ class ReviewState(private val graph: AppGraph, private val deckId: String) {
         private set
     /** Every deck by id: cards of subdecks are answered in their own deck's language. */
     private var decks: Map<String, DeckEntity> = emptyMap()
+    private var tree: DeckTree? = null
+    private var types: Map<String, NoteType> = mapOf(NoteType.BASIC.id to NoteType.BASIC)
+    private val contentCache = HashMap<String, CardContent>()
     val queue = mutableStateListOf<CardWithNote>()
     var loaded by mutableStateOf(false)
         private set
@@ -135,13 +145,26 @@ class ReviewState(private val graph: AppGraph, private val deckId: String) {
     val mode: AnswerMode
         get() = current?.card?.answerMode?.let { runCatching { AnswerMode.valueOf(it) }.getOrNull() } ?: AnswerMode.CLASSIC
 
-    val answer: String get() = current?.let { it.note.field(it.card.writeFieldOrd) }.orEmpty()
-    val question: String get() = current?.let { it.note.field(if (it.card.writeFieldOrd == 0) 1 else 0) }.orEmpty()
+    val noteType: NoteType get() = current?.let { types[it.note.noteTypeId] } ?: NoteType.BASIC
+
+    /** The current card rendered: question and answer sides, and the text written by hand. */
+    val content: CardContent?
+        get() = current?.let { c ->
+            val key = "${c.card.id}|${c.card.writeFieldOrd}|${c.note.updatedAt}|${c.note.fields.hashCode()}"
+            contentCache.getOrPut(key) {
+                CardRenderer.render(noteType, c.note, c.card.templateOrd, c.card.writeFieldOrd, tree?.path(c.card.deckId).orEmpty())
+            }
+        }
+
+    /** What is written (and checked, and read aloud). */
+    val answer: String get() = content?.writeAnswer.orEmpty()
     val layout: WritingLayout get() = WritingLayout.forAnswer(answer)
     val language: String get() = current?.let { decks[it.card.deckId]?.language } ?: deck?.language ?: "ja"
 
     suspend fun load() {
         val tree = graph.repository.deckTree()
+        this.tree = tree
+        types = graph.repository.noteTypes()
         decks = tree.byId
         deck = decks[deckId]
         queue.clear()
@@ -278,9 +301,9 @@ class ReviewState(private val graph: AppGraph, private val deckId: String) {
     }
 
     /** Quick edit of the current card's fields; the answer in progress is kept. */
-    suspend fun editCurrent(front: String, back: String, tags: String) {
+    suspend fun editCurrent(fields: List<String>, tags: String) {
         val c = current ?: return
-        graph.repository.saveCard(c, front, back, tags, c.card.deckId, AnswerMode.valueOf(c.card.answerMode), c.card.writeFieldOrd)
+        graph.repository.saveCard(c, fields, tags, c.card.deckId, AnswerMode.valueOf(c.card.answerMode), c.card.writeFieldOrd)
         graph.repository.card(c.card.id)?.let { fresh -> if (current?.card?.id == fresh.card.id) queue[0] = fresh }
     }
 
@@ -308,9 +331,12 @@ fun ReviewScreen(deckId: String, onClose: () -> Unit) {
     var editing by remember { mutableStateOf(false) }
     val focus = remember { FocusRequester() }
     LaunchedEffect(state.loaded) { runCatching { focus.requestFocus() } }
-    // read the answer aloud when it appears (setting)
+    // card sounds play by themselves (as in Anki); the answer is read aloud when it appears (setting)
     LaunchedEffect(state.current?.card?.id, state.phase) {
-        if (state.phase == Phase.ANSWER && graph.settings.autoSpeak) state.speakAnswer()
+        val side = if (state.phase == Phase.QUESTION) state.content?.question else state.content?.answer
+        val sound = side?.firstOrNull { it is CardBlock.Sound } as? CardBlock.Sound
+        if (sound != null) graph.media.play(sound.file)
+        else if (state.phase == Phase.ANSWER && graph.settings.autoSpeak) state.speakAnswer()
     }
     fun speak() {
         if (!state.speakAnswer()) Toast.makeText(context, "Нет голоса для этого языка: установите его в настройках синтеза речи", Toast.LENGTH_LONG).show()
@@ -383,7 +409,7 @@ fun ReviewScreen(deckId: String, onClose: () -> Unit) {
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                Question(state.question)
+                CardBlocks(state.content?.question.orEmpty())
                 if (state.mode == AnswerMode.HANDWRITING) WritingAnswer(state) else ClassicAnswer(state)
                 if (state.phase == Phase.ANSWER) RatingRow(state)
             }
@@ -391,9 +417,9 @@ fun ReviewScreen(deckId: String, onClose: () -> Unit) {
     }
     if (editing) {
         state.current?.let { c ->
-            QuickEditDialog(c, onDismiss = { editing = false }) { f, b, t ->
+            QuickEditDialog(c, state.noteType, onDismiss = { editing = false }) { fields, tags ->
                 editing = false
-                scope.launch { state.editCurrent(f, b, t) }
+                scope.launch { state.editCurrent(fields, tags) }
             }
         }
     }
@@ -422,35 +448,26 @@ private fun reviewKey(key: Key, state: ReviewState, scope: CoroutineScope): Bool
 }
 
 @Composable
-private fun QuickEditDialog(c: CardWithNote, onDismiss: () -> Unit, onSave: (String, String, String) -> Unit) {
-    var front by remember(c.card.id) { mutableStateOf(c.note.field(0)) }
-    var back by remember(c.card.id) { mutableStateOf(c.note.field(1)) }
+private fun QuickEditDialog(c: CardWithNote, type: NoteType, onDismiss: () -> Unit, onSave: (List<String>, String) -> Unit) {
+    val values = remember(c.card.id) {
+        val v = c.note.fields.split(NoteEntity.FIELD_SEPARATOR)
+        mutableStateListOf(*Array(maxOf(v.size, type.fields.size)) { v.getOrElse(it) { "" } })
+    }
     var tags by remember(c.card.id) { mutableStateOf(c.note.tags) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Изменить карточку") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedTextField(front, { front = it }, label = { Text("Вопрос") })
-                OutlinedTextField(back, { back = it }, label = { Text("Ответ") })
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                values.indices.forEach { i ->
+                    OutlinedTextField(values[i], { values[i] = it }, label = { Text(type.fields.getOrElse(i) { "Поле ${i + 1}" }) })
+                }
                 OutlinedTextField(tags, { tags = it }, label = { Text("Теги") }, singleLine = true)
             }
         },
-        confirmButton = { TextButton(enabled = front.isNotBlank() && back.isNotBlank(), onClick = { onSave(front, back, tags) }) { Text("Сохранить") } },
+        confirmButton = { TextButton(enabled = values.any { it.isNotBlank() }, onClick = { onSave(values.toList(), tags) }) { Text("Сохранить") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } },
     )
-}
-
-/** The first line is the question; further lines (readings, pinyin) are smaller hints. */
-@Composable
-private fun Question(text: String) {
-    val lines = text.lines()
-    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(lines.first(), fontSize = if (lines.first().length > 40) 26.sp else 34.sp, textAlign = TextAlign.Center, lineHeight = 40.sp)
-        lines.drop(1).filter { it.isNotBlank() }.forEach {
-            Text(it, fontSize = 20.sp, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
 }
 
 @Composable
@@ -458,9 +475,14 @@ private fun ClassicAnswer(state: ReviewState) {
     if (state.phase == Phase.QUESTION) {
         Button(onClick = state::reveal, modifier = Modifier.fillMaxWidth().height(56.dp)) { Text("Показать ответ") }
     } else {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(state.answer, fontSize = 40.sp, textAlign = TextAlign.Center, fontWeight = FontWeight.Medium)
-            SpeakButton(state)
+        if (state.noteType.isBasic) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(state.answer, fontSize = 40.sp, textAlign = TextAlign.Center, fontWeight = FontWeight.Medium)
+                SpeakButton(state)
+            }
+        } else {
+            CardBlocks(state.content?.answer.orEmpty(), textSize = 28.sp)
+            if (state.answer.isNotBlank()) SpeakButton(state)
         }
     }
 }
@@ -595,6 +617,8 @@ private fun Verdict(state: ReviewState) {
             Text(state.answer, fontSize = 40.sp, fontWeight = FontWeight.Medium)
             SpeakButton(state)
         }
+        // the rest of an Anki answer side (readings, examples, pictures)
+        if (!state.noteType.isBasic) CardBlocks(state.content?.answer.orEmpty(), textSize = 22.sp)
         // stroke order of the answer, animated (tap to replay)
         val refs = (state.layout as? WritingLayout.Cells)?.chars?.mapNotNull { graph.references.get(it, state.language) }.orEmpty()
         if (refs.isNotEmpty()) {

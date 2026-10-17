@@ -2,7 +2,7 @@ package app.wanki.importer
 
 /** Turns an Anki field (HTML with Anki markup) into plain text for our cards. */
 object AnkiText {
-    private val sound = Regex("""\[sound:[^\]]*]""")
+    private val sound = Regex("""\[sound:[^\]]*\]""")
     private val lineBreaks = Regex("""(?i)<\s*(br|/div|/p|/li)\s*/?>""")
     private val tags = Regex("""<[^>]+>""")
     private val numericEntity = Regex("""&#(x?[0-9a-fA-F]+);""")

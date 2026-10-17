@@ -216,6 +216,9 @@ interface ReviewDao {
     @Insert
     suspend fun insert(log: ReviewLogEntity)
 
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertAll(logs: List<ReviewLogEntity>)
+
     @Insert
     suspend fun insertAttempt(attempt: InkAttemptEntity)
 
@@ -271,6 +274,18 @@ interface ReviewDao {
 
     @Query("SELECT COUNT(*) FROM review_logs WHERE reviewedAt >= :since")
     fun observeCountSince(since: Long): Flow<Int>
+}
+
+@Dao
+interface NoteTypeDao {
+    @Query("SELECT * FROM note_types WHERE deleted = 0")
+    suspend fun all(): List<NoteTypeEntity>
+
+    @Query("SELECT * FROM note_types WHERE id = :id")
+    suspend fun get(id: String): NoteTypeEntity?
+
+    @Upsert
+    suspend fun upsertAll(types: List<NoteTypeEntity>)
 }
 
 @Dao

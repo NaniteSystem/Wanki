@@ -35,6 +35,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import app.wanki.anki.CardHtml
 import app.wanki.data.AnswerMode
 import app.wanki.data.CardFilter
 import app.wanki.data.CardQuery
@@ -220,8 +221,11 @@ private fun CardRow(c: CardWithNote, now: Long, selected: Boolean, showDeck: Boo
     Card(modifier.fillMaxWidth(), colors = colors) {
         Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text(c.note.field(0), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(c.note.field(1), style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(CardHtml.plain(c.note.field(0)), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    CardHtml.plain(c.note.field(if (c.card.writeFieldOrd == 0) 1 else c.card.writeFieldOrd)),
+                    style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
                 if (showDeck || c.note.tags.isNotBlank()) {
                     Text(
                         listOfNotNull(deckName.takeIf { showDeck }, c.note.tags.takeIf { it.isNotBlank() }?.let { "#" + it.replace(" ", " #") })

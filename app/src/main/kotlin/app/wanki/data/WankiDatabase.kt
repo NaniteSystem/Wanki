@@ -11,7 +11,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
     entities = [
         DeckEntity::class, NoteEntity::class, CardEntity::class, ReviewLogEntity::class, InkAttemptEntity::class,
         NotebookEntity::class, PageEntity::class, PageInkEntity::class, TextNoteEntity::class, NoteBlockEntity::class,
-        CharScoreEntity::class,
+        CharScoreEntity::class, NoteTypeEntity::class,
     ],
     version = WankiDatabase.VERSION,
     exportSchema = true,
@@ -22,12 +22,13 @@ abstract class WankiDatabase : RoomDatabase() {
     abstract fun notes(): NoteDao
     abstract fun reviews(): ReviewDao
     abstract fun charScores(): CharScoreDao
+    abstract fun noteTypes(): NoteTypeDao
     abstract fun notebooks(): NotebookDao
     abstract fun textNotes(): TextNoteDao
 
     companion object {
         const val NAME = "wanki.db"
-        const val VERSION = 4
+        const val VERSION = 5
 
         fun create(context: Context): WankiDatabase =
             Room.databaseBuilder(context, WankiDatabase::class.java, NAME)
@@ -88,6 +89,17 @@ abstract class WankiDatabase : RoomDatabase() {
             }
         }
 
-        val MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+        /** v5: note types imported from Anki. */
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `note_types` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, `fields` TEXT NOT NULL, " +
+                        "`templates` TEXT NOT NULL, `kind` TEXT NOT NULL, `css` TEXT NOT NULL, `updatedAt` INTEGER NOT NULL, " +
+                        "`deleted` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+                )
+            }
+        }
+
+        val MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
     }
 }
