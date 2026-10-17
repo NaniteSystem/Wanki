@@ -65,7 +65,7 @@ class AnkiImportTest {
 
     /** Legacy (schema 11): models, decks and limits as JSON in col. */
     private fun legacyApkg(): File {
-        val col = File(work, "legacy.anki2")
+        val col = File(work, "legacy.anki2").apply { delete() }
         SQLiteDatabase.openOrCreateDatabase(col, null).use { db ->
             db.execSQL("CREATE TABLE col (crt INTEGER, models TEXT, decks TEXT, dconf TEXT, conf TEXT)")
             createCommon(db)
@@ -97,7 +97,7 @@ class AnkiImportTest {
 
     /** Current schema (anki21b): note types in tables with protobuf configs, zstd everywhere. */
     private fun currentApkg(): File {
-        val col = File(work, "current.anki2")
+        val col = File(work, "current.anki2").apply { delete() }
         SQLiteDatabase.openOrCreateDatabase(col, null).use { db ->
             db.execSQL("CREATE TABLE col (crt INTEGER, models TEXT, decks TEXT, dconf TEXT, conf TEXT)")
             db.execSQL("CREATE TABLE notetypes (id INTEGER, name TEXT, config BLOB)")

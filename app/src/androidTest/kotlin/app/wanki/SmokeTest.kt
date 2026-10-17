@@ -76,13 +76,22 @@ class SmokeTest {
 
     @Test
     fun walkThroughAllSections() {
-        // First run: no decks; install one from the catalog
-        rule.waitUntilAtLeastOneExists(hasTestTag("open-catalog"), 15_000)
-        shot("00-empty")
-        rule.onNode(hasTestTag("open-catalog")).performClick()
-        rule.waitUntilAtLeastOneExists(hasTestTag("install-ja-kanji-1"), 10_000)
+        // Install a deck from the catalog: on a fresh install from the empty deck list, otherwise
+        // (data left by an earlier run) from the menu; the deck may already be there
+        rule.waitUntilAtLeastOneExists(hasTestTag("decks-menu"), 15_000)
+        rule.waitForIdle()
+        shot("00-start")
+        if (rule.onAllNodes(hasTestTag("open-catalog")).fetchSemanticsNodes().isNotEmpty()) {
+            rule.onNode(hasTestTag("open-catalog")).performClick()
+        } else {
+            rule.onNode(hasText("⋮")).performClick()
+            rule.onNode(hasText("Готовые колоды")).performClick()
+        }
+        rule.waitUntilAtLeastOneExists(hasTestTag("catalog"), 10_000)
         shot("00b-catalog")
-        rule.onNode(hasTestTag("install-ja-kanji-1")).performClick()
+        if (rule.onAllNodes(hasTestTag("install-ja-kanji-1")).fetchSemanticsNodes().isNotEmpty()) {
+            rule.onNode(hasTestTag("install-ja-kanji-1")).performClick()
+        }
         rule.waitUntilAtLeastOneExists(hasText("✓ Открыть"), 30_000)
         shot("00c-catalog-installed")
         back()
