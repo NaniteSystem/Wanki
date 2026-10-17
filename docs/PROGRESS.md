@@ -36,7 +36,12 @@
   (9 тестов: миграция, репозиторий, смоук). **Гонять на одном эмуляторе за раз** — два сразу дают таймауты PixelCopy.
 - Скриншоты смоук-теста: добавить `-Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true`, затем
   `adb pull /sdcard/Android/data/app.wanki/files/screens <папка>`; сводный лист — `python3 tools/screens/sheet.py out.png 4 360 *.png`.
-- Release: `./gradlew :app:assembleRelease` (R8; ключ из `WANKI_KEYSTORE*` или отладочный).
+- Release: `./gradlew :app:assembleRelease` (R8). **Постоянный ключ подписи** (создан 18.10.2026):
+  `~/Documents/Projects/wanki/keys/wanki-release.jks` (alias `wanki`, CN=Wanki, SHA-256 F0:F5:2D:D0:…:8C:3D), пароли — в
+  `local.properties` и копия в `keys/signing.properties`; в git не входят. Потеря ключа = обновлять приложение
+  на телефоне только с удалением. На телефоне пользователя стоит release с этим ключом (18.10) → обновлять
+  `adb -s 320147012717 install -r app/build/outputs/apk/release/app-release.apk` (данные сохраняются), копия APK —
+  `~/Desktop/Wanki-0.1.0-release.apk`.
 
 ## Этап 2: готовые колоды — решения
 
