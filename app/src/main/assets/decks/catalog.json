@@ -1,0 +1,402 @@
+{
+ "format": 1,
+ "decks": [
+  {
+   "id": "ja-kana-hiragana",
+   "path": [
+    "Японский",
+    "Кана",
+    "Хирагана"
+   ],
+   "language": "ja",
+   "mode": "HANDWRITING",
+   "count": 71,
+   "file": "ja-kana-hiragana.tsv",
+   "description": "Хирагана: 46 основных знаков и 25 со звонкими значками. Вопрос — чтение ромадзи и по Поливанову.",
+   "source": "Wanki",
+   "license": "Wanki",
+   "version": "20b5db39e1"
+  },
+  {
+   "id": "ja-kana-katakana",
+   "path": [
+    "Японский",
+    "Кана",
+    "Катакана"
+   ],
+   "language": "ja",
+   "mode": "HANDWRITING",
+   "count": 71,
+   "file": "ja-kana-katakana.tsv",
+   "description": "Катакана: 46 основных знаков и 25 со звонкими значками. Вопрос — чтение ромадзи и по Поливанову.",
+   "source": "Wanki",
+   "license": "Wanki",
+   "version": "db064d57ac"
+  },
+  {
+   "id": "ja-kanji-1",
+   "path": [
+    "Японский",
+    "Кандзи",
+    "1 класс"
+   ],
+   "language": "ja",
+   "mode": "HANDWRITING",
+   "count": 80,
+   "file": "ja-kanji-1.tsv",
+   "description": "80 кандзи 1 класса японской школы. Вопрос — значение и чтения, ответ — знак. Порядок — по частоте.",
+   "source": "KANJIDIC2, JMdict (EDRDG)",
+   "license": "KANJIDIC2 и JMdict © EDRDG, CC BY-SA 4.0",
+   "version": "2f53258bcf"
+  },
+  {
+   "id": "ja-kanji-2",
+   "path": [
+    "Японский",
+    "Кандзи",
+    "2 класс"
+   ],
+   "language": "ja",
+   "mode": "HANDWRITING",
+   "count": 160,
+   "file": "ja-kanji-2.tsv",
+   "description": "160 кандзи 2 класса японской школы. Вопрос — значение и чтения, ответ — знак. Порядок — по частоте.",
+   "source": "KANJIDIC2, JMdict (EDRDG)",
+   "license": "KANJIDIC2 и JMdict © EDRDG, CC BY-SA 4.0",
+   "version": "ca0c934310"
+  },
+  {
+   "id": "ja-kanji-3",
+   "path": [
+    "Японский",
+    "Кандзи",
+    "3 класс"
+   ],
+   "language": "ja",
+   "mode": "HANDWRITING",
+   "count": 200,
+   "file": "ja-kanji-3.tsv",
+   "description": "200 кандзи 3 класса японской школы. Вопрос — значение и чтения, ответ — знак. Порядок — по частоте.",
+   "source": "KANJIDIC2, JMdict (EDRDG)",
+   "license": "KANJIDIC2 и JMdict © EDRDG, CC BY-SA 4.0",
+   "version": "37b349f774"
+  },
+  {
+   "id": "ja-kanji-4",
+   "path": [
+    "Японский",
+    "Кандзи",
+    "4 класс"
+   ],
+   "language": "ja",
+   "mode": "HANDWRITING",
+   "count": 202,
+   "file": "ja-kanji-4.tsv",
+   "description": "202 кандзи 4 класса японской школы. Вопрос — значение и чтения, ответ — знак. Порядок — по частоте.",
+   "source": "KANJIDIC2, JMdict (EDRDG)",
+   "license": "KANJIDIC2 и JMdict © EDRDG, CC BY-SA 4.0",
+   "version": "2d4fe7d583"
+  },
+  {
+   "id": "ja-kanji-5",
+   "path": [
+    "Японский",
+    "Кандзи",
+    "5 класс"
+   ],
+   "language": "ja",
+   "mode": "HANDWRITING",
+   "count": 193,
+   "file": "ja-kanji-5.tsv",
+   "description": "193 кандзи 5 класса японской школы. Вопрос — значение и чтения, ответ — знак. Порядок — по частоте.",
+   "source": "KANJIDIC2, JMdict (EDRDG)",
+   "license": "KANJIDIC2 и JMdict © EDRDG, CC BY-SA 4.0",
+   "version": "0c133dc3c9"
+  },
+  {
+   "id": "ja-kanji-6",
+   "path": [
+    "Японский",
+    "Кандзи",
+    "6 класс"
+   ],
+   "language": "ja",
+   "mode": "HANDWRITING",
+   "count": 191,
+   "file": "ja-kanji-6.tsv",
+   "description": "191 кандзи 6 класса японской школы. Вопрос — значение и чтения, ответ — знак. Порядок — по частоте.",
+   "source": "KANJIDIC2, JMdict (EDRDG)",
+   "license": "KANJIDIC2 и JMdict © EDRDG, CC BY-SA 4.0",
+   "version": "8644a2c5a6"
+  },
+  {
+   "id": "ja-kanji-secondary",
+   "path": [
+    "Японский",
+    "Кандзи",
+    "Средняя школа"
+   ],
+   "language": "ja",
+   "mode": "HANDWRITING",
+   "count": 1110,
+   "file": "ja-kanji-secondary.tsv",
+   "description": "1110 кандзи средней школы (остальные дзёё). Вопрос — значение и чтения, ответ — знак. Порядок — по частоте.",
+   "source": "KANJIDIC2, JMdict (EDRDG)",
+   "license": "KANJIDIC2 и JMdict © EDRDG, CC BY-SA 4.0",
+   "version": "51485e7a68"
+  },
+  {
+   "id": "ja-words-01",
+   "path": [
+    "Японский",
+    "Слова",
+    "0001–1000"
+   ],
+   "language": "ja",
+   "mode": "HANDWRITING",
+   "count": 1000,
+   "file": "ja-words-01.tsv",
+   "description": "Самые частые слова японского, 0001–1000 по частоте в газетах (JMdict). Вопрос — значение и чтение, ответ — запись словом.",
+   "source": "JMdict (EDRDG)",
+   "license": "KANJIDIC2 и JMdict © EDRDG, CC BY-SA 4.0",
+   "version": "86f1fdd241"
+  },
+  {
+   "id": "ja-words-02",
+   "path": [
+    "Японский",
+    "Слова",
+    "1001–2000"
+   ],
+   "language": "ja",
+   "mode": "HANDWRITING",
+   "count": 1000,
+   "file": "ja-words-02.tsv",
+   "description": "Самые частые слова японского, 1001–2000 по частоте в газетах (JMdict). Вопрос — значение и чтение, ответ — запись словом.",
+   "source": "JMdict (EDRDG)",
+   "license": "KANJIDIC2 и JMdict © EDRDG, CC BY-SA 4.0",
+   "version": "ea311e7d75"
+  },
+  {
+   "id": "ja-words-03",
+   "path": [
+    "Японский",
+    "Слова",
+    "2001–3000"
+   ],
+   "language": "ja",
+   "mode": "HANDWRITING",
+   "count": 1000,
+   "file": "ja-words-03.tsv",
+   "description": "Самые частые слова японского, 2001–3000 по частоте в газетах (JMdict). Вопрос — значение и чтение, ответ — запись словом.",
+   "source": "JMdict (EDRDG)",
+   "license": "KANJIDIC2 и JMdict © EDRDG, CC BY-SA 4.0",
+   "version": "0e2c428429"
+  },
+  {
+   "id": "ja-words-04",
+   "path": [
+    "Японский",
+    "Слова",
+    "3001–4000"
+   ],
+   "language": "ja",
+   "mode": "HANDWRITING",
+   "count": 1000,
+   "file": "ja-words-04.tsv",
+   "description": "Самые частые слова японского, 3001–4000 по частоте в газетах (JMdict). Вопрос — значение и чтение, ответ — запись словом.",
+   "source": "JMdict (EDRDG)",
+   "license": "KANJIDIC2 и JMdict © EDRDG, CC BY-SA 4.0",
+   "version": "b37efe3d10"
+  },
+  {
+   "id": "ja-words-05",
+   "path": [
+    "Японский",
+    "Слова",
+    "4001–5000"
+   ],
+   "language": "ja",
+   "mode": "HANDWRITING",
+   "count": 1000,
+   "file": "ja-words-05.tsv",
+   "description": "Самые частые слова японского, 4001–5000 по частоте в газетах (JMdict). Вопрос — значение и чтение, ответ — запись словом.",
+   "source": "JMdict (EDRDG)",
+   "license": "KANJIDIC2 и JMdict © EDRDG, CC BY-SA 4.0",
+   "version": "4f89dbe867"
+  },
+  {
+   "id": "ja-words-06",
+   "path": [
+    "Японский",
+    "Слова",
+    "5001–6000"
+   ],
+   "language": "ja",
+   "mode": "HANDWRITING",
+   "count": 1000,
+   "file": "ja-words-06.tsv",
+   "description": "Самые частые слова японского, 5001–6000 по частоте в газетах (JMdict). Вопрос — значение и чтение, ответ — запись словом.",
+   "source": "JMdict (EDRDG)",
+   "license": "KANJIDIC2 и JMdict © EDRDG, CC BY-SA 4.0",
+   "version": "c50c5f0edb"
+  },
+  {
+   "id": "zh-hsk3-1",
+   "path": [
+    "Китайский",
+    "HSK 3.0",
+    "Уровень 1"
+   ],
+   "language": "zh",
+   "mode": "HANDWRITING",
+   "count": 506,
+   "file": "zh-hsk3-1.tsv",
+   "description": "506 слов HSK 3.0, уровень 1. Вопрос — значение (англ., CC-CEDICT) и пиньинь, ответ — упрощённые иероглифы.",
+   "source": "Complete HSK Vocabulary, CC-CEDICT",
+   "license": "Complete HSK Vocabulary (MIT), значения CC-CEDICT (CC BY-SA 4.0)",
+   "version": "285e520fd3"
+  },
+  {
+   "id": "zh-hsk3-2",
+   "path": [
+    "Китайский",
+    "HSK 3.0",
+    "Уровень 2"
+   ],
+   "language": "zh",
+   "mode": "HANDWRITING",
+   "count": 750,
+   "file": "zh-hsk3-2.tsv",
+   "description": "750 слов HSK 3.0, уровень 2. Вопрос — значение (англ., CC-CEDICT) и пиньинь, ответ — упрощённые иероглифы.",
+   "source": "Complete HSK Vocabulary, CC-CEDICT",
+   "license": "Complete HSK Vocabulary (MIT), значения CC-CEDICT (CC BY-SA 4.0)",
+   "version": "7556b191a6"
+  },
+  {
+   "id": "zh-hsk3-3",
+   "path": [
+    "Китайский",
+    "HSK 3.0",
+    "Уровень 3"
+   ],
+   "language": "zh",
+   "mode": "HANDWRITING",
+   "count": 953,
+   "file": "zh-hsk3-3.tsv",
+   "description": "953 слов HSK 3.0, уровень 3. Вопрос — значение (англ., CC-CEDICT) и пиньинь, ответ — упрощённые иероглифы.",
+   "source": "Complete HSK Vocabulary, CC-CEDICT",
+   "license": "Complete HSK Vocabulary (MIT), значения CC-CEDICT (CC BY-SA 4.0)",
+   "version": "540a75f837"
+  },
+  {
+   "id": "zh-hsk3-4",
+   "path": [
+    "Китайский",
+    "HSK 3.0",
+    "Уровень 4"
+   ],
+   "language": "zh",
+   "mode": "HANDWRITING",
+   "count": 972,
+   "file": "zh-hsk3-4.tsv",
+   "description": "972 слов HSK 3.0, уровень 4. Вопрос — значение (англ., CC-CEDICT) и пиньинь, ответ — упрощённые иероглифы.",
+   "source": "Complete HSK Vocabulary, CC-CEDICT",
+   "license": "Complete HSK Vocabulary (MIT), значения CC-CEDICT (CC BY-SA 4.0)",
+   "version": "3ae75bbfe0"
+  },
+  {
+   "id": "zh-hsk3-5",
+   "path": [
+    "Китайский",
+    "HSK 3.0",
+    "Уровень 5"
+   ],
+   "language": "zh",
+   "mode": "HANDWRITING",
+   "count": 1059,
+   "file": "zh-hsk3-5.tsv",
+   "description": "1059 слов HSK 3.0, уровень 5. Вопрос — значение (англ., CC-CEDICT) и пиньинь, ответ — упрощённые иероглифы.",
+   "source": "Complete HSK Vocabulary, CC-CEDICT",
+   "license": "Complete HSK Vocabulary (MIT), значения CC-CEDICT (CC BY-SA 4.0)",
+   "version": "28ddac4094"
+  },
+  {
+   "id": "zh-hsk3-6",
+   "path": [
+    "Китайский",
+    "HSK 3.0",
+    "Уровень 6"
+   ],
+   "language": "zh",
+   "mode": "HANDWRITING",
+   "count": 1123,
+   "file": "zh-hsk3-6.tsv",
+   "description": "1123 слов HSK 3.0, уровень 6. Вопрос — значение (англ., CC-CEDICT) и пиньинь, ответ — упрощённые иероглифы.",
+   "source": "Complete HSK Vocabulary, CC-CEDICT",
+   "license": "Complete HSK Vocabulary (MIT), значения CC-CEDICT (CC BY-SA 4.0)",
+   "version": "eb9938d931"
+  },
+  {
+   "id": "zh-hsk3-7",
+   "path": [
+    "Китайский",
+    "HSK 3.0",
+    "Уровни 7–9"
+   ],
+   "language": "zh",
+   "mode": "HANDWRITING",
+   "count": 5606,
+   "file": "zh-hsk3-7.tsv",
+   "description": "5606 слов HSK 3.0, уровни 7–9. Вопрос — значение (англ., CC-CEDICT) и пиньинь, ответ — упрощённые иероглифы.",
+   "source": "Complete HSK Vocabulary, CC-CEDICT",
+   "license": "Complete HSK Vocabulary (MIT), значения CC-CEDICT (CC BY-SA 4.0)",
+   "version": "ebcebd6f52"
+  },
+  {
+   "id": "ko-krdict-beginner",
+   "path": [
+    "Корейский",
+    "Начальный (초급)"
+   ],
+   "language": "ko",
+   "mode": "HANDWRITING",
+   "count": 1938,
+   "file": "ko-krdict-beginner.tsv",
+   "description": "1938 слов уровня «초급» из словаря 한국어기초사전 (НИИ корейского языка). Вопрос — значение по-русски, ответ — слово хангылем.",
+   "source": "한국어기초사전 (krdict.korean.go.kr)",
+   "license": "한국어기초사전 © 국립국어원, CC BY-SA 2.0 KR",
+   "version": "d1e4f0c51b"
+  },
+  {
+   "id": "ko-krdict-intermediate",
+   "path": [
+    "Корейский",
+    "Средний (중급)"
+   ],
+   "language": "ko",
+   "mode": "HANDWRITING",
+   "count": 3921,
+   "file": "ko-krdict-intermediate.tsv",
+   "description": "3921 слов уровня «중급» из словаря 한국어기초사전 (НИИ корейского языка). Вопрос — значение по-русски, ответ — слово хангылем.",
+   "source": "한국어기초사전 (krdict.korean.go.kr)",
+   "license": "한국어기초사전 © 국립국어원, CC BY-SA 2.0 KR",
+   "version": "fa05c75ae7"
+  },
+  {
+   "id": "ko-krdict-advanced",
+   "path": [
+    "Корейский",
+    "Продвинутый (고급)"
+   ],
+   "language": "ko",
+   "mode": "HANDWRITING",
+   "count": 5028,
+   "file": "ko-krdict-advanced.tsv",
+   "description": "5028 слов уровня «고급» из словаря 한국어기초사전 (НИИ корейского языка). Вопрос — значение по-русски, ответ — слово хангылем.",
+   "source": "한국어기초사전 (krdict.korean.go.kr)",
+   "license": "한국어기초사전 © 국립국어원, CC BY-SA 2.0 KR",
+   "version": "5447014b55"
+  }
+ ]
+}
