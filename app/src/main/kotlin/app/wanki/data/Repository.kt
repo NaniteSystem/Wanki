@@ -2,6 +2,8 @@ package app.wanki.data
 
 import androidx.room.withTransaction
 import androidx.sqlite.db.SimpleSQLiteQuery
+import app.wanki.catalog.CatalogDeck
+import app.wanki.catalog.CatalogRow
 import app.wanki.ink.InkCodec
 import app.wanki.ink.InkDrawing
 import app.wanki.ink.InkStroke
@@ -72,6 +74,62 @@ class Repository(private val db: WankiDatabase) {
     suspend fun setDeckMode(deck: DeckEntity, mode: AnswerMode) = db.withTransaction {
         decks.upsert(deck.copy(defaultAnswerMode = mode.name, updatedAt = System.currentTimeMillis()))
         cards.setModeInDeck(deck.id, mode.name)
+    }
+
+    // --- ready-made decks ---------------------------------------------------------------------
+
+    fun observeInstalledCatalogDecks(): Flow<List<DeckEntity>> = decks.observeInstalled()
+
+    data class InstallResult(val added: Int, val updated: Int)
+
+    /**
+     * Installs or updates a ready-made deck. Note and card ids are derived from the catalog key, so
+     * installing again only adds missing cards and refreshes bundled text; schedules are kept, and
+     * cards the user deleted or notes the user edited are left alone. Bundled notes are written with
+     * updatedAt = 0 ("untouched"); any edit gives them a real timestamp.
+     */
+    suspend fun installCatalogDeck(deck: CatalogDeck, rows: List<CatalogRow>, onProgress: (Int) -> Unit = {}): InstallResult {
+        val target = decks.byCatalogId(deck.id) ?: db.withTransaction {
+            deckByPath(deck.path, deck.language, deck.mode).copy(catalogId = deck.id).also { decks.upsert(it) }
+        }
+        var added = 0
+        var updated = 0
+        var done = 0
+        var position = cards.maxPosition()
+        val t0 = System.currentTimeMillis()
+        for (chunk in rows.chunked(500)) {
+            db.withTransaction {
+                val existingNotes = notes.getAll(chunk.map { catalogNoteId(deck.id, it.key) }).associateBy { it.id }
+                val existingCards = cards.existing(chunk.map { catalogCardId(deck.id, it.key) }).toSet()
+                val newNotes = ArrayList<NoteEntity>()
+                val newCards = ArrayList<CardEntity>()
+                for (r in chunk) {
+                    val noteId = catalogNoteId(deck.id, r.key)
+                    val fields = r.front + NoteEntity.FIELD_SEPARATOR + r.back
+                    val old = existingNotes[noteId]
+                    if (old == null) {
+                        newNotes += NoteEntity(id = noteId, fields = fields, tags = r.tags, updatedAt = 0)
+                    } else if (old.updatedAt == 0L && (old.fields != fields || old.tags != r.tags)) {
+                        newNotes += old.copy(fields = fields, tags = r.tags)
+                        updated++
+                    }
+                    val cardId = catalogCardId(deck.id, r.key)
+                    if (cardId !in existingCards) {
+                        newCards += CardEntity(
+                            id = cardId, noteId = noteId, deckId = target.id, answerMode = deck.mode.name,
+                            position = ++position, updatedAt = t0,
+                        )
+                        added++
+                    }
+                }
+                notes.upsertAll(newNotes)
+                cards.upsertAll(newCards)
+            }
+            done += chunk.size
+            onProgress(done)
+        }
+        decks.get(target.id)?.let { decks.upsert(it.copy(catalogVersion = deck.version, updatedAt = System.currentTimeMillis())) }
+        return InstallResult(added, updated)
     }
 
     fun observeCards(query: CardQuery, now: Long = System.currentTimeMillis()): Flow<List<CardWithNote>> =
@@ -408,32 +466,6 @@ class Repository(private val db: WankiDatabase) {
         textNotes.deleteBlocksExcept(note.id, blocks.map { it.id })
     }
 
-    // --- first run ---------------------------------------------------------------------------
-
-    suspend fun seedIfEmpty() {
-        if (decks.count() > 0) return
-        val kanji = createDeck("Кандзи · 1 класс (демо)", "ja", AnswerMode.HANDWRITING)
-        listOf(
-            "день, солнце" to "日", "книга, основа" to "本", "человек" to "人", "гора" to "山", "река" to "川",
-            "рот" to "口", "глаз" to "目", "дерево" to "木", "вода" to "水", "огонь" to "火", "луна, месяц" to "月",
-            "земля" to "土", "золото, деньги" to "金", "большой" to "大", "маленький" to "小", "верх" to "上",
-            "низ" to "下", "середина" to "中", "право" to "右", "лево" to "左", "один" to "一", "два" to "二",
-            "три" to "三", "белый" to "白", "камень" to "石", "Япония" to "日本", "горная река" to "山川",
-        ).forEach { (front, back) -> addCard(kanji.id, front, back, AnswerMode.HANDWRITING) }
-
-        val kana = createDeck("Хирагана (демо)", "ja", AnswerMode.HANDWRITING)
-        listOf(
-            "a" to "あ", "i" to "い", "u" to "う", "e" to "え", "o" to "お",
-            "ka" to "か", "ki" to "き", "ku" to "く", "ke" to "け", "ko" to "こ",
-            "sa" to "さ", "shi" to "し", "su" to "す", "se" to "せ", "so" to "そ",
-            "ta" to "た", "chi" to "ち", "tsu" to "つ", "te" to "て", "to" to "と",
-        ).forEach { (front, back) -> addCard(kana.id, front, back, AnswerMode.HANDWRITING) }
-
-        val words = createDeck("Слова (обычные карточки)", "en", AnswerMode.CLASSIC)
-        listOf("cat" to "кошка", "dog" to "собака", "book" to "книга", "water" to "вода", "tree" to "дерево")
-            .forEach { (front, back) -> addCard(words.id, back, front, AnswerMode.CLASSIC) }
-    }
-
     companion object {
         /** Learning cards due within this window are shown now, like Anki's learn-ahead. */
         const val LEARN_AHEAD_MS = 20 * 60_000L
@@ -442,5 +474,8 @@ class Repository(private val db: WankiDatabase) {
         fun startOfTomorrow(): Long = LocalDate.now().plusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
 
         private fun CardQuery.Sql.room() = SimpleSQLiteQuery(sql, args.toTypedArray())
+
+        fun catalogNoteId(catalogId: String, key: String) = "$catalogId:$key"
+        fun catalogCardId(catalogId: String, key: String) = "$catalogId:$key:0"
     }
 }

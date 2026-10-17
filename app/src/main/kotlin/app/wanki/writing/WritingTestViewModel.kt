@@ -7,8 +7,9 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import app.wanki.graph
-import app.wanki.input.InkLayer
 import app.wanki.ink.InkDrawing
+import app.wanki.input.InkLayer
+import app.wanki.review.WritingLayout
 import app.wanki.scoring.CharReference
 import app.wanki.scoring.HandwritingScorer
 import app.wanki.scoring.Rating
@@ -28,13 +29,17 @@ data class Attempt(
 )
 
 /** Test bench for the scoring pipeline: write a character, see the score and the review. */
+/** The lab works with the Japanese references. */
+private const val LANGUAGE = "ja"
+
 class WritingTestViewModel(app: Application) : AndroidViewModel(app) {
     private val graph = app.graph
     private val repo = graph.references
     private val ratingPolicy = RatingPolicy()
     val recognizer = graph.recognizers.get("ja")
 
-    val chars: List<String> = repo.chars
+    /** Kana and kanji with KanjiVG references (KanjiVG also has Latin letters and punctuation). */
+    val chars: List<String> = repo.chars.filter { WritingLayout.isCellChar(it.codePointAt(0)) }
     val layer = InkLayer()
 
     var index by mutableStateOf(chars.indexOf("右").coerceAtLeast(0))
@@ -51,7 +56,7 @@ class WritingTestViewModel(app: Application) : AndroidViewModel(app) {
     private var hintUsed = false
 
     val char: String get() = chars.getOrElse(index) { "" }
-    val reference: CharReference? get() = repo.get(char)
+    val reference: CharReference? get() = repo.get(char, LANGUAGE)
 
     init {
         recognizer.prefetch()
@@ -86,7 +91,7 @@ class WritingTestViewModel(app: Application) : AndroidViewModel(app) {
             val candidates = recognizer.recognize(drawing.strokes, canvasWidth, canvasHeight)
             val usedHint = hintUsed
             val result = withContext(Dispatchers.Default) {
-                val competitors = repo.competitorsFor(ref.char, candidates)
+                val competitors = repo.competitorsFor(ref.char, candidates, LANGUAGE)
                 val strokes = drawing.strokes.map { s -> s.points.map { Point(it.x.toDouble(), it.y.toDouble()) } }
                 HandwritingScorer(graph.settings.scoringConfig()).score(ref, strokes, candidates, competitors)
             }

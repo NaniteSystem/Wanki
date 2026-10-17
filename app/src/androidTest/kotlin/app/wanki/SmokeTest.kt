@@ -76,7 +76,17 @@ class SmokeTest {
 
     @Test
     fun walkThroughAllSections() {
-        rule.waitUntilAtLeastOneExists(hasText("Кандзи · 1 класс (демо)"), 15_000)
+        // First run: no decks; install one from the catalog
+        rule.waitUntilAtLeastOneExists(hasTestTag("open-catalog"), 15_000)
+        shot("00-empty")
+        rule.onNode(hasTestTag("open-catalog")).performClick()
+        rule.waitUntilAtLeastOneExists(hasTestTag("install-ja-kanji-1"), 10_000)
+        shot("00b-catalog")
+        rule.onNode(hasTestTag("install-ja-kanji-1")).performClick()
+        rule.waitUntilAtLeastOneExists(hasText("✓ Открыть"), 30_000)
+        shot("00c-catalog-installed")
+        back()
+        rule.waitUntilAtLeastOneExists(hasText("1 класс"), 10_000)
         shot("01-decks")
 
         // Review: write into the cell; the check starts by itself after a pause
@@ -106,16 +116,16 @@ class SmokeTest {
         rule.onNode(hasText("Поиск")).performClick()
         rule.waitUntilAtLeastOneExists(hasTestTag("card-search"), 10_000)
         rule.onNode(hasTestTag("card-search")).performTextInput("日")
-        rule.waitUntilAtLeastOneExists(hasText("Япония"), 10_000)
+        rule.waitUntilAtLeastOneExists(hasText("день; солнце", substring = true), 10_000)
         shot("05c-browser")
-        rule.onNode(hasText("Япония")).performClick()
+        rule.onAllNodes(hasText("день; солнце", substring = true)).onFirst().performClick()
         rule.waitUntilAtLeastOneExists(hasText("История ответов"), 10_000)
         shot("05d-card-editor")
         back()
         back()
 
         // A deck with its cards, then its settings
-        rule.onNode(hasText("Хирагана (демо)")).performClick()
+        rule.onNode(hasText("1 класс")).performClick()
         rule.waitUntilAtLeastOneExists(hasTestTag("deck-options"), 10_000)
         shot("05e-deck")
         rule.onNode(hasTestTag("deck-options")).performClick()

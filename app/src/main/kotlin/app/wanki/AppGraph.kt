@@ -2,6 +2,8 @@ package app.wanki
 
 import android.app.Application
 import android.content.Context
+import app.wanki.catalog.Catalog
+import app.wanki.catalog.CatalogInstaller
 import app.wanki.data.Backup
 import app.wanki.data.Repository
 import app.wanki.data.Settings
@@ -32,6 +34,8 @@ class AppGraph(context: Context) {
     val translation = TranslationService(textRecognition)
     val speaker = Speaker(context)
     val backup = Backup(context, db, settings)
+    val catalog = Catalog(context.assets)
+    val catalogInstaller = CatalogInstaller(catalog, repository, appScope)
 }
 
 class WankiApp : Application() {

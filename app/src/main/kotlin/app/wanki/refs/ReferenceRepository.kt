@@ -5,7 +5,11 @@ import app.wanki.scoring.CharReference
 import app.wanki.scoring.kanjivg.KanjiVg
 import java.util.concurrent.ConcurrentHashMap
 
-/** Reference characters bundled as KanjiVG SVGs under assets/kanjivg (file name = code point in hex). */
+/**
+ * Stroke references by language. Japanese: KanjiVG SVGs under assets/kanjivg (file name = code
+ * point in hex). Chinese characters differ in form and stroke order, so KanjiVG is not used for
+ * them; languages without references are checked by the recognizer alone.
+ */
 class ReferenceRepository(private val assets: AssetManager) {
     private val cache = ConcurrentHashMap<String, CharReference>()
 
@@ -17,7 +21,9 @@ class ReferenceRepository(private val assets: AssetManager) {
             .map { String(Character.toChars(it)) }
     }
 
-    fun get(char: String): CharReference? {
+    fun get(char: String, language: String): CharReference? = if (language in KANJIVG_LANGUAGES) kanjiVg(char) else null
+
+    private fun kanjiVg(char: String): CharReference? {
         if (char.codePointCount(0, char.length) != 1) return null
         cache[char]?.let { return it }
         val file = "$DIR/%05x.svg".format(char.codePointAt(0))
@@ -30,16 +36,17 @@ class ReferenceRepository(private val assets: AssetManager) {
      * Look-alikes to check the attempt against: recognizer candidates ranked above the target
      * plus the static [Confusables] table, limited to characters we have references for.
      */
-    fun competitorsFor(target: String, candidates: List<String>?): List<CharReference> {
+    fun competitorsFor(target: String, candidates: List<String>?, language: String): List<CharReference> {
         val aboveTarget = candidates?.takeWhile { it != target }.orEmpty()
         return (aboveTarget + Confusables.of(target))
             .distinct()
             .filter { it != target }
-            .mapNotNull(::get)
+            .mapNotNull { get(it, language) }
     }
 
-    private companion object {
-        const val DIR = "kanjivg"
+    companion object {
+        private const val DIR = "kanjivg"
+        val KANJIVG_LANGUAGES = setOf("ja")
     }
 }
 

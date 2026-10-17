@@ -174,7 +174,7 @@ fun MakeCardDialog(front: String, back: String, onDismiss: () -> Unit) {
                 OutlinedTextField(f, { f = it }, label = { Text("Вопрос") })
                 OutlinedTextField(b, { b = it }, label = { Text("Ответ") })
                 OutlinedButton(onClick = { picking = true }, enabled = tree != null) {
-                    Text("Колода: " + (deckId?.let { id -> tree?.path(id) } ?: "выбрать"))
+                    Text("Колода: " + (deckId?.let { id -> tree?.title(id) } ?: "выбрать"))
                 }
                 if (done) Text("Карточка добавлена", color = MaterialTheme.colorScheme.primary)
             }

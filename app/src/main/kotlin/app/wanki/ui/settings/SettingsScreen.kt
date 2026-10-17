@@ -234,7 +234,10 @@ private fun About() {
     Text("О приложении", style = MaterialTheme.typography.titleMedium)
     Text("Wanki $version", style = MaterialTheme.typography.bodyMedium)
     Text(
-        "Данные: KanjiVG © Ulrich Apel (CC BY-SA 3.0) — эталоны черт японских знаков. " +
+        "Данные: эталоны черт — KanjiVG © Ulrich Apel (CC BY-SA 3.0); кандзи и японские слова — KANJIDIC2 и JMdict " +
+            "© EDRDG (CC BY-SA 4.0); HSK — Complete HSK Vocabulary (MIT) со значениями CC-CEDICT (CC BY-SA 4.0); " +
+            "корейские слова — 한국어기초사전 © 국립국어원 (CC BY-SA 2.0 KR). Изменённые данные распространяются " +
+            "на тех же условиях.\n" +
             "Распознавание рукописи, определение языка и перевод — ML Kit (Google), работают на устройстве после загрузки моделей.",
         style = MaterialTheme.typography.bodySmall,
     )

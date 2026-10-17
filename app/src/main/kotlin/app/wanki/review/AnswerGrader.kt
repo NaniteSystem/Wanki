@@ -27,8 +27,10 @@ sealed interface WritingLayout {
             return if (chars.isNotEmpty() && chars.size <= 12 && chars.all { isCellChar(it.codePointAt(0)) }) Cells(chars) else Line
         }
 
-        fun isCellChar(cp: Int) = cp in 0x3040..0x30FF || cp in 0x3400..0x4DBF || cp in 0x4E00..0x9FFF ||
-            cp in 0xAC00..0xD7AF || cp in 0x1100..0x11FF || cp == 0x3005
+        /** Kana, CJK ideographs (all planes), hangul syllables and jamo, 々 〆. */
+        fun isCellChar(cp: Int) = cp in 0x3040..0x30FF || cp in 0x31F0..0x31FF || cp in 0x3400..0x4DBF ||
+            cp in 0x4E00..0x9FFF || cp in 0xF900..0xFAFF || cp in 0x20000..0x3134F ||
+            cp in 0xAC00..0xD7AF || cp in 0x1100..0x11FF || cp in 0x3130..0x318F || cp == 0x3005 || cp == 0x3006
     }
 }
 
@@ -71,11 +73,11 @@ class AnswerGrader(
             val strokes = cells.getOrElse(i) { emptyList() }
             if (strokes.isEmpty()) return@mapIndexed CellGrade(char, false, 0.0, null, null)
             val candidates = recognizer.recognize(strokes, cellSize, cellSize)
-            val ref = references.get(char)
+            val ref = references.get(char, language)
             if (ref != null) {
                 val result = withContext(Dispatchers.Default) {
                     scorer.score(ref, strokes.map { s -> s.points.map { Point(it.x.toDouble(), it.y.toDouble()) } },
-                        candidates, references.competitorsFor(char, candidates))
+                        candidates, references.competitorsFor(char, candidates, language))
                 }
                 CellGrade(char, result.passed, result.score, result, candidates)
             } else {

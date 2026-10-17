@@ -23,6 +23,7 @@ import app.wanki.ui.board.BoardScreen
 import app.wanki.ui.board.BoardsScreen
 import app.wanki.ui.browser.BrowserScreen
 import app.wanki.ui.browser.CardEditorScreen
+import app.wanki.ui.catalog.CatalogScreen
 import app.wanki.ui.decks.DeckOptionsScreen
 import app.wanki.ui.decks.DeckScreen
 import app.wanki.ui.decks.DecksScreen
@@ -43,6 +44,7 @@ sealed interface Route {
     data class DeckOptions(val id: String) : Route
     data class Review(val deckId: String) : Route
     data object Browser : Route
+    data object Catalog : Route
     data class CardEditor(val id: String) : Route
     /** Handwriting practice: the weak-character queue, or one [glyph]. */
     data class Practice(val glyph: String? = null, val language: String = "ja") : Route
@@ -137,7 +139,9 @@ private fun Content(nav: Navigator) {
             onStats = { nav.open(Route.Stats) },
             onBrowse = { nav.open(Route.Browser) },
             onPractice = { nav.open(Route.Practice()) },
+            onCatalog = { nav.open(Route.Catalog) },
         )
+        Route.Catalog -> CatalogScreen(onBack = { nav.back() }, onOpenDeck = { nav.open(Route.Deck(it)) })
         Route.Stats -> StatsScreen(onBack = { nav.back() }, onPractice = { nav.open(Route.Practice()) })
         is Route.Deck -> DeckScreen(
             r.id,

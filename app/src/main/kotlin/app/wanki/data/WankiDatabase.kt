@@ -27,7 +27,7 @@ abstract class WankiDatabase : RoomDatabase() {
 
     companion object {
         const val NAME = "wanki.db"
-        const val VERSION = 3
+        const val VERSION = 4
 
         fun create(context: Context): WankiDatabase =
             Room.databaseBuilder(context, WankiDatabase::class.java, NAME)
@@ -80,6 +80,14 @@ abstract class WankiDatabase : RoomDatabase() {
             }
         }
 
-        val MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3)
+        /** v4: decks remember the ready-made deck they were installed from. */
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `decks` ADD COLUMN `catalogId` TEXT")
+                db.execSQL("ALTER TABLE `decks` ADD COLUMN `catalogVersion` TEXT")
+            }
+        }
+
+        val MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
     }
 }

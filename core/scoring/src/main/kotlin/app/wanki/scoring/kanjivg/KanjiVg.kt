@@ -74,7 +74,9 @@ object KanjiVg {
         }
 
         require(strokes.isNotEmpty()) { "No strokes found in KanjiVG data" }
-        val resolvedChar = char ?: idHex?.toIntOrNull(16)?.let { String(Character.toChars(it)) }
+        // the code point in the group id is authoritative: a few files name another character in
+        // their root group (06a45 says 機)
+        val resolvedChar = idHex?.toIntOrNull(16)?.let { String(Character.toChars(it)) } ?: char
             ?: error("Cannot determine character")
         val rootComponent = root?.build() ?: Component(resolvedChar, strokes.indices.toList())
         return CharReference(resolvedChar, strokes, rootComponent, SIZE, source = "kanjivg")

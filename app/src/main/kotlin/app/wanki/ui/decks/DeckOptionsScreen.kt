@@ -88,7 +88,7 @@ private fun DeckOptions(deck: DeckEntity, tree: DeckTree, onBack: () -> Unit, on
         ) {
             OutlinedTextField(name, { name = it }, label = { Text("Название") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             Row {
-                Text("Внутри колоды: " + (parentId?.let { tree.path(it) } ?: "нет"), Modifier.weight(1f).padding(top = 12.dp))
+                Text("Внутри колоды: " + (parentId?.let { tree.title(it) } ?: "нет"), Modifier.weight(1f).padding(top = 12.dp))
                 TextButton(onClick = { picking = true }) { Text("Изменить") }
             }
             HorizontalDivider()

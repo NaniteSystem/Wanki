@@ -68,6 +68,9 @@ class DeckTree(
         return out
     }
 
+    /** For the UI: "Parent › Child". */
+    fun title(id: String): String = path(id).split("::").joinToString(" › ")
+
     /** "Parent::Child" names, as Anki shows them. */
     fun path(id: String): String {
         val names = ArrayList<String>()

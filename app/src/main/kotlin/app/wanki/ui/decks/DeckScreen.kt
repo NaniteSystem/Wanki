@@ -79,7 +79,7 @@ fun DeckScreen(
             ScreenHeader(
                 deck.name, onBack = onBack,
                 subtitle = listOfNotNull(
-                    deck.parentId?.let { t.path(it) },
+                    deck.parentId?.let { t.title(it) },
                     languageName(deck.language),
                     "${row.total} карт.",
                 ).joinToString(" · "),

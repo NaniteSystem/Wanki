@@ -3,6 +3,8 @@ package app.wanki.data
 import androidx.room.Room
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import app.wanki.catalog.CatalogDeck
+import app.wanki.catalog.CatalogRow
 import app.wanki.srs.Rating
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -115,6 +117,50 @@ class RepositoryTest {
         assertEquals(listOf("cat"), repo.observeCards(CardQuery(text = "ANIMALS")).first().map { it.note.field(1) })
         assertEquals(2, repo.observeCardCount(CardQuery(deckIds = listOf(deck.id))).first())
         assertEquals(0, repo.observeCardCount(CardQuery(text = "50%")).first())
+    }
+
+    private fun catalogDeck(version: String) = CatalogDeck(
+        id = "ja-test", path = listOf("Японский", "Тест"), language = "ja", mode = AnswerMode.HANDWRITING, count = 3,
+        file = "", description = "", source = "", license = "", version = version,
+    )
+
+    @Test
+    fun installingFromTheCatalogBuildsThePathAndIsIdempotent() = runBlocking {
+        val rows = listOf(CatalogRow("日", "день", "日", "k"), CatalogRow("一", "один", "一", "k"), CatalogRow("人", "человек", "人", "k"))
+        assertEquals(Repository.InstallResult(3, 0), repo.installCatalogDeck(catalogDeck("v1"), rows))
+        val tree = repo.deckTree()
+        val deck = tree.byId.values.single { it.catalogId == "ja-test" }
+        assertEquals("Японский::Тест", tree.path(deck.id))
+        assertEquals("v1", deck.catalogVersion)
+        assertEquals(listOf("день", "один", "человек"), repo.reviewQueue(deck.id).map { it.note.field(0) })
+        assertEquals(Repository.InstallResult(0, 0), repo.installCatalogDeck(catalogDeck("v1"), rows))
+        assertEquals(3, repo.deckTree().row(deck.id)!!.total)
+    }
+
+    @Test
+    fun updatingKeepsSchedulesEditsAndDeletions() = runBlocking {
+        val v1 = listOf(CatalogRow("日", "день", "日", ""), CatalogRow("一", "один", "一", ""), CatalogRow("人", "человек", "人", ""))
+        repo.installCatalogDeck(catalogDeck("v1"), v1)
+        val deckId = repo.deckTree().byId.values.single { it.catalogId == "ja-test" }.id
+        val queue = repo.reviewQueue(deckId)
+        // answer 日, edit 一, delete 人
+        repo.answer(queue[0].card, Rating.GOOD, repo.scheduler(0.9), AnswerMode.HANDWRITING, null, null, 1000, false, null)
+        repo.saveCard(queue[1], "один (моё)", "一", "", deckId, AnswerMode.HANDWRITING, 1)
+        repo.deleteCard(queue[2].card.id)
+
+        val v2 = listOf(
+            CatalogRow("日", "день, солнце", "日", ""), CatalogRow("一", "один, единица", "一", ""),
+            CatalogRow("人", "человек, люди", "人", ""), CatalogRow("大", "большой", "大", ""),
+        )
+        val r = repo.installCatalogDeck(catalogDeck("v2"), v2)
+        assertEquals(1, r.added)
+        assertEquals(1, r.updated)
+        val sun = repo.card(Repository.catalogCardId("ja-test", "日"))!!
+        assertEquals("день, солнце", sun.note.field(0))
+        assertTrue(!sun.card.isNew)
+        assertEquals("один (моё)", repo.card(Repository.catalogCardId("ja-test", "一"))!!.note.field(0))
+        assertTrue(repo.card(Repository.catalogCardId("ja-test", "人"))!!.card.deleted)
+        assertEquals("v2", repo.deck(deckId)!!.catalogVersion)
     }
 
     @Test

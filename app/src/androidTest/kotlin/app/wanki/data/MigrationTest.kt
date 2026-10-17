@@ -61,7 +61,23 @@ class MigrationTest {
         }
     }
 
+    @Test
+    fun migrate3To4AddsCatalogColumns() {
+        helper.createDatabase(DB4, 3).apply {
+            execSQL("INSERT INTO decks (id, parentId, name, language, defaultAnswerMode, newPerDay, updatedAt, deleted, reviewsPerDay, collapsed) VALUES ('d', NULL, 'Kanji', 'ja', 'HANDWRITING', 20, 1, 0, 200, 0)")
+            close()
+        }
+        val db = helper.runMigrationsAndValidate(DB4, 4, true, WankiDatabase.MIGRATION_3_4)
+        db.query("SELECT name, catalogId, catalogVersion FROM decks").use { c ->
+            c.moveToFirst()
+            assertEquals("Kanji", c.getString(0))
+            assertEquals(true, c.isNull(1))
+            assertEquals(true, c.isNull(2))
+        }
+    }
+
     private companion object {
+        const val DB4 = "migration-test-4"
         const val DB = "migration-test"
     }
 }

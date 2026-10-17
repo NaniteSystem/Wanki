@@ -41,6 +41,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import app.wanki.data.AnswerMode
@@ -70,6 +71,7 @@ fun DecksScreen(
     onStats: () -> Unit = {},
     onBrowse: () -> Unit = {},
     onPractice: () -> Unit = {},
+    onCatalog: () -> Unit = {},
 ) {
     val graph = LocalContext.current.graph
     // "now" is refreshed on resume so due counts stay current
@@ -110,7 +112,6 @@ fun DecksScreen(
             }
         }
     }
-    LaunchedEffect(Unit) { ui { graph.repository.seedIfEmpty() } }
     // download recognition models for the decks' languages in the background
     val languages = remember(tree) { tree?.byId?.values?.map { it.language }?.toSet().orEmpty() }
     LaunchedEffect(languages) { languages.forEach { graph.recognizers.get(it).prefetch() } }
@@ -123,6 +124,7 @@ fun DecksScreen(
                 MenuButton(
                     "⋮",
                     listOf(
+                        "Готовые колоды" to onCatalog,
                         "Импорт колоды Anki (.apkg)" to { pickApkg.launch(arrayOf("*/*")) },
                         "Импорт текста (CSV, TSV)" to { pickText.launch(arrayOf("text/*", "application/csv", "*/*")) },
                         "Тренировка почерка" to onPractice,
@@ -133,11 +135,15 @@ fun DecksScreen(
             LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (weak.isNotEmpty()) item("practice") { PracticeBanner(weak, onPractice) }
                 if (tree != null && rows.isEmpty()) item("empty") {
-                    Text(
-                        "Колод пока нет. Создайте колоду или импортируйте её из Anki или текстового файла.",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(vertical = 24.dp),
-                    )
+                    Column(Modifier.padding(vertical = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text("Колод пока нет", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "Добавьте готовую колоду — кана, кандзи по классам, частые японские слова, HSK, корейская лексика — " +
+                                "или создайте свою, или импортируйте из Anki или текстового файла (меню «⋮»).",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Button(onClick = onCatalog, modifier = Modifier.testTag("open-catalog")) { Text("Готовые колоды") }
+                    }
                 }
                 items(rows, key = { it.deck.id }) { r ->
                     DeckRowCard(
@@ -203,6 +209,7 @@ private fun DeckRowCard(r: DeckRow, onToggle: () -> Unit, onOpen: () -> Unit, on
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
             Counts(r.newCount, r.learnCount, r.reviewCount)

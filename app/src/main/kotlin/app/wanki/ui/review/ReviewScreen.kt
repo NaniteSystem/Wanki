@@ -214,7 +214,7 @@ class ReviewState(private val graph: AppGraph, private val deckId: String) {
     fun suggested(): Rating? {
         val g = grade ?: return null
         val passed = g.passed ?: return null
-        val strokeCount = (layout as? WritingLayout.Cells)?.chars?.sumOf { graph.references.get(it)?.strokes?.size ?: 3 } ?: 6
+        val strokeCount = (layout as? WritingLayout.Cells)?.chars?.sumOf { graph.references.get(it, language)?.strokes?.size ?: 3 } ?: 6
         if (intro) return if (passed) Rating.GOOD else Rating.AGAIN
         val r = RatingPolicy().suggest(passed, usedHint, answeredAt - shownAt, strokeCount)
         return Rating.valueOf(r.name)
@@ -383,7 +383,7 @@ fun ReviewScreen(deckId: String, onClose: () -> Unit) {
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                Text(state.question, fontSize = 34.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+                Question(state.question)
                 if (state.mode == AnswerMode.HANDWRITING) WritingAnswer(state) else ClassicAnswer(state)
                 if (state.phase == Phase.ANSWER) RatingRow(state)
             }
@@ -441,6 +441,18 @@ private fun QuickEditDialog(c: CardWithNote, onDismiss: () -> Unit, onSave: (Str
     )
 }
 
+/** The first line is the question; further lines (readings, pinyin) are smaller hints. */
+@Composable
+private fun Question(text: String) {
+    val lines = text.lines()
+    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(lines.first(), fontSize = if (lines.first().length > 40) 26.sp else 34.sp, textAlign = TextAlign.Center, lineHeight = 40.sp)
+        lines.drop(1).filter { it.isNotBlank() }.forEach {
+            Text(it, fontSize = 20.sp, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
 @Composable
 private fun ClassicAnswer(state: ReviewState) {
     if (state.phase == Phase.QUESTION) {
@@ -492,7 +504,7 @@ private fun WritingAnswer(state: ReviewState) {
 
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
             if (state.intro && state.phase == Phase.QUESTION) {
-                val refs = cellsLayout?.chars?.mapNotNull { graph.references.get(it) }.orEmpty()
+                val refs = cellsLayout?.chars?.mapNotNull { graph.references.get(it, state.language) }.orEmpty()
                 Text("Новая карточка: посмотрите порядок черт и обведите по образцу", style = MaterialTheme.typography.titleSmall, color = HintColor)
                 if (refs.isNotEmpty()) {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { refs.forEach { StrokeOrderAnimation(it, Modifier.size(96.dp)) } }
@@ -513,7 +525,7 @@ private fun WritingAnswer(state: ReviewState) {
                                 cellsLayout.chars.forEachIndexed { i, ch ->
                                     val cell = Cell(i * cellPx, 0f, cellPx)
                                     drawTianzige(cell)
-                                    if (state.phase == Phase.QUESTION) graph.references.get(ch)?.let { ref ->
+                                    if (state.phase == Phase.QUESTION) graph.references.get(ch, state.language)?.let { ref ->
                                         when (state.hintLevel) {
                                             2 -> drawReference(ref, cell)
                                             1 -> {
@@ -534,7 +546,7 @@ private fun WritingAnswer(state: ReviewState) {
                             if (state.phase == Phase.ANSWER && g != null && cellsLayout != null) {
                                 val split = AnswerGrader.splitIntoCells(state.layer.strokes.toList(), cellsLayout.chars.size, cellPx)
                                 g.cells.forEachIndexed { i, cg ->
-                                    val ref = graph.references.get(cg.char) ?: return@forEachIndexed
+                                    val ref = graph.references.get(cg.char, state.language) ?: return@forEachIndexed
                                     val r = cg.result ?: return@forEachIndexed
                                     drawReview(ref, r, split[i], Cell(i * cellPx, 0f, cellPx))
                                 }
@@ -584,7 +596,7 @@ private fun Verdict(state: ReviewState) {
             SpeakButton(state)
         }
         // stroke order of the answer, animated (tap to replay)
-        val refs = (state.layout as? WritingLayout.Cells)?.chars?.mapNotNull { graph.references.get(it) }.orEmpty()
+        val refs = (state.layout as? WritingLayout.Cells)?.chars?.mapNotNull { graph.references.get(it, state.language) }.orEmpty()
         if (refs.isNotEmpty()) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 refs.forEach { StrokeOrderAnimation(it, Modifier.size(96.dp)) }

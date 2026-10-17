@@ -30,6 +30,9 @@ data class DeckEntity(
     @ColumnInfo(defaultValue = "200") val reviewsPerDay: Int = 200,
     /** Subdecks hidden in the deck list (UI state, does not bump [updatedAt]). */
     @ColumnInfo(defaultValue = "0") val collapsed: Boolean = false,
+    /** Ready-made deck this one was installed from (assets/decks/catalog.json), and its data version. */
+    val catalogId: String? = null,
+    val catalogVersion: String? = null,
 )
 
 /** Anki-compatible: fields are joined with 0x1F. Only the "basic" note type for now. */

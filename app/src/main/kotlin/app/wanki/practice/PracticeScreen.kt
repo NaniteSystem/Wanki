@@ -73,7 +73,7 @@ fun PracticeScreen(glyph: String?, language: String, onBack: () -> Unit) {
             val items = if (glyph != null) listOf(CharQuality(glyph, language, 0.0, 0, 0))
             else graph.repository.charQuality().filter { it.weak }
             queue.clear()
-            queue.addAll(items.filter { graph.references.get(it.glyph) != null })
+            queue.addAll(items.filter { graph.references.get(it.glyph, it.language) != null })
             loaded = true
         }
     }
@@ -99,7 +99,7 @@ fun PracticeScreen(glyph: String?, language: String, onBack: () -> Unit) {
             )
             current == null -> Summary(best, onBack)
             else -> {
-                val ref = graph.references.get(current.glyph) ?: return@Column
+                val ref = graph.references.get(current.glyph, current.language) ?: return@Column
                 val density = LocalDensity.current
                 val tool = remember { ToolSelection() }
                 fun next() {

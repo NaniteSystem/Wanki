@@ -108,7 +108,7 @@ private fun CardEditor(c: CardWithNote, tree: DeckTree, onBack: () -> Unit, onPr
     BackHandler { saveAndClose() }
 
     Column(Modifier.fillMaxSize()) {
-        ScreenHeader("Карточка", onBack = ::saveAndClose, subtitle = tree.path(deckId)) {
+        ScreenHeader("Карточка", onBack = ::saveAndClose, subtitle = tree.title(deckId)) {
             Button(onClick = ::saveAndClose, enabled = front.isNotBlank() && back.isNotBlank()) { Text(if (dirty) "Сохранить" else "Готово") }
         }
         Column(
@@ -119,7 +119,7 @@ private fun CardEditor(c: CardWithNote, tree: DeckTree, onBack: () -> Unit, onPr
             OutlinedTextField(back, { back = it }, label = { Text("Ответ") }, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(tags, { tags = it }, label = { Text("Теги через пробел") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Колода: " + tree.path(deckId), Modifier.weight(1f))
+                Text("Колода: " + tree.title(deckId), Modifier.weight(1f))
                 TextButton(onClick = { picking = true }) { Text("Изменить") }
             }
             Text("Как отвечать", style = MaterialTheme.typography.titleSmall)
@@ -130,7 +130,8 @@ private fun CardEditor(c: CardWithNote, tree: DeckTree, onBack: () -> Unit, onPr
                     FilterChip(writeOrd == 1, { writeOrd = 1 }, { Text("ответ") })
                     FilterChip(writeOrd == 0, { writeOrd = 0 }, { Text("вопрос") })
                 }
-                ReferenceInfo(if (writeOrd == 0) front else back) { ch -> onPractice(ch, tree.byId[deckId]?.language ?: "ja") }
+                val language = tree.byId[deckId]?.language ?: "ja"
+                ReferenceInfo(if (writeOrd == 0) front else back, language) { ch -> onPractice(ch, language) }
             }
             HorizontalDivider()
             Schedule(c)
@@ -167,7 +168,7 @@ private fun CardEditor(c: CardWithNote, tree: DeckTree, onBack: () -> Unit, onPr
 
 /** Which characters of the written side have stroke references (others are checked by the recognizer only). */
 @Composable
-private fun ReferenceInfo(answer: String, onPractice: (String) -> Unit) {
+private fun ReferenceInfo(answer: String, language: String, onPractice: (String) -> Unit) {
     val graph = LocalContext.current.graph
     val layout = WritingLayout.forAnswer(answer)
     if (layout !is WritingLayout.Cells) {
@@ -177,13 +178,13 @@ private fun ReferenceInfo(answer: String, onPractice: (String) -> Unit) {
         )
         return
     }
-    val missing = layout.chars.filter { graph.references.get(it) == null }
+    val missing = layout.chars.filter { graph.references.get(it, language) == null }
     Text(
         if (missing.isEmpty()) "Для всех знаков есть эталоны: проверяются черты, их порядок и почерк."
         else "Нет эталона для: ${missing.joinToString(" ")} — эти знаки проверяются только распознаванием.",
         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
-    val practicable = layout.chars.filter { graph.references.get(it) != null }.distinct()
+    val practicable = layout.chars.filter { graph.references.get(it, language) != null }.distinct()
     if (practicable.isNotEmpty()) {
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             practicable.forEach { ch -> OutlinedButton(onClick = { onPractice(ch) }) { Text("Тренировать $ch") } }

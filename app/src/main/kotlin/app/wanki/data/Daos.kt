@@ -44,6 +44,12 @@ interface DeckDao {
     @Upsert
     suspend fun upsert(deck: DeckEntity)
 
+    @Query("SELECT * FROM decks WHERE catalogId = :catalogId AND deleted = 0 LIMIT 1")
+    suspend fun byCatalogId(catalogId: String): DeckEntity?
+
+    @Query("SELECT * FROM decks WHERE catalogId IS NOT NULL AND deleted = 0")
+    fun observeInstalled(): Flow<List<DeckEntity>>
+
     @Query("UPDATE decks SET collapsed = :collapsed WHERE id = :id")
     suspend fun setCollapsed(id: String, collapsed: Boolean)
 
@@ -130,6 +136,10 @@ interface CardDao {
     @Query("SELECT COALESCE(MAX(position), 0) FROM cards")
     suspend fun maxPosition(): Long
 
+    /** Which of these card ids exist (deleted ones included: a card the user deleted stays deleted). */
+    @Query("SELECT id FROM cards WHERE id IN (:ids)")
+    suspend fun existing(ids: List<String>): List<String>
+
     @Query(
         """
         SELECT (due + :offset) / 86400000 AS day, COUNT(*) AS n FROM cards
@@ -187,6 +197,9 @@ interface NoteDao {
 
     @Query("SELECT * FROM notes WHERE id = :id")
     suspend fun get(id: String): NoteEntity?
+
+    @Query("SELECT * FROM notes WHERE id IN (:ids)")
+    suspend fun getAll(ids: List<String>): List<NoteEntity>
 
     /** Notes left without live cards are deleted too. */
     @Query(
