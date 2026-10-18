@@ -25,7 +25,7 @@ class HifzPlanTest {
         for (d in 1L..7L) p = HifzPlan.afterSabqi(p, false, d, 7)
         assertEquals(0, p.sabqiLeft)
         assertTrue(HifzPlan.sabqi(text(p), 8).isEmpty())
-        assertEquals(listOf("p0"), HifzPlan.manzilChunk(listOf(text(p)), null, 14))
+        assertEquals(listOf("p0"), HifzPlan.manzilChunk(listOf(text(p)), null, 14, 100))
     }
 
     @Test fun manzilErrorGoesBackToSabqi() =
@@ -33,27 +33,45 @@ class HifzPlanTest {
 
     @Test fun manzilChunkIsShareOfCycle() {
         val t = text(*Array(30) { piece(it, learned = 1) })
-        assertEquals((0 until 3).map { "p$it" }, HifzPlan.manzilChunk(listOf(t), null, 14)) // ceil(30/14) = 3
-        assertEquals((3 until 6).map { "p$it" }, HifzPlan.manzilChunk(listOf(t), "p3", 14))
+        assertEquals((0 until 3).map { "p$it" }, HifzPlan.manzilChunk(listOf(t), null, 14, 100)) // ceil(30/14) = 3
+        assertEquals((3 until 6).map { "p$it" }, HifzPlan.manzilChunk(listOf(t), "p3", 14, 100))
     }
 
     @Test fun manzilWrapsAroundAndNeverRepeats() {
         val t = text(piece(0, learned = 1), piece(1, learned = 1), piece(2, learned = 1))
-        assertEquals(listOf("p2", "p0"), HifzPlan.manzilChunk(listOf(t), "p2", 2))
+        assertEquals(listOf("p2", "p0"), HifzPlan.manzilChunk(listOf(t), "p2", 2, 100))
         assertEquals("p1", HifzPlan.nextPointer(listOf(t), listOf("p2", "p0")))
-        assertEquals(listOf("p0", "p1", "p2"), HifzPlan.manzilChunk(listOf(t), "p0", 1))
+        assertEquals(listOf("p0", "p1", "p2"), HifzPlan.manzilChunk(listOf(t), "p0", 1, 100))
     }
 
     @Test fun manzilGoesAcrossTextsInOrderAndSkipsFsrsTexts() {
         val a = text(piece(0, learned = 1), id = "a", order = 2)
         val b = text(PlanPiece("b0", 0, 1), id = "b", order = 1)
         val f = text(PlanPiece("f0", 0, 1), id = "f", order = 0, schedule = TextSchedule.FSRS)
-        assertEquals(listOf("b0", "p0"), HifzPlan.manzilChunk(listOf(a, b, f), null, 1))
+        assertEquals(listOf("b0", "p0"), HifzPlan.manzilChunk(listOf(a, b, f), null, 1, 100))
     }
 
     @Test fun pointerToMissingPieceStartsFromFirst() =
-        assertEquals(listOf("p0"), HifzPlan.manzilChunk(listOf(text(piece(0, learned = 1), piece(1, learned = 1))), "gone", 2))
+        assertEquals(listOf("p0"), HifzPlan.manzilChunk(listOf(text(piece(0, learned = 1), piece(1, learned = 1))), "gone", 2, 100))
 
     @Test fun noManzilPiecesNoPointer() =
         assertNull(HifzPlan.nextPointer(listOf(text(piece(0))), emptyList()))
+
+    @Test fun nextPointerSurvivesLastPieceErroring() {
+        val t = text(piece(0, learned = 1), piece(1, learned = 1), piece(2, learned = 1))
+        val chunk = listOf("p0", "p1")
+        val after = text(piece(0, learned = 1), HifzPlan.afterManzil(piece(1, learned = 1), true, 5, 7), piece(2, learned = 1))
+        assertEquals("p2", HifzPlan.nextPointer(listOf(after), chunk))
+        assertEquals("p2", HifzPlan.nextPointer(listOf(t), chunk))
+    }
+
+    @Test fun nextPointerSurvivesDeletedLastPiece() {
+        val t = text(piece(0, learned = 1), piece(2, learned = 1), piece(3, learned = 1))
+        assertEquals("p2", HifzPlan.nextPointer(listOf(t), listOf("p0", "p1")))
+    }
+
+    @Test fun pieceCountedTodayIsNotInTodaysChunk() {
+        val t = text(piece(0, learned = 1, hifzDay = 5), piece(1, learned = 1), piece(2, learned = 1))
+        assertEquals(listOf("p1"), HifzPlan.manzilChunk(listOf(t), null, 2, 5))
+    }
 }

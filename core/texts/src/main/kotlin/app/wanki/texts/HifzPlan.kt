@@ -9,28 +9,34 @@ object HifzPlan {
             .sortedBy { it.index }
             .map { it.id }
 
-    /** Manzil pieces in rotation order: hifz texts by order, then piece index. */
-    private fun manzilPieces(texts: List<PlanText>): List<String> =
+    /** Learned pieces of hifz texts in rotation order: texts by order, then piece index. */
+    private fun learnedPieces(texts: List<PlanText>): List<PlanPiece> =
         texts.filter { it.schedule == TextSchedule.HIFZ }
             .sortedBy { it.order }
-            .flatMap { t -> t.pieces.filter { it.learnedDay != null && it.sabqiLeft == 0 }.sortedBy { it.index } }
-            .map { it.id }
+            .flatMap { t -> t.pieces.filter { it.learnedDay != null }.sortedBy { it.index } }
 
     /** Today's share of the manzil: ceil(n / cycleDays) pieces starting at [pointer], circular. */
-    fun manzilChunk(texts: List<PlanText>, pointer: String?, cycleDays: Int): List<String> {
-        val all = manzilPieces(texts)
+    fun manzilChunk(texts: List<PlanText>, pointer: String?, cycleDays: Int, today: Long): List<String> {
+        val all = learnedPieces(texts).filter { it.sabqiLeft == 0 && it.hifzDay != today }.map { it.id }
         if (all.isEmpty()) return emptyList()
-        val size = ((all.size + cycleDays - 1) / cycleDays).coerceIn(1, all.size)
+        val days = cycleDays.coerceAtLeast(1)
+        val size = ((all.size + days - 1) / days).coerceIn(1, all.size)
         val start = all.indexOf(pointer).coerceAtLeast(0)
         return List(size) { all[(start + it) % all.size] }
     }
 
-    /** The piece after the chunk's last one; where tomorrow's manzil starts. */
+    /**
+     * The manzil piece after the chunk's last surviving piece; where tomorrow's manzil starts.
+     * Works before or after ratings: a chunk piece sent back to sabqi still marks the position.
+     */
     fun nextPointer(texts: List<PlanText>, chunk: List<String>): String? {
-        val all = manzilPieces(texts)
-        if (all.isEmpty()) return null
-        val last = chunk.lastOrNull()?.let { all.indexOf(it) } ?: -1
-        return all[(last + 1) % all.size]
+        val all = learnedPieces(texts)
+        val manzil = all.filter { it.sabqiLeft == 0 }
+        if (manzil.isEmpty()) return null
+        val start = chunk.indices.reversed().map { i -> all.indexOfFirst { it.id == chunk[i] } }.firstOrNull { it >= 0 } ?: -1
+        if (start < 0) return manzil.first().id
+        val order = List(all.size) { all[(start + 1 + it) % all.size] }.filter { it.sabqiLeft == 0 }
+        return (order.firstOrNull { it.id !in chunk } ?: order.first()).id
     }
 
     /** A piece just learned: it enters the sabqi window, first counted tomorrow. */
