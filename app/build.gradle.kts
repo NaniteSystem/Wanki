@@ -67,6 +67,7 @@ dependencies {
     implementation(project(":core:scoring"))
     implementation(project(":core:ink"))
     implementation(project(":core:srs"))
+    implementation(project(":core:texts"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)

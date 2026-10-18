@@ -19,6 +19,7 @@ rootProject.name = "Wanki"
 include(":core:scoring")
 include(":core:ink")
 include(":core:srs")
+include(":core:texts")
 
 // Android modules need an SDK. Without one (e.g. a plain JVM container) only the pure-JVM modules
 // are built; CI and Android Studio always have it.
