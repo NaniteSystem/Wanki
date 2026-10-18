@@ -11,7 +11,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
     entities = [
         DeckEntity::class, NoteEntity::class, CardEntity::class, ReviewLogEntity::class, InkAttemptEntity::class,
         NotebookEntity::class, PageEntity::class, PageInkEntity::class, TextNoteEntity::class, NoteBlockEntity::class,
-        CharScoreEntity::class, NoteTypeEntity::class,
+        CharScoreEntity::class, NoteTypeEntity::class, TextEntity::class, TextPieceEntity::class, RecitationEntity::class,
     ],
     version = WankiDatabase.VERSION,
     exportSchema = true,
@@ -25,10 +25,11 @@ abstract class WankiDatabase : RoomDatabase() {
     abstract fun noteTypes(): NoteTypeDao
     abstract fun notebooks(): NotebookDao
     abstract fun textNotes(): TextNoteDao
+    abstract fun texts(): TextDao
 
     companion object {
         const val NAME = "wanki.db"
-        const val VERSION = 5
+        const val VERSION = 6
 
         fun create(context: Context): WankiDatabase =
             Room.databaseBuilder(context, WankiDatabase::class.java, NAME)
@@ -100,6 +101,33 @@ abstract class WankiDatabase : RoomDatabase() {
             }
         }
 
-        val MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+        /** v6: texts learned by heart, their pieces and the recitation log. */
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `texts` (`id` TEXT NOT NULL, `title` TEXT NOT NULL, `language` TEXT NOT NULL, " +
+                        "`kind` TEXT NOT NULL, `schedule` TEXT NOT NULL, `portionSize` INTEGER NOT NULL, `active` INTEGER NOT NULL, " +
+                        "`lastPortionDay` INTEGER, `position` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, " +
+                        "`updatedAt` INTEGER NOT NULL, `deleted` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+                )
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `text_pieces` (`id` TEXT NOT NULL, `textId` TEXT NOT NULL, `pieceIndex` INTEGER NOT NULL, " +
+                        "`content` TEXT NOT NULL, `note` TEXT NOT NULL, `learnedAt` INTEGER, `state` TEXT NOT NULL, `step` INTEGER, " +
+                        "`stability` REAL, `difficulty` REAL, `due` INTEGER NOT NULL, `lastReview` INTEGER, `reps` INTEGER NOT NULL, " +
+                        "`lapses` INTEGER NOT NULL, `seed` INTEGER NOT NULL, `sabqiLeft` INTEGER NOT NULL, `hifzDay` INTEGER, " +
+                        "`updatedAt` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_text_pieces_textId` ON `text_pieces` (`textId`)")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `recitations` (`id` TEXT NOT NULL, `textId` TEXT NOT NULL, `pieceId` TEXT NOT NULL, " +
+                        "`at` INTEGER NOT NULL, `part` TEXT NOT NULL, `mode` TEXT NOT NULL, `rating` INTEGER, `error` INTEGER NOT NULL, " +
+                        "`hints` INTEGER NOT NULL, `durationMs` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_recitations_textId` ON `recitations` (`textId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_recitations_pieceId` ON `recitations` (`pieceId`)")
+            }
+        }
+
+        val MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
     }
 }

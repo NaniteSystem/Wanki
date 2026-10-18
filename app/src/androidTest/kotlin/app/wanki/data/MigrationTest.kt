@@ -84,7 +84,18 @@ class MigrationTest {
         db.query("SELECT COUNT(*) FROM note_types").use { c -> c.moveToFirst(); assertEquals(1, c.getInt(0)) }
     }
 
+    @Test
+    fun migrate5To6AddsTexts() {
+        helper.createDatabase(DB6, 5).close()
+        val db = helper.runMigrationsAndValidate(DB6, 6, true, WankiDatabase.MIGRATION_5_6)
+        db.execSQL("INSERT INTO texts (id, title, language, kind, schedule, portionSize, active, lastPortionDay, position, createdAt, updatedAt, deleted) VALUES ('t', 'Стих', 'ru', 'POEM', 'FSRS', 4, 1, NULL, 0, 0, 0, 0)")
+        db.execSQL("INSERT INTO text_pieces (id, textId, pieceIndex, content, note, learnedAt, state, step, stability, difficulty, due, lastReview, reps, lapses, seed, sabqiLeft, hifzDay, updatedAt) VALUES ('p', 't', 0, 'Строка', '', NULL, 'LEARNING', 0, NULL, NULL, 0, NULL, 0, 0, 1, 0, NULL, 0)")
+        db.execSQL("INSERT INTO recitations (id, textId, pieceId, at, part, mode, rating, error, hints, durationMs) VALUES ('r', 't', 'p', 0, 'NEW', 'SELF', 3, 0, 0, 0)")
+        db.query("SELECT COUNT(*) FROM recitations").use { c -> c.moveToFirst(); assertEquals(1, c.getInt(0)) }
+    }
+
     private companion object {
+        const val DB6 = "migration-test-6"
         const val DB5 = "migration-test-5"
         const val DB4 = "migration-test-4"
         const val DB = "migration-test"
