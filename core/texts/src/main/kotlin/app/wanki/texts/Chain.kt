@@ -1,6 +1,6 @@
 package app.wanki.texts
 
-/** One backward-chaining step: show line [cue] (if any), then recite the lines in [targets]. */
+/** One chaining step: show line [cue] (if any), then recite the lines in [targets]. */
 data class ChainStep(val cue: Int?, val targets: IntRange)
 
 object Chain {
