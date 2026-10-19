@@ -52,6 +52,20 @@ class TextRepositoryTest {
     }
 
     @Test
+    fun saveTextCreatesANewTextInOneCall() = runBlocking {
+        // the editor saves a new text this way: the text row and its pieces in one transaction
+        val t = TextEntity(title = " ", language = "ar", kind = TextKind.PROSE.name, schedule = TextSchedule.HIFZ.name, portionSize = 0)
+        texts.saveText(t, listOf(EditedPiece(null, "a", "n"), EditedPiece(null, "b", scheduleFrom = "missing")))
+        val stored = texts.text(t.id)!!
+        assertEquals(listOf("Текст", "ar", "PROSE", "HIFZ", 1), listOf(stored.title, stored.language, stored.kind, stored.schedule, stored.portionSize))
+        val pieces = texts.pieces(t.id)
+        assertEquals(listOf(Triple(0, "a", "n"), Triple(1, "b", "")), pieces.map { Triple(it.pieceIndex, it.content, it.note) })
+        assertTrue(pieces.all { it.learnedAt == null && it.sabqiLeft == 0 })
+        // portion size 0 was raised to 1
+        assertEquals(listOf(1), texts.today(now).items.filterIsInstance<TodayItem.NewPortion>().map { it.pieceIds.size })
+    }
+
+    @Test
     fun contentRoundTripsVerbatim() = runBlocking {
         val src = "بِسْمِ ٱللَّهِ ٱلرَّحْمَٰنِ ٱلرَّحِيمِ\nٱلْحَمْدُ لِلَّهِ رَبِّ ٱلْعَٰلَمِينَ"
         val t = texts.createText("Фатиха", "ar", TextKind.POEM, TextSchedule.HIFZ, 3, src)!!

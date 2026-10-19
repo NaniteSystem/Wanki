@@ -82,7 +82,10 @@ fun TextDetailScreen(id: String, onBack: () -> Unit, onEdit: (String) -> Unit) {
     val t = text
     val ps = pieces
     Column(Modifier.fillMaxSize()) {
-        ScreenHeader(t?.title.orEmpty(), onBack = onBack, subtitle = t?.let { "${textLanguageName(it.language)} · ${kindName(it.kind)}" }) {
+        ScreenHeader(
+            t?.title.orEmpty(), onBack = onBack,
+            subtitle = t?.let { "${textLanguageName(it.language)} · ${kindName(it.kind)}" }, subtitleMaxLines = 1,
+        ) {
             // "Изменить" sits with the other actions below: header actions squeeze the title at large font sizes
             if (t != null && !t.deleted) MenuButton("⋮", listOf("Изменить" to { onEdit(id) }, "Удалить" to { deleting = true }))
         }

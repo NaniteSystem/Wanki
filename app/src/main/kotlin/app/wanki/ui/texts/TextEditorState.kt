@@ -23,8 +23,10 @@ internal data class Draft(
 
 /**
  * The text editor: settings, the whole-text field and the pieces. Typing in the whole-text field re-splits it and
- * aligns the result with the pieces so edited ones keep their ids; editing, splitting or joining a piece rewrites
- * the whole-text field as one piece per line.
+ * aligns the result with the pieces so edited ones keep their ids; a piece with an id that drops out on the way (a
+ * line merged into its neighbour, deleted letter by letter, a sentence end deleted) waits in [dropped] and comes back
+ * with its id, schedule and note when its exact text does. Editing, splitting or joining a piece rewrites the
+ * whole-text field as one piece per line.
  */
 @Stable
 internal class TextEditorState {
@@ -49,6 +51,9 @@ internal class TextEditorState {
     var changed by mutableStateOf(false)
         private set
     private var nextKey = 0L
+    private val dropped = ArrayList<Draft>()
+    /** The stored content of each loaded piece: a dropped piece also comes back when this text does. */
+    private val saved = HashMap<String, String>()
 
     val canSave: Boolean get() = drafts.any { PieceDrafts.hasContent(it.value.text) }
 
@@ -63,6 +68,9 @@ internal class TextEditorState {
         drafts.clear()
         drafts += pieces.map { Draft(nextKey++, it.id, TextFieldValue(it.content), it.note) }
         content = pieces.joinToString("\n") { it.content }
+        dropped.clear()
+        saved.clear()
+        pieces.associateTo(saved) { it.id to it.content }
     }
 
     fun detected(code: String) { if (!languagePicked) { language = code; languageDetected = true } }
@@ -97,14 +105,13 @@ internal class TextEditorState {
                 drafts[i] = d.copy(value = TextFieldValue(""))
             } else {
                 drafts[i] = d.copy(value = TextFieldValue(parts[0], TextRange(parts[0].length)))
-                drafts.addAll(i + 1, parts.drop(1).map { Draft(nextKey++, null, TextFieldValue(it), scheduleFrom = d.id ?: d.scheduleFrom) })
+                parts.drop(1).forEachIndexed { k, part -> drafts.add(i + 1 + k, cutOff(part, d)) }
             }
         } else {
             if (v.text == d.value.text) { drafts[i] = d.copy(value = v); return } // cursor moved
             drafts[i] = d.copy(value = v)
         }
-        changed = true
-        syncContent()
+        piecesChanged()
     }
 
     fun editNote(i: Int, note: String) { drafts[i] = drafts[i].copy(note = note); changed = true }
@@ -125,9 +132,8 @@ internal class TextEditorState {
         val at = PieceDrafts.cutPoint(d.value.text, d.value.selection.start, Words.needsDictionary(language))
         val head = d.value.text.take(at).trimEnd()
         drafts[i] = d.copy(value = TextFieldValue(head, TextRange(head.length)))
-        drafts.add(i + 1, Draft(nextKey++, null, TextFieldValue(d.value.text.drop(at).trimStart()), scheduleFrom = d.id ?: d.scheduleFrom))
-        changed = true
-        syncContent()
+        drafts.add(i + 1, cutOff(d.value.text.drop(at).trimStart(), d))
+        piecesChanged()
     }
 
     /** The merged piece keeps the previous piece's schedule; notes are joined. */
@@ -144,8 +150,8 @@ internal class TextEditorState {
             noteOpen = p.noteOpen || c.noteOpen,
         )
         drafts.removeAt(i)
-        changed = true
-        syncContent()
+        if (c.id != null && c.id != drafts[i - 1].id) dropped += c
+        piecesChanged()
     }
 
     /** The title, or the first piece when it is blank. */
@@ -160,20 +166,41 @@ internal class TextEditorState {
     fun pieces(): List<EditedPiece> = drafts.filter { PieceDrafts.hasContent(it.value.text) }
         .map { EditedPiece(it.id, it.value.text.trim(), it.note.trim(), it.scheduleFrom) }
 
-    private fun syncContent() { content = drafts.joinToString("\n") { it.value.text.trim() } }
+    /** A change made to the pieces themselves: the whole-text field follows. */
+    private fun piecesChanged() {
+        changed = true
+        content = drafts.joinToString("\n") { it.value.text.trim() }
+    }
 
+    /** A dropped piece whose exact text (as dropped or as stored) is [text], taken out of [dropped]. */
+    private fun takeDropped(text: String): Draft? {
+        val i = dropped.indexOfLast { it.value.text.trim() == text || saved[it.id] == text }
+        return if (i < 0) null else dropped.removeAt(i).copy(value = TextFieldValue(text))
+    }
+
+    /** The piece cut off [from]: a dropped piece with this text comes back, else a new one copying [from]'s schedule. */
+    private fun cutOff(text: String, from: Draft): Draft =
+        takeDropped(text) ?: Draft(nextKey++, null, TextFieldValue(text), scheduleFrom = from.id ?: from.scheduleFrom)
+
+    /**
+     * The whole-text field split into [pieces], aligned with the drafts of a keystroke ago. A piece paired with a
+     * draft that has an id keeps it; any other piece first takes back a dropped piece with exactly its text, then
+     * keeps the id-less draft it was paired with, else is new (copying the schedule of the piece it was split from).
+     */
     private fun resplit(pieces: List<String>) {
         val old = drafts.toList()
         val origins = PieceDrafts.align(old.map { it.value.text.trim() }, pieces)
         val next = pieces.mapIndexed { j, s ->
             val o = origins[j]
             val prev = o.old?.let(old::get)
-            when {
-                prev == null -> Draft(nextKey++, null, TextFieldValue(s), scheduleFrom = o.splitFrom?.let(old::get)?.let { it.id ?: it.scheduleFrom })
-                prev.value.text == s -> prev
-                else -> prev.copy(value = TextFieldValue(s))
-            }
+            val d = prev?.takeIf { it.id != null }
+                ?: takeDropped(s)
+                ?: prev
+                ?: Draft(nextKey++, null, TextFieldValue(s), scheduleFrom = o.splitFrom?.let(old::get)?.let { it.id ?: it.scheduleFrom })
+            if (d.value.text == s) d else d.copy(value = TextFieldValue(s))
         }
+        val kept = next.mapTo(HashSet()) { it.key }
+        dropped += old.filter { it.id != null && it.key !in kept }
         if (next != old) { drafts.clear(); drafts.addAll(next) }
     }
 

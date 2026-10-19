@@ -74,35 +74,27 @@ fun TextEditorScreen(id: String?, onBack: () -> Unit, onSaved: (String) -> Unit)
     }
 
     fun save() {
-        if (saving || !state.canSave) return
-        saving = true
         val pieces = state.pieces()
+        // a text never has zero pieces (saveText would keep an empty list as "pieces unchanged")
+        if (saving || pieces.isEmpty()) return
+        saving = true
         val title = state.resolvedTitle()
-        val o = original
         val detect = if (state.languagePicked) null else state.content.take(2000)
         val picked = state.language
+        // a new text is one saveText call too: it stores the text and its pieces in one transaction
+        val base = original ?: TextEntity(title = title, language = picked)
         val kind = state.kind
         val schedule = state.schedule
         val portion = state.portion
         graph.appScope.launch {
             // saved right after pasting: the debounced detection may not have run yet
             val language = detect?.let { graph.textRecognition.identify(it) } ?: picked
-            val savedId = if (o == null) {
-                // createText splits by kind; the pieces as edited (joins, splits, notes) are saved over it
-                graph.texts.createText(title, language, kind, schedule, portion, pieces.joinToString("\n") { it.content })
-                    ?.also { t ->
-                        val created = graph.texts.pieces(t.id)
-                        graph.texts.saveText(t, pieces.mapIndexed { i, p -> p.copy(id = created.getOrNull(i)?.id) })
-                    }?.id
-            } else {
-                graph.texts.saveText(
-                    o.copy(title = title, language = language, kind = kind.name, schedule = schedule.name, portionSize = portion),
-                    pieces,
-                )
-                o.id
-            }
+            graph.texts.saveText(
+                base.copy(title = title, language = language, kind = kind.name, schedule = schedule.name, portionSize = portion),
+                pieces,
+            )
             saving = false
-            if (savedId != null) onSaved(savedId)
+            onSaved(base.id)
         }
     }
 

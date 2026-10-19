@@ -19,6 +19,7 @@ fun ScreenHeader(
     title: String,
     onBack: (() -> Unit)? = null,
     subtitle: String? = null,
+    subtitleMaxLines: Int = Int.MAX_VALUE,
     actions: @Composable () -> Unit = {},
 ) {
     Row(
@@ -32,7 +33,7 @@ fun ScreenHeader(
             if (subtitle != null) {
                 Text(
                     subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    maxLines = subtitleMaxLines, overflow = TextOverflow.Ellipsis,
                 )
             }
         }

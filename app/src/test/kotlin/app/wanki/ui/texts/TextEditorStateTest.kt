@@ -7,20 +7,24 @@ import app.wanki.data.TextEntity
 import app.wanki.data.TextPieceEntity
 import app.wanki.texts.TextKind
 import kotlin.test.Test
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class TextEditorStateTest {
-    private fun loaded(): TextEditorState {
-        val t = TextEntity(id = "t", title = "Стих", language = "ru")
-        return TextEditorState().apply {
-            load(t, listOf(
-                TextPieceEntity(id = "p1", textId = "t", pieceIndex = 0, content = "Раз два", note = "один"),
-                TextPieceEntity(id = "p2", textId = "t", pieceIndex = 1, content = "Три четыре", note = "два"),
-            ))
+    private fun loaded(vararg pieces: Pair<String, String>, kind: TextKind = TextKind.POEM, language: String = "ru") =
+        TextEditorState().apply {
+            val t = TextEntity(id = "t", title = "Стих", language = language, kind = kind.name)
+            load(t, pieces.mapIndexed { i, (content, note) ->
+                TextPieceEntity(id = "p${i + 1}", textId = "t", pieceIndex = i, content = content, note = note)
+            })
         }
-    }
+
+    private fun loaded() = loaded("Раз два" to "один", "Три четыре" to "два")
+
+    /** Feeds the whole-text field one state at a time, as typing does. */
+    private fun TextEditorState.type(vararg states: String) = states.forEach(::editContent)
 
     @Test
     fun splitAtTheCursorCopiesTheSchedule() {
@@ -78,5 +82,63 @@ class TextEditorStateTest {
         s.pickLanguage("ru")
         s.detected("ar")
         assertEquals("ru", s.language)
+    }
+
+    @Test
+    fun lineMergedIntoItsNeighbourAndSplitAgainKeepsItsId() {
+        val s = loaded("Мороз" to "один", "Пора" to "два")
+        s.type("МорозПора", "Мороз\nПора") // Backspace at the start of line 2, then Enter
+        assertEquals(listOf(EditedPiece("p1", "Мороз", "один"), EditedPiece("p2", "Пора", "два")), s.pieces())
+        // merged, split one letter off, then put right: the cut-off "зПора" is a split of p1 until it reads "Пора" again
+        s.type("МорозПора", "Моро\nзПора", "Моро\nПора", "Мороз\nПора")
+        assertEquals(listOf(EditedPiece("p1", "Мороз", "один"), EditedPiece("p2", "Пора", "два")), s.pieces())
+    }
+
+    @Test
+    fun joinUndoneByEnterBringsThePieceBack() {
+        val s = loaded("Мороз" to "один", "Пора" to "два")
+        s.joinWithPrevious(1)
+        s.type("Мороз\nПора")
+        assertEquals(listOf(EditedPiece("p1", "Мороз", "один два"), EditedPiece("p2", "Пора", "два")), s.pieces())
+    }
+
+    @Test
+    fun lineDeletedAndRetypedKeepsItsId() {
+        val s = loaded("Мороз" to "", "Пора" to "два", "Встань" to "")
+        s.type("Мороз\nПор\nВстань", "Мороз\nПо\nВстань", "Мороз\nП\nВстань", "Мороз\n\nВстань")
+        assertEquals(listOf("p1", "p3"), s.pieces().map { it.id })
+        s.type("Мороз\nП\nВстань", "Мороз\nПо\nВстань", "Мороз\nПор\nВстань", "Мороз\nПора\nВстань")
+        assertEquals(
+            listOf(EditedPiece("p1", "Мороз"), EditedPiece("p2", "Пора", "два"), EditedPiece("p3", "Встань")),
+            s.pieces(),
+        )
+    }
+
+    @Test
+    fun proseTerminatorDeletedAndRetypedKeepsBothIds() {
+        val s = loaded("Раз." to "один", "Два." to "два", kind = TextKind.PROSE)
+        s.type("Раз. Два.", "Раз Два.", "Раз. Два.")
+        assertEquals(listOf(EditedPiece("p1", "Раз.", "один"), EditedPiece("p2", "Два.", "два")), s.pieces())
+    }
+
+    @Test
+    fun movedLineKeepsItsId() {
+        val s = loaded("А" to "", "Б" to "", "В" to "")
+        s.type("Б\nВ", "Б\nВ\nА")
+        assertEquals(listOf("p2", "p3", "p1"), s.pieces().map { it.id })
+    }
+
+    @Test
+    fun arabicWithMarksRoundTripsByteForByte() {
+        val ayat = listOf("بِسْمِ ٱللَّهِ ٱلرَّحْمَٰنِ ٱلرَّحِيمِ ۝١", "ٱلْحَمْدُ لِلَّهِ رَبِّ ٱلْعَٰلَمِينَ ۝٢")
+        val s = loaded(ayat[0] to "", ayat[1] to "", language = "ar")
+        fun check() {
+            assertEquals(listOf("p1", "p2"), s.pieces().map { it.id })
+            s.pieces().zip(ayat).forEach { (p, a) -> assertContentEquals(a.toByteArray(), p.content.toByteArray()) }
+        }
+        check()
+        // re-aligned through the whole-text field: a blank line in between, then the text as it was
+        s.type(ayat.joinToString("\n\n"), ayat.joinToString("\n"))
+        check()
     }
 }
