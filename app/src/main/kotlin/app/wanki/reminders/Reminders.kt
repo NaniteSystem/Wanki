@@ -65,7 +65,7 @@ object Reminders {
         val text = buildList {
             if (due > 0) add("к повторению: $due")
             if (fresh > 0) add("новых: $fresh")
-            if (texts > 0) add("текстов: $texts")
+            if (texts > 0) add("кусков текста: $texts")
         }.joinToString(", ")
         val title = when {
             texts == 0 -> "Пора повторить карточки"

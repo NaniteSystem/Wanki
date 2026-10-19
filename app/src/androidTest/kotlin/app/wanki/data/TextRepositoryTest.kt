@@ -102,6 +102,59 @@ class TextRepositoryTest {
     }
 
     @Test
+    fun hifzToFsrsReplaysOnlyRatedLogs() = runBlocking {
+        val t = texts.createText("Сура", "ar", TextKind.POEM, TextSchedule.HIFZ, 1, "a\nb")!!
+        val p = texts.pieces(t.id)[0]
+        texts.completePortion(t.id, listOf(p.id), 0, now)
+        texts.completeSabqi(t.id, listOf(p.id), setOf(p.id), 0, now + DAY)
+        texts.logPractice(t.id, listOf(p.id), setOf(p.id), 0, 0, now + DAY + 1)
+        texts.switchSchedule(t.id, TextSchedule.FSRS, now + 2 * DAY)
+        val expected = FsrsScheduler(desiredRetention = settings.desiredRetention.toDouble())
+            .replay(listOf(Review(Rating.GOOD, now), Review(Rating.AGAIN, now + DAY)), p.seed) // practice left out
+        assertEquals(expected.due, texts.pieces(t.id)[0].due)
+    }
+
+    @Test
+    fun fsrsToHifzUsesRecency() = runBlocking {
+        val t = texts.createText("Т", "ru", TextKind.POEM, TextSchedule.FSRS, 1, "a\nb")!!
+        val p = texts.pieces(t.id)[0].id
+        texts.completePortion(t.id, listOf(p), 0, now)
+        texts.switchSchedule(t.id, TextSchedule.HIFZ, now + 3 * DAY)
+        assertEquals(4, texts.pieces(t.id)[0].sabqiLeft) // window 7, learned 3 days ago
+    }
+
+    @Test
+    fun manzilPointerAdvances() = runBlocking {
+        settings.sabqiDays = 1
+        settings.manzilCycleDays = 2
+        val t = texts.createText("Сура", "ar", TextKind.POEM, TextSchedule.HIFZ, 1, "a\nb\nc\nd")!!
+        val ids = texts.pieces(t.id).map { it.id }
+        texts.markLearned(t.id, 3, now)
+        val m = texts.today(now).items.filterIsInstance<TodayItem.Manzil>().single()
+        assertEquals(ids.take(2), m.pieceIds)
+        texts.completeManzil(m.pieceIds, emptySet(), 0, now)
+        assertEquals(ids.drop(2), texts.today(now + DAY).items.filterIsInstance<TodayItem.Manzil>().single().pieceIds)
+    }
+
+    @Test
+    fun splitPieceKeepsHistoryAcrossSwitch() = runBlocking {
+        val t = texts.createText("Т", "ru", TextKind.POEM, TextSchedule.FSRS, 2, "a\nb")!!
+        val (a, b) = texts.pieces(t.id)
+        texts.completePortion(t.id, listOf(a.id, b.id), 0, now)
+        texts.reviewPiece(a.id, Rating.GOOD, 0, 0, now + 3 * DAY)
+        texts.reviewPiece(b.id, Rating.HARD, 0, 0, now + 3 * DAY)
+        suspend fun log(pieceId: String) =
+            db.texts().recitations(t.id).filter { it.pieceId == pieceId }.map { Triple(it.part, it.rating, it.at) }
+        val parentLog = log(b.id)
+        texts.saveText(t, listOf(EditedPiece(a.id, "a"), EditedPiece(b.id, "b1"), EditedPiece(null, "b2", scheduleFrom = b.id)))
+        assertEquals(parentLog, log(texts.pieces(t.id)[2].id)) // the split-off piece carries the parent's log
+        texts.switchSchedule(t.id, TextSchedule.HIFZ, now + 4 * DAY)
+        texts.switchSchedule(t.id, TextSchedule.FSRS, now + 4 * DAY)
+        val (_, parent, split) = texts.pieces(t.id)
+        assertEquals(parent.due, split.due)
+    }
+
+    @Test
     fun markLearnedHifzGoesStraightToManzil() = runBlocking {
         val t = texts.createText("Т", "ru", TextKind.POEM, TextSchedule.HIFZ, 1, "a\nb\nc")!!
         texts.markLearned(t.id, 1, now)

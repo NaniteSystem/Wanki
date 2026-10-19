@@ -82,9 +82,10 @@ class TextRepository(private val db: WankiDatabase, private val settings: Settin
 
     /**
      * Saves the editor: title, language, kind, portion size and the pieces in the given order. A piece with
-     * an id keeps its row and schedule; a new one copies learnedAt, FSRS and hifz fields from
-     * [EditedPiece.scheduleFrom]; pieces left out are deleted (their recitations stay). A changed schedule
-     * goes through [switchSchedule]. An empty piece list leaves the pieces alone (a text never has none).
+     * an id keeps its row and schedule; a new one copies learnedAt, FSRS and hifz fields and the recitation
+     * log of [EditedPiece.scheduleFrom], so a later schedule switch replays the same history; pieces left out
+     * are deleted (their recitations stay). A changed schedule goes through [switchSchedule]. An empty piece
+     * list leaves the pieces alone (a text never has none).
      */
     suspend fun saveText(text: TextEntity, pieces: List<EditedPiece>) {
         val now = System.currentTimeMillis()
@@ -93,13 +94,24 @@ class TextRepository(private val db: WankiDatabase, private val settings: Settin
             if (pieces.isNotEmpty()) {
                 val existing = dao.pieces(text.id).associateBy { it.id }
                 val used = HashSet<String>()
+                val split = ArrayList<Pair<String, String>>() // new piece id to the piece it was split from
                 val rows = pieces.mapIndexed { i, e ->
-                    val base = e.id?.takeIf(used::add)?.let(existing::get)
-                        ?: e.scheduleFrom?.let(existing::get)?.copy(id = newId())
-                        ?: TextPieceEntity(textId = text.id, pieceIndex = i, content = e.content)
+                    val own = e.id?.takeIf(used::add)?.let(existing::get)
+                    val parent = if (own == null) e.scheduleFrom?.let(existing::get) else null
+                    val base = when {
+                        own != null -> own
+                        parent != null -> parent.copy(id = newId()).also { split += it.id to parent.id }
+                        else -> TextPieceEntity(textId = text.id, pieceIndex = i, content = e.content)
+                    }
                     base.copy(pieceIndex = i, content = e.content, note = e.note, updatedAt = now)
                 }
                 dao.upsertPieces(rows)
+                if (split.isNotEmpty()) {
+                    val logs = dao.recitations(text.id).groupBy { it.pieceId }
+                    dao.insertRecitations(split.flatMap { (child, parent) ->
+                        logs[parent].orEmpty().map { it.copy(id = newId(), pieceId = child) }
+                    })
+                }
                 val kept = rows.mapTo(HashSet()) { it.id }
                 existing.keys.filter { it !in kept }.chunked(500).forEach { dao.deletePieces(it) }
             }
@@ -144,7 +156,7 @@ class TextRepository(private val db: WankiDatabase, private val settings: Settin
                     Rating.entries.firstOrNull { it.value == r.rating }?.let { PieceLog(r.pieceId, r.at, it) }
                 }
                 val states = ScheduleSwitch.toFsrs(logs, scheduler(), pieces.associate { it.id to it.seed })
-                // a learned piece without a rated log (split off later) keeps the FSRS fields it was given
+                // a piece without a rated log keeps the FSRS fields it has
                 pieces.map { p -> states[p.id]?.let { p.withSrs(it, now) } ?: p }
             }
         }
