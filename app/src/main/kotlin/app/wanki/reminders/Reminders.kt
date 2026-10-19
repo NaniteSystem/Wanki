@@ -23,8 +23,8 @@ import java.time.ZoneId
 
 /**
  * The daily "time to review" notification. An inexact alarm (15-minute window, no special
- * permission) fires at the chosen time; the receiver posts the notification only when cards are
- * due and schedules the next day. Rescheduled on boot and whenever the app starts.
+ * permission) fires at the chosen time; the receiver posts the notification only when cards or
+ * text pieces are due and schedules the next day. Rescheduled on boot and whenever the app starts.
  */
 object Reminders {
     private const val CHANNEL = "reminders"
@@ -55,7 +55,8 @@ object Reminders {
         val tree = context.graph.repository.deckTree()
         val due = tree.roots.mapNotNull { tree.row(it.id) }.sumOf { it.dueCount }
         val fresh = tree.roots.mapNotNull { tree.row(it.id) }.sumOf { it.newCount }
-        if (due + fresh == 0 || !canNotify(context)) return
+        val texts = context.graph.texts.today().pieces
+        if (due + fresh + texts == 0 || !canNotify(context)) return
         ensureChannel(context)
         val open = PendingIntent.getActivity(
             context, 0, Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
@@ -64,10 +65,16 @@ object Reminders {
         val text = buildList {
             if (due > 0) add("к повторению: $due")
             if (fresh > 0) add("новых: $fresh")
+            if (texts > 0) add("текстов: $texts")
         }.joinToString(", ")
+        val title = when {
+            texts == 0 -> "Пора повторить карточки"
+            due + fresh == 0 -> "Пора повторить тексты"
+            else -> "Пора повторить"
+        }
         val n = NotificationCompat.Builder(context, CHANNEL)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle("Пора повторить карточки")
+            .setContentTitle(title)
             .setContentText(text.replaceFirstChar { it.uppercase() })
             .setContentIntent(open)
             .setAutoCancel(true)

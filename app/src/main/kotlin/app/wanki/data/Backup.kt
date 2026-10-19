@@ -41,10 +41,13 @@ class Backup(private val context: Context, private val db: WankiDatabase, privat
         settings.lastBackupAt = System.currentTimeMillis()
     }
 
+    /** Whether there is anything worth an automatic copy: a deck or a text. */
+    suspend fun hasContent(): Boolean = db.decks().count() > 0 || db.texts().countTexts() > 0
+
     /** One automatic copy a day (only once there is something to keep). */
     suspend fun autoBackupIfDue(now: Long = System.currentTimeMillis()) = withContext(Dispatchers.IO) {
         if (now - settings.lastBackupAt < DAY_MS) return@withContext
-        if (db.decks().count() == 0) return@withContext
+        if (!hasContent()) return@withContext
         val name = "wanki-" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmm")) + ".zip"
         val tmp = File(dir, "$name.part")
         // daily copies leave the media out (they stay in place when such a copy is restored)

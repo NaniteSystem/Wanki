@@ -35,24 +35,29 @@ interface TextDao {
     @Upsert
     suspend fun upsertPieces(pieces: List<TextPieceEntity>)
 
+    /** At most 500 ids per call (SQLite variable limit). */
     @Query("DELETE FROM text_pieces WHERE id IN (:ids)")
     suspend fun deletePieces(ids: List<String>)
 
-    /** Pieces of every live text on the hifz schedule. */
+    @Query("SELECT * FROM text_pieces WHERE id = :id")
+    suspend fun getPiece(id: String): TextPieceEntity?
+
+    /** At most 500 ids per call (SQLite variable limit). */
+    @Query("SELECT * FROM text_pieces WHERE id IN (:ids)")
+    suspend fun getPieces(ids: List<String>): List<TextPieceEntity>
+
+    /** Pieces of every live (not deleted) text. */
     @Query(
         """
         SELECT p.* FROM text_pieces p JOIN texts t ON t.id = p.textId
-        WHERE t.deleted = 0 AND t.schedule = 'HIFZ' ORDER BY t.position, p.pieceIndex
+        WHERE t.deleted = 0 ORDER BY t.position, p.pieceIndex
         """,
     )
-    suspend fun hifzPieces(): List<TextPieceEntity>
+    suspend fun livePieces(): List<TextPieceEntity>
 
     @Insert
     suspend fun insertRecitations(recitations: List<RecitationEntity>)
 
     @Query("SELECT * FROM recitations WHERE textId = :textId ORDER BY at")
     suspend fun recitations(textId: String): List<RecitationEntity>
-
-    @Query("SELECT * FROM recitations WHERE pieceId IN (:pieceIds) ORDER BY at")
-    suspend fun recitationsOfPieces(pieceIds: List<String>): List<RecitationEntity>
 }

@@ -1,0 +1,148 @@
+package app.wanki.data
+
+import android.content.Context
+import androidx.room.Room
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
+import app.wanki.srs.FsrsScheduler
+import app.wanki.srs.Rating
+import app.wanki.srs.Review
+import app.wanki.texts.TextKind
+import app.wanki.texts.TextSchedule
+import kotlinx.coroutines.runBlocking
+import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Before
+import org.junit.Test
+import org.junit.runner.RunWith
+import java.time.LocalDate
+import java.time.ZoneId
+
+@RunWith(AndroidJUnit4::class)
+class TextRepositoryTest {
+    private lateinit var context: Context
+    private lateinit var db: WankiDatabase
+    private lateinit var settings: Settings
+    private lateinit var texts: TextRepository
+
+    /** Noon, so no step of a test crosses midnight. */
+    private val now = LocalDate.of(2026, 10, 19).atTime(12, 0).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+
+    @Before
+    fun setUp() {
+        context = InstrumentationRegistry.getInstrumentation().targetContext
+        context.getSharedPreferences(Settings.NAME, Context.MODE_PRIVATE).edit().clear().commit()
+        db = Room.inMemoryDatabaseBuilder(context, WankiDatabase::class.java).build()
+        settings = Settings(context)
+        texts = TextRepository(db, settings)
+    }
+
+    @After
+    fun tearDown() {
+        db.close()
+        context.getSharedPreferences(Settings.NAME, Context.MODE_PRIVATE).edit().clear().commit()
+    }
+
+    @Test
+    fun createTextRejectsEmpty() = runBlocking {
+        assertNull(texts.createText("x", "ru", TextKind.POEM, TextSchedule.FSRS, 4, " \n — "))
+    }
+
+    @Test
+    fun contentRoundTripsVerbatim() = runBlocking {
+        val src = "بِسْمِ ٱللَّهِ ٱلرَّحْمَٰنِ ٱلرَّحِيمِ\nٱلْحَمْدُ لِلَّهِ رَبِّ ٱلْعَٰلَمِينَ"
+        val t = texts.createText("Фатиха", "ar", TextKind.POEM, TextSchedule.HIFZ, 3, src)!!
+        assertEquals(src.lines(), texts.pieces(t.id).map { it.content })
+    }
+
+    @Test
+    fun portionThenReviewByFsrs() = runBlocking {
+        val t = texts.createText("Стих", "ru", TextKind.POEM, TextSchedule.FSRS, 2, "a\nb\nc")!!
+        val today = texts.today(now)
+        assertEquals(listOf(2), today.items.filterIsInstance<TodayItem.NewPortion>().map { it.pieceIds.size })
+        val ids = today.items.first().pieceIds
+        texts.completePortion(t.id, ids, 1000, now)
+        assertTrue(texts.pieces(t.id).take(2).all { it.learnedAt == now && it.reps == 1 })
+        assertTrue(texts.today(now).items.none { it is TodayItem.NewPortion }) // one portion per day
+        assertEquals(1, texts.today(now + DAY).items.filterIsInstance<TodayItem.NewPortion>().size)
+        assertEquals(ids, texts.today(now + 2 * DAY).items.filterIsInstance<TodayItem.Review>().single().pieceIds)
+    }
+
+    @Test
+    fun hifzSabqiThenManzil() = runBlocking {
+        settings.sabqiDays = 2
+        val t = texts.createText("Сура", "ar", TextKind.POEM, TextSchedule.HIFZ, 1, "a\nb")!!
+        val p = texts.pieces(t.id)[0].id
+        texts.completePortion(t.id, listOf(p), 0, now)
+        for (d in 1..2) {
+            val s = texts.today(now + d * DAY).items.filterIsInstance<TodayItem.Sabqi>().single()
+            texts.completeSabqi(t.id, s.pieceIds, emptySet(), 0, now + d * DAY)
+        }
+        val m = texts.today(now + 3 * DAY).items.filterIsInstance<TodayItem.Manzil>().single()
+        assertEquals(listOf(p), m.pieceIds)
+        texts.completeManzil(m.pieceIds, setOf(p), 0, now + 3 * DAY) // error → back to sabqi
+        assertEquals(2, texts.pieces(t.id)[0].sabqiLeft)
+        assertTrue(texts.today(now + 3 * DAY).items.none { it is TodayItem.Manzil })
+    }
+
+    @Test
+    fun switchingTwiceKeepsHistory() = runBlocking {
+        val t = texts.createText("Т", "ru", TextKind.POEM, TextSchedule.FSRS, 1, "a\nb")!!
+        val p = texts.pieces(t.id)[0].id
+        texts.completePortion(t.id, listOf(p), 0, now)
+        texts.reviewPiece(p, Rating.GOOD, 0, 0, now + 3 * DAY)
+        texts.switchSchedule(t.id, TextSchedule.HIFZ, now + 3 * DAY)
+        texts.switchSchedule(t.id, TextSchedule.FSRS, now + 3 * DAY)
+        val expected = FsrsScheduler(desiredRetention = settings.desiredRetention.toDouble())
+            .replay(listOf(Review(Rating.GOOD, now), Review(Rating.GOOD, now + 3 * DAY)), texts.pieces(t.id)[0].seed)
+        assertEquals(expected.due, texts.pieces(t.id)[0].due)
+    }
+
+    @Test
+    fun markLearnedHifzGoesStraightToManzil() = runBlocking {
+        val t = texts.createText("Т", "ru", TextKind.POEM, TextSchedule.HIFZ, 1, "a\nb\nc")!!
+        texts.markLearned(t.id, 1, now)
+        assertEquals(listOf(0, 0), texts.pieces(t.id).take(2).map { it.sabqiLeft })
+        // piece c is still new today
+        assertEquals(1, texts.today(now).items.filterIsInstance<TodayItem.NewPortion>().single().pieceIds.size)
+    }
+
+    @Test
+    fun joinAndSplitKeepSchedule() = runBlocking {
+        val t = texts.createText("Т", "ru", TextKind.POEM, TextSchedule.FSRS, 2, "a\nb")!!
+        val (a, b) = texts.pieces(t.id)
+        texts.completePortion(t.id, listOf(a.id, b.id), 0, now)
+        texts.saveText(t, listOf(EditedPiece(a.id, "a\nb"), EditedPiece(null, "c", scheduleFrom = a.id)))
+        val after = texts.pieces(t.id)
+        assertEquals(listOf("a\nb", "c"), after.map { it.content })
+        assertEquals(a.id, after[0].id)
+        assertEquals(after[0].due, after[1].due)
+    }
+
+    @Test
+    fun practiceDoesNotMoveSchedule() = runBlocking {
+        val t = texts.createText("Т", "ru", TextKind.POEM, TextSchedule.FSRS, 1, "a")!!
+        val p = texts.pieces(t.id)[0]
+        texts.completePortion(t.id, listOf(p.id), 0, now)
+        val before = texts.pieces(t.id)[0]
+        texts.logPractice(t.id, listOf(p.id), setOf(p.id), 0, 0, now + 1)
+        texts.logPractice(t.id, listOf(p.id), setOf(p.id), 0, 0, now + 2)
+        assertEquals(before, texts.pieces(t.id)[0])
+        assertEquals(setOf(p.id), texts.weakPieces(t.id))
+    }
+
+    @Test
+    fun backupRunsWithOnlyTexts() = runBlocking {
+        val backup = Backup(context, db, settings)
+        assertFalse(backup.hasContent())
+        texts.createText("Т", "ru", TextKind.POEM, TextSchedule.FSRS, 1, "a")
+        assertTrue(backup.hasContent())
+    }
+
+    private companion object {
+        const val DAY = 86_400_000L
+    }
+}

@@ -7,6 +7,7 @@ import app.wanki.catalog.CatalogInstaller
 import app.wanki.data.Backup
 import app.wanki.data.Repository
 import app.wanki.data.Settings
+import app.wanki.data.TextRepository
 import app.wanki.data.WankiDatabase
 import app.wanki.media.MediaStore
 import app.wanki.recognition.RecognizerPool
@@ -30,6 +31,7 @@ class AppGraph(context: Context) {
     val recognizers = RecognizerPool(appScope)
     val references = ReferenceRepository(context.assets)
     val repository = Repository(db)
+    val texts = TextRepository(db, settings)
     val grader = AnswerGrader(references, recognizers, settings)
     val textRecognition = TextRecognition(recognizers, settings)
     val translation = TranslationService(textRecognition)

@@ -32,6 +32,15 @@ class Settings(context: Context) {
     /** Last automatic or manual backup, epoch ms. */
     var lastBackupAt by pref("lastBackupAt", 0L)
 
+    /** Hifz: how many study days a newly learned piece stays in sabqi. */
+    var sabqiDays by pref("sabqiDays", 7)
+    /** Hifz: days one full manzil cycle over all learned pieces takes. */
+    var manzilCycleDays by pref("manzilCycleDays", 14)
+    /** Id of the piece the next manzil chunk starts from; "" = from the beginning. */
+    var manzilPointer by pref("manzilPointer", "")
+    /** Epoch day the last manzil chunk was finished. */
+    var manzilDoneDay by pref("manzilDoneDay", -1L)
+
     val autoLanguageList: List<String> get() = autoLanguages.split(',').map { it.trim() }.filter { it.isNotEmpty() }
 
     fun scoringConfig() = ScoringConfig(
