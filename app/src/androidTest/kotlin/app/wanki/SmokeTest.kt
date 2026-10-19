@@ -5,6 +5,7 @@ import android.util.Log
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.down
 import androidx.compose.ui.test.hasTestTag
@@ -149,6 +150,25 @@ class SmokeTest {
         rule.waitUntilAtLeastOneExists(hasText("Тренировка почерка"), 10_000)
         rule.waitForIdle()
         shot("05g-practice")
+        back()
+
+        // Texts: the list from the decks screen, a new poem, its detail screen
+        rule.onNode(hasTestTag("open-texts")).performClick()
+        rule.waitUntilAtLeastOneExists(hasTestTag("new-text"), 10_000)
+        shot("14-texts")
+        rule.onNode(hasTestTag("new-text")).performClick()
+        rule.waitUntilAtLeastOneExists(hasTestTag("text-content"), 10_000)
+        rule.onNode(hasTestTag("text-content"))
+            .performTextInput("Мороз и солнце; день чудесный!\nЕщё ты дремлешь, друг прелестный —\nПора, красавица, проснись")
+        rule.waitForIdle()
+        shot("15-text-editor")
+        rule.onNode(hasTestTag("save-text")).performClick()
+        rule.waitUntilAtLeastOneExists(hasTestTag("text-detail"), 10_000)
+        rule.onAllNodes(hasText("Мороз", substring = true)).onFirst().assertIsDisplayed()
+        shot("16-text-detail")
+        back()
+        rule.waitUntilAtLeastOneExists(hasText("Все тексты"), 10_000)
+        shot("16b-texts-list")
         back()
 
         // Notebook: create, write on the page

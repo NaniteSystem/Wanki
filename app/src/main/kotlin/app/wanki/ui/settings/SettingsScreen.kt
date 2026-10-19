@@ -54,6 +54,7 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlin.math.roundToInt
 
 private val backupDate = DateTimeFormatter.ofPattern("d MMM yyyy, HH:mm", Locale.forLanguageTag("ru"))
 
@@ -108,6 +109,16 @@ fun SettingsScreen(onOpenLab: () -> Unit) {
                 s.desiredRetention = it
             }
             Toggle("Озвучивать ответ", "Ответ читается вслух голосом системы, когда показан", s.autoSpeak) { s.autoSpeak = it }
+            HorizontalDivider()
+            Text("Тексты", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "Для расписания «сабак·сабки·манзиль»: сабки — недавно выученные куски, они повторяются каждый день, " +
+                    "пока не пройдёт окно; манзиль — всё выученное раньше, по кругу.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            IntSetting("Окно сабки, дней", s.sabqiDays, 3..30) { s.sabqiDays = it }
+            IntSetting("Круг манзиля, дней", s.manzilCycleDays, 3..60) { s.manzilCycleDays = it }
             HorizontalDivider()
             Text("Проверка письма", style = MaterialTheme.typography.titleMedium)
             Setting("Порог «знак вспомнен»: %.0f%%".format(s.passThreshold), s.passThreshold, 40f..90f) { s.passThreshold = it }
@@ -265,6 +276,19 @@ private fun ReminderTimeDialog(minutes: Int, onDismiss: () -> Unit, onPick: (Int
         confirmButton = { TextButton(onClick = { onPick(state.hour * 60 + state.minute) }) { Text("Готово") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } },
     )
+}
+
+@Composable
+private fun IntSetting(label: String, value: Int, range: IntRange, onChange: (Int) -> Unit) {
+    Column {
+        Text("$label: $value", style = MaterialTheme.typography.bodyMedium)
+        Slider(
+            value = value.toFloat(),
+            onValueChange = { onChange(it.roundToInt().coerceIn(range)) },
+            // rounded instead of `steps`: a tick per day is too dense for a 3–60 range
+            valueRange = range.first.toFloat()..range.last.toFloat(),
+        )
+    }
 }
 
 @Composable

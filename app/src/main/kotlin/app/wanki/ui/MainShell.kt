@@ -36,6 +36,9 @@ import app.wanki.ui.notes.NotesScreen
 import app.wanki.ui.review.ReviewScreen
 import app.wanki.ui.settings.SettingsScreen
 import app.wanki.ui.stats.StatsScreen
+import app.wanki.ui.texts.TextDetailScreen
+import app.wanki.ui.texts.TextEditorScreen
+import app.wanki.ui.texts.TextsScreen
 import app.wanki.writing.WritingTestScreen
 
 sealed interface Route {
@@ -56,6 +59,10 @@ sealed interface Route {
     data class DiaryDay(val epochDay: Long) : Route
     data object Boards : Route
     data class Board(val id: String) : Route
+    data object Texts : Route
+    /** [id] null = a new text. */
+    data class TextEditor(val id: String?) : Route
+    data class TextDetail(val id: String) : Route
     data object Settings : Route
     data object Stats : Route
     data object WritingLab : Route
@@ -93,7 +100,7 @@ fun MainShell() {
         // Screens pushed on top of a tab (review, a page) take the whole screen; tab roots keep the bar.
         val immersive = nav.stack.size > 1 &&
             (nav.current is Route.Review || nav.current is Route.Practice || nav.current is Route.Notebook ||
-                nav.current is Route.DiaryDay || nav.current is Route.Board)
+                nav.current is Route.DiaryDay || nav.current is Route.Board || nav.current is Route.TextEditor)
         if (wide) {
             Row(Modifier.fillMaxSize()) {
                 NavigationRail {
@@ -140,7 +147,20 @@ private fun Content(nav: Navigator) {
             onBrowse = { nav.open(Route.Browser) },
             onPractice = { nav.open(Route.Practice()) },
             onCatalog = { nav.open(Route.Catalog) },
+            onTexts = { nav.open(Route.Texts) },
         )
+        Route.Texts -> TextsScreen(
+            onBack = { nav.back() },
+            onOpen = { nav.open(Route.TextDetail(it)) },
+            onNew = { nav.open(Route.TextEditor(null)) },
+        )
+        is Route.TextEditor -> TextEditorScreen(
+            r.id,
+            onBack = { nav.back() },
+            // a new text replaces the editor with its detail screen; an edited one returns to it
+            onSaved = { id -> nav.back(); if (r.id == null) nav.open(Route.TextDetail(id)) },
+        )
+        is Route.TextDetail -> TextDetailScreen(r.id, onBack = { nav.back() }, onEdit = { nav.open(Route.TextEditor(it)) })
         Route.Catalog -> CatalogScreen(onBack = { nav.back() }, onOpenDeck = { nav.open(Route.Deck(it)) })
         Route.Stats -> StatsScreen(onBack = { nav.back() }, onPractice = { nav.open(Route.Practice()) })
         is Route.Deck -> DeckScreen(

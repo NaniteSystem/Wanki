@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -73,6 +74,7 @@ fun DecksScreen(
     onBrowse: () -> Unit = {},
     onPractice: () -> Unit = {},
     onCatalog: () -> Unit = {},
+    onTexts: () -> Unit = {},
 ) {
     val graph = LocalContext.current.graph
     // "now" is refreshed on resume so due counts stay current
@@ -84,6 +86,9 @@ fun DecksScreen(
     val tree by remember(now) { graph.repository.observeDeckTree(now) }.collectAsState(null)
     val rows = remember(tree) { tree?.rows().orEmpty() }
     val reviewedToday by remember { graph.repository.observeReviewedToday() }.collectAsState(0)
+    val texts by remember { graph.texts.observeTexts() }.collectAsState(null)
+    // re-collected with "now": a new day or changed hifz settings change the plan without a database change
+    val textToday by remember(now) { graph.texts.observeToday() }.collectAsState(null)
     val scoreCount by remember { graph.repository.observeCharScoreCount() }.collectAsState(0)
     val weak by produceState(emptyList<CharQuality>(), scoreCount) { value = ui { graph.repository.charQuality().filter { it.weak } } }
     var creating by remember { mutableStateOf(false) }
@@ -148,6 +153,7 @@ fun DecksScreen(
                 )
             }
             LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                item("texts") { TextsRow(texts?.isNotEmpty(), textToday?.pieces, onTexts) }
                 if (weak.isNotEmpty()) item("practice") { PracticeBanner(weak, onPractice) }
                 if (tree != null && rows.isEmpty()) item("empty") {
                     Column(Modifier.padding(vertical = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -187,6 +193,28 @@ fun DecksScreen(
         CreateDeckDialog(tree, onDismiss = { creating = false }) { name, lang, mode, parent ->
             creating = false
             graph.appScope.launch { onOpen(graph.repository.createDeck(name, lang, mode, parent).id) }
+        }
+    }
+}
+
+/** Entry to texts learned by heart; [hasTexts] and [today] are null while loading. */
+@Composable
+private fun TextsRow(hasTexts: Boolean?, today: Int?, onClick: () -> Unit) {
+    Card(onClick = onClick, modifier = Modifier.fillMaxWidth().testTag("open-texts")) {
+        Row(Modifier.heightIn(min = 56.dp).padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Тексты", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    when (hasTexts) {
+                        null -> ""
+                        true -> today?.let { "Сегодня: $it" }.orEmpty()
+                        false -> "Стихи, отрывки, любые тексты наизусть"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Text("›", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
