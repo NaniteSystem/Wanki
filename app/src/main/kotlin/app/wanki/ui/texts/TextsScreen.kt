@@ -1,6 +1,7 @@
 package app.wanki.ui.texts
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -58,7 +59,7 @@ import app.wanki.ui.decks.NewColor
 private data class Progress(val learned: Int, val total: Int)
 
 @Composable
-fun TextsScreen(onBack: () -> Unit, onOpen: (String) -> Unit, onNew: () -> Unit) {
+fun TextsScreen(onBack: () -> Unit, onOpen: (String) -> Unit, onNew: () -> Unit, onStudy: (StudyRequest) -> Unit) {
     val graph = LocalContext.current.graph
     // the plan depends on the day and the hifz settings, not only on the database: recompute on resume
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
@@ -85,7 +86,7 @@ fun TextsScreen(onBack: () -> Unit, onOpen: (String) -> Unit, onNew: () -> Unit)
                 if (maxWidth >= 840.dp) {
                     Row(Modifier.fillMaxSize().padding(horizontal = 24.dp), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
                         LazyColumn(Modifier.weight(1f), contentPadding = bottom, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            todaySection(today, texts)
+                            todaySection(today, texts, onStudy)
                         }
                         LazyColumn(Modifier.weight(1f), contentPadding = bottom, verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             textsSection(texts, progress, onOpen, onNew)
@@ -97,7 +98,7 @@ fun TextsScreen(onBack: () -> Unit, onOpen: (String) -> Unit, onNew: () -> Unit)
                         contentPadding = bottom,
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        todaySection(today, texts)
+                        todaySection(today, texts, onStudy)
                         item { Spacer(Modifier.size(8.dp)) }
                         textsSection(texts, progress, onOpen, onNew)
                     }
@@ -110,7 +111,7 @@ fun TextsScreen(onBack: () -> Unit, onOpen: (String) -> Unit, onNew: () -> Unit)
     }
 }
 
-private fun LazyListScope.todaySection(today: TextToday?, texts: List<TextEntity>?) {
+private fun LazyListScope.todaySection(today: TextToday?, texts: List<TextEntity>?, onStudy: (StudyRequest) -> Unit) {
     item { SectionTitle("Сегодня") }
     if (today == null || texts == null) return
     if (today.items.isEmpty()) {
@@ -122,7 +123,7 @@ private fun LazyListScope.todaySection(today: TextToday?, texts: List<TextEntity
             )
         }
     }
-    items(today.items) { TodayRow(it) }
+    items(today.items) { TodayRow(it) { onStudy(it.toStudyRequest()) } }
 }
 
 private fun LazyListScope.textsSection(
@@ -139,9 +140,9 @@ private fun SectionTitle(text: String) {
     Text(text, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 8.dp, bottom = 4.dp))
 }
 
-/** "Новое: <title> · N"; not clickable yet (study sessions come later). */
+/** "Новое: <title> · N"; a tap opens the study session for this block. */
 @Composable
-private fun TodayRow(item: TodayItem) {
+private fun TodayRow(item: TodayItem, onClick: () -> Unit) {
     val (kind, color) = when (item) {
         is TodayItem.NewPortion -> (if (scheduleOf(item.text.schedule) == TextSchedule.HIFZ) "Сабак" else "Новое") to NewColor
         is TodayItem.Review -> "Повторить" to DueColor
@@ -154,7 +155,7 @@ private fun TodayRow(item: TodayItem) {
         is TodayItem.Sabqi -> item.text.title
         is TodayItem.Manzil -> null
     }
-    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(onClick = onClick), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(10.dp).background(color, CircleShape))
         Spacer(Modifier.width(12.dp))
         Text(

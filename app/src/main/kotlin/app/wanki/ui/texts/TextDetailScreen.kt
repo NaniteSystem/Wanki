@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.LinearProgressIndicator
@@ -63,7 +64,7 @@ private fun status(p: TextPieceEntity, schedule: TextSchedule, now: Long) = when
 }
 
 @Composable
-fun TextDetailScreen(id: String, onBack: () -> Unit, onEdit: (String) -> Unit) {
+fun TextDetailScreen(id: String, onBack: () -> Unit, onEdit: (String) -> Unit, onStudy: (StudyRequest) -> Unit) {
     val graph = LocalContext.current.graph
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LifecycleResumeEffect(Unit) {
@@ -102,6 +103,8 @@ fun TextDetailScreen(id: String, onBack: () -> Unit, onEdit: (String) -> Unit) {
                 onEdit = { onEdit(id) },
                 onPause = { graph.appScope.launch { graph.texts.setActive(id, !t.active) } },
                 onSwitch = { switching = true },
+                onLearn = if (portion.isNotEmpty()) ({ onStudy(StudyRequest(StudyKind.LEARN, id, portion)) }) else null,
+                onPractice = if (ps.isNotEmpty()) ({ onStudy(StudyRequest(StudyKind.PRACTICE, id, ps.map { it.id })) }) else null,
             )
         }
         BoxWithConstraints(Modifier.fillMaxSize().testTag("text-detail")) {
@@ -182,6 +185,7 @@ fun TextDetailScreen(id: String, onBack: () -> Unit, onEdit: (String) -> Unit) {
 @Composable
 private fun Summary(
     t: TextEntity, pieces: List<TextPieceEntity>, portion: Int, onEdit: () -> Unit, onPause: () -> Unit, onSwitch: () -> Unit,
+    onLearn: (() -> Unit)?, onPractice: (() -> Unit)?,
 ) {
     val learned = pieces.count { it.learnedAt != null }
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -203,6 +207,10 @@ private fun Summary(
             },
             style = MaterialTheme.typography.bodyMedium,
         )
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            if (onLearn != null) Button(onClick = onLearn, modifier = Modifier.testTag("learn-portion")) { Text("Учить порцию") }
+            if (onPractice != null) OutlinedButton(onClick = onPractice) { Text("Рассказать весь текст") }
+        }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             OutlinedButton(onClick = onEdit) { Text("Изменить") }
             OutlinedButton(onClick = onPause) { Text(if (t.active) "Пауза" else "Продолжить") }
