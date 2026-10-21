@@ -210,23 +210,33 @@ class TextRepository(private val db: WankiDatabase, private val settings: Settin
             dao.insertRecitations(logRows(listOf(next), RecitationPart.REVIEW, now, durationMs, hints, errors) { rating.value })
         }
 
-    /** Today's sabqi of a text; a piece with an error stays in sabqi for a full window again. */
+    /**
+     * Today's sabqi of a text; a piece with an error stays in sabqi for a full window again. A piece already
+     * recited in sabqi today is skipped, so a double submit neither logs a second error nor moves it twice.
+     */
     suspend fun completeSabqi(
         textId: String, pieceIds: List<String>, errorIds: Set<String>, durationMs: Long, now: Long = System.currentTimeMillis(),
     ) = db.withTransaction {
         val today = day(now)
         val byId = dao.pieces(textId).associateBy { it.id }
-        val done = pieceIds.distinct().mapNotNull { byId[it] }.map {
+        val doneToday = dao.recitations(textId)
+            .filter { it.part == RecitationPart.SABQI.name && day(it.at) == today }.mapTo(HashSet()) { it.pieceId }
+        val done = pieceIds.distinct().filter { it !in doneToday }.mapNotNull { byId[it] }.map {
             it.withHifz(HifzPlan.afterSabqi(it.plan(), it.id in errorIds, today, settings.sabqiDays), now)
         }
+        if (done.isEmpty()) return@withTransaction
         dao.upsertPieces(done)
         dao.insertRecitations(logRows(done, RecitationPart.SABQI, now, durationMs, 0, errorIds, ::hifzRating))
     }
 
-    /** Today's manzil chunk: a piece with an error goes back to sabqi; the pointer moves past the chunk. */
+    /**
+     * Today's manzil chunk: a piece with an error goes back to sabqi; the pointer moves past the chunk. Once
+     * a day: when today's manzil is already done (a double submit), nothing changes.
+     */
     suspend fun completeManzil(pieceIds: List<String>, errorIds: Set<String>, durationMs: Long, now: Long = System.currentTimeMillis()) =
         db.withTransaction {
             val today = day(now)
+            if (settings.manzilDoneDay == today) return@withTransaction
             val texts = dao.texts()
             val all = dao.livePieces()
             val chunk = pieceIds.toSet()

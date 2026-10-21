@@ -80,6 +80,7 @@ fun VoiceBar(pieceIds: List<String>, snackbar: SnackbarHostState, scope: Corouti
 
     fun startRecording() {
         graph.media.stop()
+        graph.speaker.stop() // TTS must not end up in the recording
         runCatching { graph.recorder.start(name) }
             .onSuccess { changed() }
             .onFailure { say("Микрофон недоступен") }
@@ -93,6 +94,7 @@ fun VoiceBar(pieceIds: List<String>, snackbar: SnackbarHostState, scope: Corouti
     }
 
     fun play(loop: Boolean) {
+        graph.speaker.stop() // your own voice and TTS never talk over each other
         if (!graph.media.play(name, loop)) say("Не удалось воспроизвести запись")
     }
 

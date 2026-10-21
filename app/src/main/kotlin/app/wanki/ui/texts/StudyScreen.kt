@@ -83,6 +83,9 @@ class StudyState(private val graph: AppGraph, val request: StudyRequest) {
         private set
     var errorPieces by mutableStateOf<Set<String>>(emptySet())
         private set
+    /** Pieces a hint was taken in; mode switches and taps on the card never clear it (only a fresh attempt does). */
+    var hintedPieces by mutableStateOf<Set<String>>(emptySet())
+        private set
     var hints by mutableIntStateOf(0)
         private set
     var allRevealed by mutableStateOf(false)
@@ -103,6 +106,10 @@ class StudyState(private val graph: AppGraph, val request: StudyRequest) {
     var reviewIndex by mutableIntStateOf(0)
         private set
     private var pieceShownAt = startedAt
+
+    /** True while a result is being written: «Без ошибок», «Готово» and the ratings are disabled, double taps dropped. */
+    private val saving = BusyGuard()
+    val busy: Boolean get() = saving.busy
 
     // first-letters typing
     private var flIndex by mutableIntStateOf(0)
@@ -128,6 +135,8 @@ class StudyState(private val graph: AppGraph, val request: StudyRequest) {
 
     fun switchMode(m: StudyMode) {
         if (m == mode) return
+        // LEARN judges the recital itself: practice hints in other modes must not block «Без ошибок»
+        if (startsFreshRecital(request.kind, mode, m)) resetAttempt()
         mode = m
         // a fresh view for the new mode; hints and marked mistakes carry over
         revealedWords = emptySet()
@@ -145,11 +154,16 @@ class StudyState(private val graph: AppGraph, val request: StudyRequest) {
         if (hint) {
             hints++
             cueDirty = true
-            if (request.kind != StudyKind.LEARN && request.kind != StudyKind.REVIEW) errorPieces = errorPieces + piece.id
+            hintedPieces = hintedPieces + piece.id
         }
     }
 
-    fun jumpCue(level: Int) { cueLevel = level.coerceIn(0, VanishingCues.MAX_LEVEL); revealedWords = emptySet(); cueDirty = false }
+    /** The slider: only a real level change resets the reveals (a drag fires many events on the same level). */
+    fun jumpCue(level: Int) {
+        cueLevel = cueJump(cueLevel, level) ?: return
+        revealedWords = emptySet()
+        cueDirty = false
+    }
 
     /**
      * "Дальше" = "I recited this level": a clean level rises to the next one; a dirty one is retried with
@@ -163,8 +177,11 @@ class StudyState(private val graph: AppGraph, val request: StudyRequest) {
 
     fun reveal() { allRevealed = true }
 
+    /** Shown as an error: marked by hand or a hint was taken in it. */
+    fun isError(pieceId: String): Boolean = pieceId in errorPieces || pieceId in hintedPieces
+
     fun toggleError(pieceId: String) {
-        errorPieces = if (pieceId in errorPieces) errorPieces - pieceId else errorPieces + pieceId
+        errorPieces = toggleMark(errorPieces, hintedPieces, pieceId)
     }
 
     // --- chain ---
@@ -188,30 +205,37 @@ class StudyState(private val graph: AppGraph, val request: StudyRequest) {
     private fun sessionDuration(): Long = (System.currentTimeMillis() - startedAt).coerceAtLeast(0)
 
     /** "Без ошибок": the portion is learned. Only valid for a clean recital. */
-    suspend fun learnClean() {
-        if (!clean) return
+    suspend fun learnClean() = saving.run {
+        if (!clean || finished) return@run
         graph.texts.completePortion(request.textId!!, request.pieceIds, sessionDuration())
         finished = true
     }
 
     /** "Ещё раз": a fresh attempt in the same LEARN session. */
     fun again() {
-        revealedWords = emptySet()
-        errorPieces = emptySet()
-        hints = 0
-        allRevealed = false
-        cueDirty = false
+        resetAttempt()
         cueLevel = 0
         mode = StudyMode.RECITE
     }
 
+    private fun resetAttempt() {
+        revealedWords = emptySet()
+        errorPieces = emptySet()
+        hintedPieces = emptySet()
+        hints = 0
+        allRevealed = false
+        cueDirty = false
+    }
+
     /** One FSRS review outcome for the current piece, then move on. */
-    suspend fun rate(outcome: RecallOutcome) {
-        val piece = pieces.getOrNull(reviewIndex) ?: return
+    suspend fun rate(outcome: RecallOutcome) = saving.run {
+        if (finished) return@run
+        val piece = pieces.getOrNull(reviewIndex) ?: return@run
         val rating = TextRating.rating(outcome, usedHints = hints > 0)
         graph.texts.reviewPiece(piece.id, rating, hints, duration())
         reviewIndex++
         hints = 0
+        hintedPieces = emptySet()
         revealedWords = emptySet()
         allRevealed = false
         pieceShownAt = System.currentTimeMillis()
@@ -223,8 +247,9 @@ class StudyState(private val graph: AppGraph, val request: StudyRequest) {
         allPieces.firstOrNull { it.textId == piece.textId && it.pieceIndex == piece.pieceIndex - 1 }
 
     /** "Готово": write the sabqi/manzil/practice result. */
-    suspend fun reciteDone() {
-        val errs = recitalErrors(errorPieces, revealedWords)
+    suspend fun reciteDone() = saving.run {
+        if (finished) return@run
+        val errs = recitalErrors(errorPieces, hintedPieces)
         when (request.kind) {
             StudyKind.SABQI -> graph.texts.completeSabqi(request.textId!!, request.pieceIds, errs, sessionDuration())
             StudyKind.MANZIL -> graph.texts.completeManzil(request.pieceIds, errs, sessionDuration())
@@ -344,7 +369,7 @@ private fun PieceCard(
     markable: Boolean,
     speak: (TextPieceEntity) -> Unit,
 ) {
-    val error = piece.id in state.errorPieces
+    val error = state.isError(piece.id)
     val colors = if (error) CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer) else CardDefaults.cardColors()
     val mod = Modifier.fillMaxWidth().let { if (markable) it.clickable { state.toggleError(piece.id) } else it }
     Card(colors = colors, modifier = mod) {
@@ -474,12 +499,12 @@ private fun ReciteBody(state: StudyState, scope: kotlinx.coroutines.CoroutineSco
             } else if (learn) {
                 Text("Отметьте куски, где ошиблись. Без ошибок — порция выучена.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = { scope.launch { state.learnClean() } }, enabled = state.clean, modifier = Modifier.testTag("learned")) { Text("Без ошибок") }
-                    OutlinedButton(onClick = { state.again() }) { Text("Ещё раз") }
+                    Button(onClick = { scope.launch { state.learnClean() } }, enabled = state.clean && !state.busy, modifier = Modifier.testTag("learned")) { Text("Без ошибок") }
+                    OutlinedButton(onClick = { state.again() }, enabled = !state.busy) { Text("Ещё раз") }
                 }
             } else {
                 Text("Отметьте куски, где ошиблись, затем «Готово».", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Button(onClick = { scope.launch { state.reciteDone() } }, modifier = Modifier.testTag("done")) { Text("Готово") }
+                Button(onClick = { scope.launch { state.reciteDone() } }, enabled = !state.busy, modifier = Modifier.testTag("done")) { Text("Готово") }
             }
         }
     }
@@ -505,6 +530,7 @@ private fun ReviewBody(state: StudyState, scope: kotlinx.coroutines.CoroutineSco
                 Button(onClick = { state.reveal() }, modifier = Modifier.testTag("reveal")) { Text("Показать") }
             } else {
                 FlowRowButtons(
+                    enabled = !state.busy,
                     "Не вспомнил" to { scope.launch { state.rate(RecallOutcome.FORGOT) } },
                     "С ошибками" to { scope.launch { state.rate(RecallOutcome.ERRORS) } },
                     "Верно" to { scope.launch { state.rate(RecallOutcome.CORRECT) } },
@@ -517,9 +543,9 @@ private fun ReviewBody(state: StudyState, scope: kotlinx.coroutines.CoroutineSco
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun FlowRowButtons(vararg actions: Pair<String, () -> Unit>) {
+private fun FlowRowButtons(enabled: Boolean, vararg actions: Pair<String, () -> Unit>) {
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        actions.forEach { (label, action) -> OutlinedButton(onClick = action) { Text(label) } }
+        actions.forEach { (label, action) -> OutlinedButton(onClick = action, enabled = enabled) { Text(label) } }
     }
 }
 

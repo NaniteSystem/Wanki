@@ -35,6 +35,13 @@ class Speaker(private val context: Context) {
         return say(text, language)
     }
 
+    /** Stops speech now and drops a request still waiting for the engine to start (your own voice takes over). */
+    @Synchronized
+    fun stop() {
+        pending = null
+        tts?.takeIf { ready }?.stop()
+    }
+
     private fun say(text: String, language: String): Boolean {
         val engine = tts ?: return false
         val result = engine.setLanguage(locale(language))

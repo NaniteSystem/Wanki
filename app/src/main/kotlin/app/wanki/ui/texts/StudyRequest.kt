@@ -1,5 +1,8 @@
 package app.wanki.ui.texts
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import app.wanki.data.TodayItem
 import app.wanki.texts.VanishingCues
 
@@ -33,6 +36,42 @@ fun nextCueLevel(level: Int, revealedThisLevel: Boolean): Int =
 /** A learn portion counts as learned only when nothing was revealed and no piece is marked wrong. */
 fun isClean(hints: Int, markedErrors: Set<String>): Boolean = hints == 0 && markedErrors.isEmpty()
 
-/** The errors of a recital: pieces marked by hand plus every piece a word was revealed in. */
-fun recitalErrors(marked: Set<String>, revealed: Set<WordRef>): Set<String> =
-    marked + revealed.map { it.pieceId }
+/**
+ * The errors of a recital: pieces marked by hand plus every piece a hint was taken in. [hinted] outlives
+ * mode switches and reveals, so "used hint ⇒ not clean" cannot be bypassed.
+ */
+fun recitalErrors(marked: Set<String>, hinted: Set<String>): Set<String> = marked + hinted
+
+/** A tap on a piece card toggles its mark; a [hinted] piece stays an error, so tapping it changes nothing. */
+fun toggleMark(marked: Set<String>, hinted: Set<String>, pieceId: String): Set<String> = when (pieceId) {
+    in hinted -> marked
+    in marked -> marked - pieceId
+    else -> marked + pieceId
+}
+
+/**
+ * In a LEARN session the recital is judged on its own: entering RECITE starts a fresh attempt, so hints
+ * taken while practising in other modes do not block «Без ошибок». Hints inside the recital still count.
+ */
+fun startsFreshRecital(kind: StudyKind, from: StudyMode, to: StudyMode): Boolean =
+    kind == StudyKind.LEARN && to == StudyMode.RECITE && from != StudyMode.RECITE
+
+/** The cue level the slider moves to, or null when it stays on the current one (then nothing is reset). */
+fun cueJump(current: Int, requested: Int): Int? =
+    requested.coerceIn(0, VanishingCues.MAX_LEVEL).takeIf { it != current }
+
+/** Runs one save at a time: a second tap while the first is still writing is dropped. [busy] disables the buttons. */
+class BusyGuard {
+    var busy by mutableStateOf(false)
+        private set
+
+    suspend fun run(action: suspend () -> Unit) {
+        if (busy) return
+        busy = true
+        try {
+            action()
+        } finally {
+            busy = false
+        }
+    }
+}

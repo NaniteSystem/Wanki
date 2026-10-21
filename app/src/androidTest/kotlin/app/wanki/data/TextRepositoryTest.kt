@@ -103,6 +103,44 @@ class TextRepositoryTest {
     }
 
     @Test
+    fun sabqiSubmittedTwiceTheSameDayCountsOnce() = runBlocking {
+        settings.sabqiDays = 3
+        val t = texts.createText("Сура", "ar", TextKind.POEM, TextSchedule.HIFZ, 2, "a\nb\nc")!!
+        val (a, b) = texts.pieces(t.id)
+        texts.completePortion(t.id, listOf(a.id, b.id), 0, now)
+        texts.completeSabqi(t.id, listOf(a.id, b.id), setOf(a.id), 0, now + DAY)
+        val after = texts.pieces(t.id).take(2)
+        // a double tap on «Готово»: the error must not be logged twice (which would make a weak piece at once)
+        texts.completeSabqi(t.id, listOf(a.id, b.id), setOf(a.id), 0, now + DAY + 1)
+        assertEquals(after, texts.pieces(t.id).take(2))
+        assertEquals(1, db.texts().recitations(t.id).count { it.part == RecitationPart.SABQI.name && it.pieceId == a.id })
+        assertEquals(emptySet<String>(), texts.weakPieces(t.id))
+        // the next day it counts again
+        texts.completeSabqi(t.id, listOf(b.id), emptySet(), 0, now + 2 * DAY)
+        assertEquals(2, db.texts().recitations(t.id).count { it.part == RecitationPart.SABQI.name && it.pieceId == b.id })
+    }
+
+    @Test
+    fun manzilSubmittedTwiceTheSameDayCountsOnce() = runBlocking {
+        settings.sabqiDays = 1
+        settings.manzilCycleDays = 2
+        val t = texts.createText("Сура", "ar", TextKind.POEM, TextSchedule.HIFZ, 1, "a\nb\nc\nd")!!
+        val ids = texts.pieces(t.id).map { it.id }
+        texts.markLearned(t.id, 3, now)
+        val m = texts.today(now).items.filterIsInstance<TodayItem.Manzil>().single()
+        texts.completeManzil(m.pieceIds, setOf(ids[0]), 0, now)
+        val pieces = texts.pieces(t.id)
+        val pointer = settings.manzilPointer
+        texts.completeManzil(m.pieceIds, setOf(ids[0]), 0, now + 1) // double tap
+        assertEquals(pieces, texts.pieces(t.id))
+        assertEquals(pointer, settings.manzilPointer)
+        assertEquals(1, db.texts().recitations(t.id).count { it.part == RecitationPart.MANZIL.name && it.pieceId == ids[0] })
+        // the next day's chunk goes on from the pointer
+        val next = texts.today(now + DAY).items.filterIsInstance<TodayItem.Manzil>().single()
+        assertEquals(ids.drop(2), next.pieceIds)
+    }
+
+    @Test
     fun switchingTwiceKeepsHistory() = runBlocking {
         val t = texts.createText("Т", "ru", TextKind.POEM, TextSchedule.FSRS, 1, "a\nb")!!
         val p = texts.pieces(t.id)[0].id
