@@ -225,3 +225,6 @@ Android не принимает неэкранированные `}`/`]` (пад
   (`docs/superpowers/plans/`), затем выполнять так же — skill `superpowers:subagent-driven-development`.
 - Эмуляторы: телефон `wanki-phone` — порт 5558, планшет `wanki-tablet` — 5556, по одному за раз; `emulator-5554` —
   чужая сессия; телефон пользователя `320147012717` — никогда.
+
+## Этап П1 (чернильные разделы)
+- Задача 1 (21.10): навигация и позиция переживают поворот, смену темы и смерть процесса — `RouteCodec` + `Navigator.Saver`, `rememberSaveable` для страницы тетради, прогресса практики и фильтра браузера, `configChanges` у `MainActivity`; тесты `RouteCodecTest` (JVM) и `RecreateTest` (эмулятор).

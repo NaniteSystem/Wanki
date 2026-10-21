@@ -26,6 +26,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -77,8 +78,8 @@ fun PracticeScreen(glyph: String?, language: String, onBack: () -> Unit) {
             loaded = true
         }
     }
-    var index by remember { mutableIntStateOf(0) }
-    var round by remember { mutableIntStateOf(0) }
+    var index by rememberSaveable { mutableIntStateOf(0) }
+    var round by rememberSaveable { mutableIntStateOf(0) }
     val layer = remember { InkLayer() }
     var grade by remember { mutableStateOf<CellGrade?>(null) }
     var checking by remember { mutableStateOf(false) }

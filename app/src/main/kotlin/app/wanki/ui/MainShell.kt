@@ -14,7 +14,8 @@ import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateListOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
@@ -83,19 +84,30 @@ private val tabs = listOf(
 )
 
 /** Back stack navigation: each tab is a root, screens push on top of it. */
-class Navigator {
-    val stack = mutableStateListOf<Route>(Route.Decks)
+class Navigator(initial: List<Route> = listOf(Route.Decks)) {
+    val stack = mutableStateListOf<Route>().apply { addAll(initial.ifEmpty { listOf(Route.Decks) }) }
     val current: Route get() = stack.last()
     val root: Route get() = stack.first()
 
     fun open(route: Route) { stack.add(route) }
     fun back(): Boolean = if (stack.size > 1) { stack.removeAt(stack.lastIndex); true } else false
     fun switchTab(route: Route) { stack.clear(); stack.add(route) }
+
+    companion object {
+        /** A navigator from saved route strings; undecodable entries are dropped, none left means the decks tab. */
+        fun restore(saved: List<String>): Navigator = Navigator(saved.mapNotNull(RouteCodec::decode))
+
+        /** Keeps the back stack across recreation and process death. */
+        val Saver: Saver<Navigator, List<String>> = Saver(
+            save = { nav -> nav.stack.map(RouteCodec::encode) },
+            restore = { restore(it) },
+        )
+    }
 }
 
 @Composable
 fun MainShell() {
-    val nav = remember { Navigator() }
+    val nav = rememberSaveable(saver = Navigator.Saver) { Navigator() }
     BackHandler(enabled = nav.stack.size > 1) { nav.back() }
 
     BoxWithConstraints(Modifier.fillMaxSize()) {

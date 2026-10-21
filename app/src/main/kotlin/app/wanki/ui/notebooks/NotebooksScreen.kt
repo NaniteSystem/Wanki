@@ -32,6 +32,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -164,7 +165,7 @@ fun NotebookScreen(notebookId: String, initialPageId: String?, onBack: () -> Uni
     val graph = LocalContext.current.graph
     val notebook by produceState<app.wanki.data.NotebookEntity?>(null, notebookId) { value = ui { graph.repository.notebook(notebookId) } }
     val pages by remember(notebookId) { graph.repository.observePages(notebookId) }.collectAsState(emptyList<PageEntity>())
-    var index by remember { mutableStateOf<Int?>(null) }
+    var index by rememberSaveable(notebookId) { mutableStateOf<Int?>(null) }
     val scope = rememberUiScope()
 
     LaunchedEffect(pages, initialPageId) {
