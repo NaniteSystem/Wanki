@@ -89,6 +89,16 @@ class InkLayer(initial: List<InkStroke> = emptyList()) {
         if (before != strokes.toList()) push(Edit.Replaced(before, strokes.toList()))
     }
 
+    /** Drops the selection drag and puts the strokes back (e.g. it turned out to be a pinch or tap). */
+    fun cancelMove() {
+        val before = moveBefore ?: return
+        moveBefore = null
+        strokes.clear()
+        strokes.addAll(before)
+        selection.clear()
+        selection.addAll(moveIndices.mapNotNull { before.getOrNull(it) })
+    }
+
     /** Removes the selected strokes (undoable). */
     fun deleteSelection() {
         val hit = strokes.withIndex().filter { (_, s) -> selection.any { it === s } }
@@ -164,7 +174,8 @@ class InkLayer(initial: List<InkStroke> = emptyList()) {
 
     fun replaceAll(newStrokes: List<InkStroke>, undoable: Boolean = true) {
         val before = strokes.toList()
-        eraseBefore = null // a reload or replace ends any eraser drag in progress
+        eraseBefore = null // a reload or replace ends any eraser drag or move in progress
+        moveBefore = null
         strokes.clear()
         strokes.addAll(newStrokes)
         if (undoable) push(Edit.Replaced(before, newStrokes)) else {
@@ -177,7 +188,11 @@ class InkLayer(initial: List<InkStroke> = emptyList()) {
         timeBaseUptime = -1L
     }
 
+    /** An eraser drag or selection move holds a snapshot; undo/redo now would make it stale. */
+    private val gestureOpen: Boolean get() = eraseBefore != null || moveBefore != null
+
     fun undo() {
+        if (gestureOpen) return
         val e = undoStack.removeLastOrNull() ?: return
         when (e) {
             is Edit.Added -> e.strokes.forEach { s -> strokes.removeAt(strokes.indexOfLast { it === s }) }
@@ -189,6 +204,7 @@ class InkLayer(initial: List<InkStroke> = emptyList()) {
     }
 
     fun redo() {
+        if (gestureOpen) return
         val e = redoStack.removeLastOrNull() ?: return
         when (e) {
             is Edit.Added -> strokes.addAll(e.strokes)

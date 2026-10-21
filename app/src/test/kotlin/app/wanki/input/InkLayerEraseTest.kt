@@ -61,4 +61,54 @@ class InkLayerEraseTest {
         layer.undo()
         assertEquals(listOf(a, b, c), layer.strokes.toList())
     }
+
+    @Test
+    fun undoIsIgnoredWhileEraseOpen() {
+        val layer = InkLayer(listOf(a))
+        layer.add(b)
+        layer.beginErase()
+        layer.eraseAt(0f, 5f, 5f)
+        val v = layer.version
+        layer.undo()
+        layer.redo()
+        assertEquals(listOf(b), layer.strokes.toList())
+        assertEquals(v, layer.version)
+        assertTrue(layer.endErase())
+        layer.undo()
+        assertEquals(listOf(a, b), layer.strokes.toList())
+        layer.undo()
+        assertEquals(listOf(a), layer.strokes.toList())
+    }
+
+    @Test
+    fun undoIsIgnoredWhileMoveOpen() {
+        val layer = InkLayer(listOf(a))
+        layer.add(b)
+        layer.selection.add(b)
+        layer.beginMove()
+        layer.moveSelectionBy(5f, 0f)
+        val v = layer.version
+        layer.undo()
+        assertEquals(2, layer.strokes.size)
+        assertEquals(105f, layer.strokes[1].points[0].x)
+        assertEquals(v, layer.version)
+        layer.endMove()
+        layer.undo()
+        assertEquals(listOf(a, b), layer.strokes.toList())
+    }
+
+    @Test
+    fun cancelledMoveRestoresStrokesWithoutStep() {
+        val layer = InkLayer(listOf(a, b))
+        layer.selection.add(b)
+        val v = layer.version
+        layer.beginMove()
+        layer.moveSelectionBy(5f, 0f)
+        layer.cancelMove()
+        assertEquals(listOf(a, b), layer.strokes.toList())
+        assertEquals(v, layer.version)
+        assertFalse(layer.canUndo)
+        layer.endMove() // no open move any more: nothing pushed
+        assertFalse(layer.canUndo)
+    }
 }
