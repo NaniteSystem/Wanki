@@ -352,6 +352,19 @@ interface NotebookDao {
     @Upsert
     suspend fun upsertPage(page: PageEntity)
 
+    /** Inserts a page not stored yet (a diary day gets its row on the first save); keeps an existing one. */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertPageIfMissing(page: PageEntity)
+
+    @Query("UPDATE pages SET updatedAt = :now WHERE id = :id")
+    suspend fun touchPage(id: String, now: Long)
+
+    @Query("UPDATE pages SET template = :template, updatedAt = :now WHERE id = :id")
+    suspend fun setPageTemplate(id: String, template: String, now: Long)
+
+    @Query("UPDATE pages SET viewScale = :scale, viewX = :x, viewY = :y WHERE id = :id")
+    suspend fun setPageView(id: String, scale: Float, x: Float, y: Float)
+
     @Query("SELECT * FROM page_ink WHERE pageId = :pageId")
     suspend fun ink(pageId: String): PageInkEntity?
 

@@ -94,7 +94,27 @@ class MigrationTest {
         db.query("SELECT COUNT(*) FROM recitations").use { c -> c.moveToFirst(); assertEquals(1, c.getInt(0)) }
     }
 
+    @Test
+    fun migrate6To7AddsPageView() {
+        helper.createDatabase(DB7, 6).apply {
+            execSQL("INSERT INTO pages (id, notebookId, pageIndex, template, date, updatedAt, deleted) VALUES ('p', 'nb', 2, 'LINED', NULL, 5, 0)")
+            close()
+        }
+        val db = helper.runMigrationsAndValidate(DB7, 7, true, WankiDatabase.MIGRATION_6_7)
+        db.query("SELECT id, pageIndex, template, viewScale, viewX, viewY FROM pages").use { c ->
+            assertEquals(1, c.count)
+            c.moveToFirst()
+            assertEquals("p", c.getString(0))
+            assertEquals(2, c.getInt(1))
+            assertEquals("LINED", c.getString(2))
+            assertEquals(true, c.isNull(3))
+            assertEquals(true, c.isNull(4))
+            assertEquals(true, c.isNull(5))
+        }
+    }
+
     private companion object {
+        const val DB7 = "migration-test-7"
         const val DB6 = "migration-test-6"
         const val DB5 = "migration-test-5"
         const val DB4 = "migration-test-4"

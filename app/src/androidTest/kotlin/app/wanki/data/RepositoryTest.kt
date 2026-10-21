@@ -179,4 +179,28 @@ class RepositoryTest {
         assertEquals(0, e.card.writeFieldOrd)
         assertEquals(c.card.position, e.card.position)
     }
+
+    @Test
+    fun pageViewSurvivesInkSaveAndTemplateChange() = runBlocking {
+        val nb = repo.createNotebook("Тетрадь", PageTemplate.LINED, "ru")
+        val page = repo.pages(nb.id).single()
+        repo.setPageView(page.id, 2f, -30f, -40f)
+        // the editor keeps its own (older) copy of the page and saves with it
+        repo.saveInk(page, emptyList())
+        repo.setPageTemplate(page, PageTemplate.GRID)
+        val stored = repo.pages(nb.id).single()
+        assertEquals(2f, stored.viewScale)
+        assertEquals(-30f, stored.viewX)
+        assertEquals(-40f, stored.viewY)
+        assertEquals(PageTemplate.GRID.name, stored.template)
+    }
+
+    @Test
+    fun firstInkSaveStoresAnUnsavedDiaryPage() = runBlocking {
+        val diary = repo.diary()
+        val day = java.time.LocalDate.of(2026, 10, 21)
+        val page = PageEntity(notebookId = diary.id, pageIndex = day.toEpochDay().toInt(), template = diary.template, date = day.toEpochDay())
+        repo.saveInk(page, emptyList())
+        assertEquals(listOf(page.id), repo.pages(diary.id).map { it.id })
+    }
 }

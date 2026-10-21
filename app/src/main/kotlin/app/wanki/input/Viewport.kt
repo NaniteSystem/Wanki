@@ -25,6 +25,12 @@ class Viewport(
     private var screenW = 0f
     private var screenH = 0f
 
+    /** True once the canvas has been measured (the view is meaningful from then on). */
+    val hasLayout: Boolean get() = screenW > 0f
+
+    /** A stored view waiting for the first layout (clamping needs the screen size). */
+    private var restored: FloatArray? = null
+
     fun worldToScreen(): Matrix = Matrix().apply {
         setScale(scale, scale)
         postTranslate(offsetX, offsetY)
@@ -42,7 +48,23 @@ class Viewport(
         val first = screenW == 0f
         screenW = w
         screenH = h
-        if (first) fitWidth()
+        if (first) {
+            val r = restored
+            restored = null
+            if (r != null) restore(r[0], r[1], r[2]) else fitWidth()
+        }
+    }
+
+    /**
+     * Brings back a stored view, clamped like [transform]. Before the first [onScreenSize] it is
+     * kept and applied then, instead of [fitWidth].
+     */
+    fun restore(scale: Float, offsetX: Float, offsetY: Float) {
+        if (screenW == 0f) {
+            restored = floatArrayOf(scale, offsetX, offsetY)
+            return
+        }
+        set(scale.coerceIn(minScale, maxScale), offsetX, offsetY)
     }
 
     /** Fit the page width (or reset an infinite board to 1:1). */

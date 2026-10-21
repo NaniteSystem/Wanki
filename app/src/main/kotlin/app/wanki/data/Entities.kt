@@ -167,6 +167,10 @@ data class PageEntity(
     val date: Long? = null,
     val updatedAt: Long = System.currentTimeMillis(),
     val deleted: Boolean = false,
+    /** Last zoom and pan of the page (Viewport scale and offsets); null = fit the width. */
+    val viewScale: Float? = null,
+    val viewX: Float? = null,
+    val viewY: Float? = null,
 )
 
 @Entity(tableName = "page_ink")

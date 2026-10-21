@@ -43,6 +43,8 @@ import app.wanki.input.ToolSelection
 import app.wanki.input.Viewport
 import app.wanki.recognition.ModelStatus
 import app.wanki.ui.common.InkToolbar
+import app.wanki.ui.common.SaveErrorSnackbar
+import app.wanki.ui.common.SerialSaver
 import app.wanki.ui.common.SelectionBar
 import app.wanki.ui.common.TextActionsDialog
 import app.wanki.ui.common.copyToClipboard
@@ -53,7 +55,10 @@ import app.wanki.ui.common.label
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-/** Loads, autosaves and recognizes one page. Lives as long as the page is on screen. */
+/**
+ * Loads, saves and recognizes one page. Ink is saved after every finished gesture (one
+ * [InkLayer.version] step); zoom and pan are remembered per page. Lives as long as the page is on screen.
+ */
 class PageEditorState(
     private val graph: AppGraph,
     val notebook: NotebookEntity,
@@ -65,6 +70,20 @@ class PageEditorState(
     val layer = InkLayer()
     val viewport = Viewport(minScale = if (infinite) 0.1f else 0.3f, bounds = if (infinite) null else PageGeometry.BOUNDS)
     private val section = InkSection.ofNotebookKind(notebook.kind)
+
+    /** Saves the ink one save at a time; a failure is kept in [SerialSaver.error] until a save succeeds. */
+    val saver = SerialSaver(graph.appScope) { saveIfDirty() }
+    private var savedView: Triple<Float, Float, Float>? = null
+
+    init {
+        val s = page.viewScale
+        val x = page.viewX
+        val y = page.viewY
+        if (s != null && x != null && y != null) {
+            viewport.restore(s, x, y)
+            savedView = Triple(s, x, y)
+        }
+    }
     var tool by mutableStateOf(graph.settings.tool(section))
         private set
 
@@ -104,7 +123,7 @@ class PageEditorState(
         loaded = true
     }
 
-    suspend fun saveIfDirty() {
+    private suspend fun saveIfDirty() {
         if (!loaded || layer.version == savedVersion) return
         val v = layer.version
         graph.repository.saveInk(page, layer.strokes.toList())
@@ -119,11 +138,22 @@ class PageEditorState(
         val text = graph.textRecognition.recognize(strokes, notebook.language)?.text
         recognizing = false
         if (text != null) {
-            saveIfDirty()
+            // the recognized text lives in the ink row: the ink must be stored first
+            saver.request()
+            saver.flush()
             graph.repository.setRecognizedText(page.id, text)
             recognizedText = text
             recognizedVersion = v
         }
+    }
+
+    /** Stores the current zoom and pan if they changed (not an edit: the page's date stays). */
+    suspend fun saveView() {
+        if (!loaded || !viewport.hasLayout) return
+        val v = Triple(viewport.scale, viewport.offsetX, viewport.offsetY)
+        if (v == savedView) return
+        graph.repository.setPageView(page.id, v.first, v.second, v.third)
+        savedView = v
     }
 
     suspend fun setTemplate(t: PageTemplate) {
@@ -149,87 +179,97 @@ fun PageEditor(
     var templateMenu by remember { mutableStateOf(false) }
 
     LaunchedEffect(state) { ui { state.load() } }
-    // autosave shortly after the last change, recognize after a longer pause
+    // version only changes when a gesture ends: save each one; recognize after a pause
     LaunchedEffect(state.layer.version, state.loaded) {
         if (!state.loaded) return@LaunchedEffect
-        delay(800)
-        ui { state.saveIfDirty() }
+        state.saver.request()
         delay(2500)
         ui { state.recognizeIfDirty() }
     }
     DisposableEffect(state) {
-        onDispose { graph.appScope.launch { state.saveIfDirty(); state.recognizeIfDirty() } }
+        onDispose {
+            graph.appScope.launch {
+                // a change from the last frame may not have reached the effect above yet
+                state.saver.request()
+                state.saver.flush()
+                runCatching { state.saveView() }
+                runCatching { state.recognizeIfDirty() }
+            }
+        }
     }
 
-    Column(modifier) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-            Box(Modifier.weight(1f)) { header() }
-            if (!state.infinite) {
-                Box {
-                    TextButton(onClick = { templateMenu = true }) { Text(state.template.label()) }
-                    DropdownMenu(expanded = templateMenu, onDismissRequest = { templateMenu = false }) {
-                        PageTemplate.entries.forEach { t ->
-                            DropdownMenuItem(text = { Text(t.label()) }, onClick = {
-                                templateMenu = false
-                                graph.appScope.launch { state.setTemplate(t) }
-                            })
-                        }
-                    }
-                }
-            }
-            TextButton(onClick = { state.viewport.fitWidth() }) { Text("Вписать") }
-            TextButton(onClick = { showText = !showText }) { Text(if (showText) "Скрыть текст" else "Текст") }
-        }
-        InkToolbar(state.tool, state::selectTool, state.layer, Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
-        if (state.layer.hasSelection) {
-            SelectionBar(state.layer, state.notebook.language, Modifier.padding(horizontal = 8.dp, vertical = 2.dp))
-        }
-        Row(Modifier.weight(1f).fillMaxWidth()) {
-            InkSurface(
-                layer = state.layer,
-                tool = state.tool,
-                viewport = state.viewport,
-                enabled = state.loaded,
-                gestures = true,
-                modifier = Modifier.weight(1f).fillMaxSize().testTag("page-canvas"),
-                background = {
-                    if (state.infinite) drawBoard(state.viewport.visibleWorld(), state.viewport.scale)
-                    else drawPage(state.template)
-                },
-            )
-            if (showText) {
-                Surface(tonalElevation = 1.dp, modifier = Modifier.width(280.dp).fillMaxSize()) {
-                    Column(Modifier.padding(12.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Распознанный текст", style = MaterialTheme.typography.titleSmall)
-                        val status = state.modelStatus
-                        Text(
-                            when {
-                                state.recognizing -> "распознаю…"
-                                status == ModelStatus.DOWNLOADING -> "загрузка модели распознавания…"
-                                status == ModelStatus.UNAVAILABLE -> "распознавание недоступно (нет модели или сети)"
-                                else -> "обновляется автоматически после паузы"
-                            },
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        SelectionContainer {
-                            Text(state.recognizedText.ifBlank { "—" }, modifier = Modifier.heightIn(min = 40.dp))
-                        }
-                        if (state.recognizedText.isNotBlank()) {
-                            Row {
-                                TextButton(onClick = { copyToClipboard(context, state.recognizedText) }) { Text("Копировать") }
-                                TextButton(onClick = { translateAll = true }) { Text("Перевести") }
+    Box(modifier) {
+        Column(Modifier.fillMaxSize()) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Box(Modifier.weight(1f)) { header() }
+                if (!state.infinite) {
+                    Box {
+                        TextButton(onClick = { templateMenu = true }) { Text(state.template.label()) }
+                        DropdownMenu(expanded = templateMenu, onDismissRequest = { templateMenu = false }) {
+                            PageTemplate.entries.forEach { t ->
+                                DropdownMenuItem(text = { Text(t.label()) }, onClick = {
+                                    templateMenu = false
+                                    graph.appScope.launch { state.setTemplate(t) }
+                                })
                             }
                         }
-                        Text(
-                            "Чтобы взять часть текста — обведите её инструментом «Лассо».",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                    }
+                }
+                TextButton(onClick = { state.viewport.fitWidth() }) { Text("Вписать") }
+                TextButton(onClick = { showText = !showText }) { Text(if (showText) "Скрыть текст" else "Текст") }
+            }
+            InkToolbar(state.tool, state::selectTool, state.layer, Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+            if (state.layer.hasSelection) {
+                SelectionBar(state.layer, state.notebook.language, Modifier.padding(horizontal = 8.dp, vertical = 2.dp))
+            }
+            Row(Modifier.weight(1f).fillMaxWidth()) {
+                InkSurface(
+                    layer = state.layer,
+                    tool = state.tool,
+                    viewport = state.viewport,
+                    enabled = state.loaded,
+                    gestures = true,
+                    modifier = Modifier.weight(1f).fillMaxSize().testTag("page-canvas"),
+                    background = {
+                        if (state.infinite) drawBoard(state.viewport.visibleWorld(), state.viewport.scale)
+                        else drawPage(state.template)
+                    },
+                )
+                if (showText) {
+                    Surface(tonalElevation = 1.dp, modifier = Modifier.width(280.dp).fillMaxSize()) {
+                        Column(Modifier.padding(12.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Распознанный текст", style = MaterialTheme.typography.titleSmall)
+                            val status = state.modelStatus
+                            Text(
+                                when {
+                                    state.recognizing -> "распознаю…"
+                                    status == ModelStatus.DOWNLOADING -> "загрузка модели распознавания…"
+                                    status == ModelStatus.UNAVAILABLE -> "распознавание недоступно (нет модели или сети)"
+                                    else -> "обновляется автоматически после паузы"
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            SelectionContainer {
+                                Text(state.recognizedText.ifBlank { "—" }, modifier = Modifier.heightIn(min = 40.dp))
+                            }
+                            if (state.recognizedText.isNotBlank()) {
+                                Row {
+                                    TextButton(onClick = { copyToClipboard(context, state.recognizedText) }) { Text("Копировать") }
+                                    TextButton(onClick = { translateAll = true }) { Text("Перевести") }
+                                }
+                            }
+                            Text(
+                                "Чтобы взять часть текста — обведите её инструментом «Лассо».",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                 }
             }
         }
+        SaveErrorSnackbar(state.saver, Modifier.align(androidx.compose.ui.Alignment.BottomCenter))
     }
     if (translateAll) TextActionsDialog(initialText = state.recognizedText, onDismiss = { translateAll = false })
 }

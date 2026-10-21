@@ -421,8 +421,15 @@ class Repository(private val db: WankiDatabase) {
         return p
     }
 
-    suspend fun setPageTemplate(page: PageEntity, template: PageTemplate) =
-        notebooks.upsertPage(page.copy(template = template.name, updatedAt = System.currentTimeMillis()))
+    // pages are updated column by column: the editor's copy of a page may be stale
+    suspend fun setPageTemplate(page: PageEntity, template: PageTemplate) = db.withTransaction {
+        notebooks.insertPageIfMissing(page)
+        notebooks.setPageTemplate(page.id, template.name, System.currentTimeMillis())
+    }
+
+    /** Remembers a page's zoom and pan (does not count as an edit). */
+    suspend fun setPageView(pageId: String, scale: Float, x: Float, y: Float) =
+        notebooks.setPageView(pageId, scale, x, y)
 
     suspend fun createBoard(title: String): NotebookEntity {
         val n = NotebookEntity(title = title.trim().ifBlank { "Доска" }, kind = NotebookKind.BOARD.name, template = PageTemplate.DOTS.name)
@@ -489,7 +496,8 @@ class Repository(private val db: WankiDatabase) {
                     updatedAt = now,
                 ),
             )
-            notebooks.upsertPage(page.copy(updatedAt = now))
+            notebooks.insertPageIfMissing(page)
+            notebooks.touchPage(page.id, now)
             notebooks.touch(page.notebookId, now)
         }
     }

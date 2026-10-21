@@ -35,6 +35,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -57,6 +58,8 @@ import app.wanki.input.InkSection
 import app.wanki.input.ToolSelection
 import app.wanki.recognition.AUTO_LANGUAGE
 import app.wanki.ui.common.InkToolbar
+import app.wanki.ui.common.SaveErrorSnackbar
+import app.wanki.ui.common.SerialSaver
 import app.wanki.ui.common.ScreenHeader
 import app.wanki.ui.common.drawTemplate
 import app.wanki.ui.common.ui
@@ -130,8 +133,10 @@ fun NoteEditorScreen(id: String?, onBack: () -> Unit) {
     var note by remember { mutableStateOf<TextNoteEntity?>(null) }
     var title by remember { mutableStateOf("") }
     val blocks = remember { mutableStateListOf<BlockState>() }
+    // `version` counts title/text/layout edits; ink layers count their own gestures
     var version by remember { mutableIntStateOf(0) }
     var savedVersion by remember { mutableIntStateOf(0) }
+    var recognitionChanged by remember { mutableStateOf(false) }
     var tool by remember { mutableStateOf(graph.settings.tool(InkSection.NOTE)) }
 
     LaunchedEffect(id) { ui {
@@ -147,18 +152,24 @@ fun NoteEditorScreen(id: String?, onBack: () -> Unit) {
         }
         title = n.title
         note = n
+        savedVersion = version + blocks.sumOf { it.layer?.version ?: 0 }
     } }
     val inkVersions = blocks.sumOf { it.layer?.version ?: 0 }
     suspend fun save() {
         val n = note ?: return
+        val v = version + blocks.sumOf { it.layer?.version ?: 0 }
+        if (v == savedVersion && !recognitionChanged) return
         if (title.isBlank() && blocks.all { it.text.isBlank() && (it.layer?.isEmpty != false) }) return
         graph.repository.saveNoteWithBlocks(n.copy(title = title), blocks.map { it.toEntity(n.id) })
-        savedVersion = version + inkVersions
+        savedVersion = v
+        recognitionChanged = false
     }
+    val latestSave by rememberUpdatedState<suspend () -> Unit> { save() }
+    val saver = remember { SerialSaver(graph.appScope) { latestSave() } }
+    // every text change and every finished ink gesture is saved; recognition waits for a pause
     LaunchedEffect(version, inkVersions) {
         if (note == null || version + inkVersions == savedVersion) return@LaunchedEffect
-        delay(700)
-        ui { save() }
+        saver.request()
         // recognize handwriting blocks after a longer pause so search finds them
         delay(2500)
         var changed = false
@@ -167,67 +178,74 @@ fun NoteEditorScreen(id: String?, onBack: () -> Unit) {
             val r = ui { graph.textRecognition.recognize(l.strokes.toList(), AUTO_LANGUAGE) } ?: continue
             if (r.text != b.recognizedText) { b.recognizedText = r.text; changed = true }
         }
-        if (changed) ui { save() }
+        if (changed) {
+            recognitionChanged = true
+            saver.request()
+        }
     }
     DisposableEffect(Unit) {
-        onDispose { graph.appScope.launch { save() } }
+        onDispose { graph.appScope.launch { saver.request(); saver.flush() } }
     }
 
-    Column(Modifier.fillMaxSize()) {
-        ScreenHeader("Заметка", onBack = onBack) {
-            if (id != null) {
-                TextButton(onClick = {
-                    graph.appScope.launch { graph.repository.deleteTextNote(id) }
-                    note = null
-                    onBack()
-                }) { Text("Удалить") }
+    Box(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize()) {
+            ScreenHeader("Заметка", onBack = onBack) {
+                if (id != null) {
+                    TextButton(onClick = {
+                        note = null
+                        // a save still running must not bring the note back after it is deleted
+                        graph.appScope.launch { saver.flush(); graph.repository.deleteTextNote(id) }
+                        onBack()
+                    }) { Text("Удалить") }
+                }
             }
-        }
-        if (blocks.any { it.type == NoteBlockType.INK }) {
-            InkToolbar(tool, { tool = it; graph.settings.setTool(InkSection.NOTE, it) }, blocks.firstNotNullOf { it.layer }, Modifier.padding(horizontal = 8.dp),
-                tools = listOf(ToolKind.PEN, ToolKind.MARKER, ToolKind.HIGHLIGHTER, ToolKind.ERASER))
-        }
-        val colors = TextFieldDefaults.colors(
-            focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent,
-        )
-        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 8.dp)) {
-            TextField(
-                title, { title = it; version++ }, placeholder = { Text("Заголовок") },
-                textStyle = MaterialTheme.typography.headlineSmall, colors = colors, singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
+            if (blocks.any { it.type == NoteBlockType.INK }) {
+                InkToolbar(tool, { tool = it; graph.settings.setTool(InkSection.NOTE, it) }, blocks.firstNotNullOf { it.layer }, Modifier.padding(horizontal = 8.dp),
+                    tools = listOf(ToolKind.PEN, ToolKind.MARKER, ToolKind.HIGHLIGHTER, ToolKind.ERASER))
+            }
+            val colors = TextFieldDefaults.colors(
+                focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent,
             )
-            blocks.forEachIndexed { i, b ->
-                when (b.type) {
-                    NoteBlockType.TEXT -> TextField(
-                        b.text, { b.text = it; version++ }, placeholder = { Text("Текст") },
-                        colors = colors, modifier = Modifier.fillMaxWidth(),
-                    )
-                    NoteBlockType.INK -> {
-                        Surface(
-                            shape = RoundedCornerShape(10.dp), color = WritingPaper,
-                            modifier = Modifier.fillMaxWidth().height(b.heightDp.dp).padding(vertical = 4.dp),
-                        ) {
-                            InkSurface(
-                                layer = b.layer!!, tool = tool, modifier = Modifier.fillMaxSize(), gestures = true,
-                                background = { drawTemplate(PageTemplate.LINED, InkRect(0f, 0f, size.width, size.height)) },
-                            )
-                        }
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            if (b.recognizedText.isNotBlank()) {
-                                Text(b.recognizedText, style = MaterialTheme.typography.labelSmall, maxLines = 2,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
-                            } else Spacer(Modifier.weight(1f))
-                            TextButton(onClick = { b.heightDp += 200f; version++ }) { Text("Выше") }
-                            TextButton(onClick = { blocks.removeAt(i); version++ }) { Text("Убрать") }
+            Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 8.dp)) {
+                TextField(
+                    title, { title = it; version++ }, placeholder = { Text("Заголовок") },
+                    textStyle = MaterialTheme.typography.headlineSmall, colors = colors, singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                blocks.forEachIndexed { i, b ->
+                    when (b.type) {
+                        NoteBlockType.TEXT -> TextField(
+                            b.text, { b.text = it; version++ }, placeholder = { Text("Текст") },
+                            colors = colors, modifier = Modifier.fillMaxWidth(),
+                        )
+                        NoteBlockType.INK -> {
+                            Surface(
+                                shape = RoundedCornerShape(10.dp), color = WritingPaper,
+                                modifier = Modifier.fillMaxWidth().height(b.heightDp.dp).padding(vertical = 4.dp),
+                            ) {
+                                InkSurface(
+                                    layer = b.layer!!, tool = tool, modifier = Modifier.fillMaxSize(), gestures = true,
+                                    background = { drawTemplate(PageTemplate.LINED, InkRect(0f, 0f, size.width, size.height)) },
+                                )
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (b.recognizedText.isNotBlank()) {
+                                    Text(b.recognizedText, style = MaterialTheme.typography.labelSmall, maxLines = 2,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+                                } else Spacer(Modifier.weight(1f))
+                                TextButton(onClick = { b.heightDp += 200f; version++ }) { Text("Выше") }
+                                TextButton(onClick = { blocks.removeAt(i); version++ }) { Text("Убрать") }
+                            }
                         }
                     }
                 }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(vertical = 8.dp)) {
+                    OutlinedButton(onClick = { blocks += BlockState(newId(), NoteBlockType.TEXT); version++ }) { Text("+ Текст") }
+                    OutlinedButton(onClick = { blocks += BlockState(newId(), NoteBlockType.INK); version++ }) { Text("+ От руки") }
+                }
+                Spacer(Modifier.height(120.dp))
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(vertical = 8.dp)) {
-                OutlinedButton(onClick = { blocks += BlockState(newId(), NoteBlockType.TEXT); version++ }) { Text("+ Текст") }
-                OutlinedButton(onClick = { blocks += BlockState(newId(), NoteBlockType.INK); version++ }) { Text("+ От руки") }
-            }
-            Spacer(Modifier.height(120.dp))
         }
+        SaveErrorSnackbar(saver, Modifier.align(Alignment.BottomCenter))
     }
 }

@@ -29,7 +29,7 @@ abstract class WankiDatabase : RoomDatabase() {
 
     companion object {
         const val NAME = "wanki.db"
-        const val VERSION = 6
+        const val VERSION = 7
 
         fun create(context: Context): WankiDatabase =
             Room.databaseBuilder(context, WankiDatabase::class.java, NAME)
@@ -128,6 +128,15 @@ abstract class WankiDatabase : RoomDatabase() {
             }
         }
 
-        val MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+        /** v7: each page remembers its zoom and pan. */
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `pages` ADD COLUMN `viewScale` REAL")
+                db.execSQL("ALTER TABLE `pages` ADD COLUMN `viewX` REAL")
+                db.execSQL("ALTER TABLE `pages` ADD COLUMN `viewY` REAL")
+            }
+        }
+
+        val MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
     }
 }
