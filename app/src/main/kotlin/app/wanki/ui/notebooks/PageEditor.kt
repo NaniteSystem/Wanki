@@ -63,6 +63,25 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
+ * Open panels of a page screen. Lives in the screen (not in the per-page [PageEditorState]), so turning a
+ * page keeps the text panel open; saved across recreation.
+ */
+class PageUiState {
+    var showText by mutableStateOf(false)
+    var showPaper by mutableStateOf(false)
+
+    companion object {
+        val Saver = androidx.compose.runtime.saveable.listSaver<PageUiState, Boolean>(
+            save = { listOf(it.showText, it.showPaper) },
+            restore = { PageUiState().apply { showText = it[0]; showPaper = it[1] } },
+        )
+    }
+}
+
+@Composable
+fun rememberPageUi(): PageUiState = androidx.compose.runtime.saveable.rememberSaveable(saver = PageUiState.Saver) { PageUiState() }
+
+/**
  * Loads, saves and recognizes one page. Ink is saved after every finished gesture (one
  * [InkLayer.version] step); zoom and pan are remembered per page. Lives as long as the page is on screen.
  */
@@ -71,6 +90,7 @@ class PageEditorState(
     val notebook: NotebookEntity,
     page: PageEntity,
     val infinite: Boolean,
+    val ui: PageUiState = PageUiState(),
 ) {
     var page by mutableStateOf(page)
         private set
@@ -102,8 +122,12 @@ class PageEditorState(
         private set
 
     /** Screen-only UI state, opened from the header menu. */
-    var showText by mutableStateOf(false)
-    var showPaper by mutableStateOf(false)
+    var showText: Boolean
+        get() = ui.showText
+        set(v) { ui.showText = v }
+    var showPaper: Boolean
+        get() = ui.showPaper
+        set(v) { ui.showPaper = v }
     var recognizedText by mutableStateOf("")
         private set
     var recognizing by mutableStateOf(false)
@@ -174,7 +198,7 @@ class PageEditorState(
 }
 
 /** Header actions shared by every page screen. «Бумага…» only makes sense for sheets, not for boards. */
-fun PageEditorState.paperAction() = HeaderAction(0, "Бумага…", "menu-template") { showPaper = true }
+fun PageEditorState.paperAction() = HeaderAction(R.drawable.ic_article, "Бумага…", "menu-template") { showPaper = true }
 fun PageEditorState.fitAction() = HeaderAction(R.drawable.ic_fit_screen, "Вписать", "fit") { viewport.fitWidth() }
 fun PageEditorState.textAction() = HeaderAction(R.drawable.ic_notes, "Текст", "show-text") { showText = !showText }
 

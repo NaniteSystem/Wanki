@@ -38,6 +38,7 @@ import app.wanki.ui.common.ScreenHeader
 import app.wanki.R
 import app.wanki.ui.common.HeaderAction
 import app.wanki.ui.notebooks.PageEditor
+import app.wanki.ui.notebooks.rememberPageUi
 import app.wanki.ui.notebooks.fitAction
 import app.wanki.ui.notebooks.textAction
 import app.wanki.ui.notebooks.PageEditorState
@@ -104,7 +105,8 @@ fun BoardScreen(boardId: String, onBack: () -> Unit) {
     val graph = LocalContext.current.graph
     val board by produceState<Pair<NotebookEntity, PageEntity>?>(null, boardId) { value = ui { graph.repository.boardPage(boardId) } }
     val (notebook, page) = board ?: return
-    val state = remember(page.id) { PageEditorState(graph, notebook, page, infinite = true) }
+    val pageUi = rememberPageUi()
+    val state = remember(page.id) { PageEditorState(graph, notebook, page, infinite = true, ui = pageUi) }
     var confirmDelete by remember { mutableStateOf(false) }
     PageEditor(
         state, notebook.title, onBack, Modifier.fillMaxSize(),

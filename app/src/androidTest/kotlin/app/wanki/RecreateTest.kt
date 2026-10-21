@@ -57,4 +57,25 @@ class RecreateTest {
         rule.onNode(hasTestTag("page-canvas")).assertIsDisplayed()
         rule.onNode(hasTestTag("page-prev")).assertIsDisplayed().assertIsEnabled()
     }
+
+    /** The text panel (side panel on a tablet) stays open when the page is turned. */
+    @Test
+    fun textPanelStaysOpenWhenPageTurns() {
+        val title = "Panel ${System.currentTimeMillis()}"
+        runBlocking {
+            val repo = rule.activity.graph.repository
+            repo.addPage(repo.createNotebook(title, PageTemplate.LINED, "auto"))
+        }
+        rule.waitUntilAtLeastOneExists(hasTestTag("tab-Тетради"), 15_000)
+        rule.onNode(hasTestTag("tab-Тетради")).performClick()
+        rule.waitUntilAtLeastOneExists(hasText(title), 10_000)
+        rule.onNode(hasText(title)).performClick()
+        rule.waitUntilAtLeastOneExists(hasText("стр. 1 из 2"), 10_000)
+        rule.onNode(hasTestTag("show-text")).performClick()
+        rule.waitUntilAtLeastOneExists(hasText("Распознанный текст"), 10_000)
+        rule.onNode(hasTestTag("page-next")).performClick()
+        rule.waitUntilAtLeastOneExists(hasText("стр. 2 из 2"), 10_000)
+        rule.waitForIdle()
+        rule.onNodeWithText("Распознанный текст").assertExists()
+    }
 }

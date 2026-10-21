@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import app.wanki.graph
 import app.wanki.ui.common.ScreenHeader
 import app.wanki.ui.notebooks.PageEditor
+import app.wanki.ui.notebooks.rememberPageUi
 import app.wanki.ui.notebooks.fitAction
 import app.wanki.ui.notebooks.paperAction
 import app.wanki.ui.notebooks.textAction
@@ -127,7 +128,8 @@ fun DiaryDayScreen(epochDay: Long, onBack: () -> Unit) {
         value = ui { graph.repository.diary() to graph.repository.diaryPage(date) }
     }
     val (diary, page) = loaded ?: return
-    val state = remember(page.id) { PageEditorState(graph, diary, page, infinite = false) }
+    val pageUi = rememberPageUi()
+    val state = remember(page.id) { PageEditorState(graph, diary, page, infinite = false, ui = pageUi) }
     PageEditor(
         state,
         title = "${date.dayOfMonth} ${date.month.getDisplayName(TextStyle.FULL, ru)} ${date.year}",

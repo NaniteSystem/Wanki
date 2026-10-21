@@ -187,7 +187,8 @@ fun NotebookScreen(notebookId: String, initialPageId: String?, onBack: () -> Uni
     val nb = notebook ?: return
     val i = index ?: return
     val page = pages.getOrNull(i) ?: return
-    val state = remember(page.id) { PageEditorState(graph, nb, page, infinite = false) }
+    val pageUi = rememberPageUi()
+    val state = remember(page.id) { PageEditorState(graph, nb, page, infinite = false, ui = pageUi) }
 
     PageEditor(
         state, nb.title, onBack, Modifier.fillMaxSize(),
