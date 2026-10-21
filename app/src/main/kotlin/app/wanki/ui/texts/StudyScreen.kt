@@ -57,7 +57,6 @@ import app.wanki.texts.TextWords
 import app.wanki.ui.common.ScreenHeader
 import app.wanki.ui.common.rememberUiScope
 import app.wanki.ui.common.ui
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /** One study session over a request's pieces. Session state lives here; leaving mid-session saves nothing. */
@@ -90,9 +89,8 @@ class StudyState(private val graph: AppGraph, val request: StudyRequest) {
     // cues
     var cueLevel by mutableIntStateOf(0)
         private set
-    /** True once a word was revealed on the current level: it then stays until "Дальше" forces it on. */
-    var cueDirty by mutableStateOf(false)
-        private set
+    /** True once a word was revealed on the current level: "Дальше" then retries it instead of rising. */
+    private var cueDirty by mutableStateOf(false)
 
     // chain
     var chainIndex by mutableIntStateOf(0)
@@ -151,21 +149,14 @@ class StudyState(private val graph: AppGraph, val request: StudyRequest) {
 
     fun jumpCue(level: Int) { cueLevel = level.coerceIn(0, VanishingCues.MAX_LEVEL); revealedWords = emptySet(); cueDirty = false }
 
-    /** "Дальше": the explicit force — advances even a dirty level, then the next level starts clean. */
+    /**
+     * "Дальше" = "I recited this level": a clean level rises to the next one; a dirty one is retried with
+     * its reveals cleared. The session's hint count stays, so "used hint ⇒ not clean" still holds.
+     */
     fun cueNext() {
-        cueLevel = nextCueLevel(cueLevel, cueDirty, forced = true)
+        cueLevel = nextCueLevel(cueLevel, revealedThisLevel = cueDirty)
         revealedWords = emptySet()
         cueDirty = false
-    }
-
-    /** The automatic rise: a level completed with no reveals moves up on its own; a dirty level waits. */
-    fun autoAdvanceCue() {
-        val next = nextCueLevel(cueLevel, cueDirty, forced = false)
-        if (next != cueLevel) {
-            cueLevel = next
-            revealedWords = emptySet()
-            cueDirty = false
-        }
     }
 
     fun reveal() { allRevealed = true }
@@ -243,9 +234,6 @@ class StudyState(private val graph: AppGraph, val request: StudyRequest) {
 
     fun speak(piece: TextPieceEntity): Boolean = graph.speaker.speak(piece.content, language(piece))
 }
-
-/** How long a cue level stays before a clean (no-reveal) level rises on its own. */
-private const val CUE_AUTO_ADVANCE_MS = 3500L
 
 @Composable
 fun StudyScreen(request: StudyRequest, onClose: () -> Unit) {
@@ -380,13 +368,6 @@ private fun ReadBody(state: StudyState, speak: (TextPieceEntity) -> Unit) {
 
 @Composable
 private fun CuesBody(state: StudyState, speak: (TextPieceEntity) -> Unit) {
-    // a level read without revealing a word rises by itself after a short pause; revealing one cancels it
-    LaunchedEffect(state.cueLevel, state.cueDirty) {
-        if (!state.cueDirty && state.cueLevel < VanishingCues.MAX_LEVEL) {
-            delay(CUE_AUTO_ADVANCE_MS)
-            state.autoAdvanceCue()
-        }
-    }
     PieceList(
         state, state.pieces,
         display = { cueDisplay(it, state.wordsOf(it).size, state.cueLevel, hidden = false) },

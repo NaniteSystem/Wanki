@@ -24,12 +24,11 @@ fun TodayItem.toStudyRequest(): StudyRequest = when (this) {
 data class WordRef(val pieceId: String, val index: Int)
 
 /**
- * The cue level to show next. A level passed with no reveals ([revealedThisLevel] false) rises on its
- * own — this is the automatic path, called with [forced] = false. Once a word has been revealed the
- * level stays (so it can be retried); only [forced] = true (the "Дальше" button) advances it then.
+ * The cue level after "Дальше" ("I recited this level"). A level passed with no revealed words rises
+ * by itself to the next one; a level where a word was revealed stays, to be recited again.
  */
-fun nextCueLevel(level: Int, revealedThisLevel: Boolean, forced: Boolean): Int =
-    if (forced || !revealedThisLevel) (level + 1).coerceIn(0, VanishingCues.MAX_LEVEL) else level
+fun nextCueLevel(level: Int, revealedThisLevel: Boolean): Int =
+    if (revealedThisLevel) level.coerceIn(0, VanishingCues.MAX_LEVEL) else (level + 1).coerceIn(0, VanishingCues.MAX_LEVEL)
 
 /** A learn portion counts as learned only when nothing was revealed and no piece is marked wrong. */
 fun isClean(hints: Int, markedErrors: Set<String>): Boolean = hints == 0 && markedErrors.isEmpty()

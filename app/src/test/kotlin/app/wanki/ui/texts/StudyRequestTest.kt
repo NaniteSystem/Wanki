@@ -17,21 +17,15 @@ class StudyRequestTest {
         assertEquals(StudyRequest(StudyKind.MANZIL, null, listOf("a", "b")), TodayItem.Manzil(listOf("a", "b")).toStudyRequest())
     }
 
-    @Test fun cleanLevelAutoAdvances() {
-        // the automatic path (forced = false): a level with no reveals rises on its own
-        assertEquals(2, nextCueLevel(1, revealedThisLevel = false, forced = false))
-    }
+    @Test fun cleanLevelRisesToTheNext() =
+        assertEquals(2, nextCueLevel(1, revealedThisLevel = false))
 
-    @Test fun dirtyLevelDoesNotAutoAdvanceButTheButtonForcesIt() {
-        // a level where a word was revealed stays put under the automatic path…
-        assertEquals(1, nextCueLevel(1, revealedThisLevel = true, forced = false))
-        // …and only "Дальше" (forced = true) moves it on
-        assertEquals(2, nextCueLevel(1, revealedThisLevel = true, forced = true))
-    }
+    @Test fun dirtyLevelIsRetried() =
+        assertEquals(1, nextCueLevel(1, revealedThisLevel = true))
 
     @Test fun cueLevelClampsAtMax() {
-        assertEquals(VanishingCues.MAX_LEVEL, nextCueLevel(VanishingCues.MAX_LEVEL, revealedThisLevel = false, forced = false))
-        assertEquals(VanishingCues.MAX_LEVEL, nextCueLevel(VanishingCues.MAX_LEVEL, revealedThisLevel = true, forced = true))
+        assertEquals(VanishingCues.MAX_LEVEL, nextCueLevel(VanishingCues.MAX_LEVEL, revealedThisLevel = false))
+        assertEquals(VanishingCues.MAX_LEVEL, nextCueLevel(VanishingCues.MAX_LEVEL, revealedThisLevel = true))
     }
 
     @Test fun usedHintMeansNotClean() {
