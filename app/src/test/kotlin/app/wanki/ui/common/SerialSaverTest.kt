@@ -14,6 +14,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class SerialSaverTest {
@@ -45,7 +46,7 @@ class SerialSaverTest {
         advanceUntilIdle()
         assertEquals(1, maxRunning)
         assertEquals(0, running)
-        assert(runs >= 2)
+        assertTrue(runs >= 2, "saves keep running: $runs")
     }
 
     @Test

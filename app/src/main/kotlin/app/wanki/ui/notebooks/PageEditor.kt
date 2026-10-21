@@ -1,5 +1,6 @@
 package app.wanki.ui.notebooks
 
+import android.util.Log
 import app.wanki.ui.common.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -192,8 +193,10 @@ fun PageEditor(
                 // a change from the last frame may not have reached the effect above yet
                 state.saver.request()
                 state.saver.flush()
-                runCatching { state.saveView() }
-                runCatching { state.recognizeIfDirty() }
+                val id = state.page.id
+                state.saver.error.value?.let { Log.e("Wanki", "page $id: last ink save failed", it) }
+                runCatching { state.saveView() }.onFailure { Log.e("Wanki", "page $id: view not saved", it) }
+                runCatching { state.recognizeIfDirty() }.onFailure { Log.e("Wanki", "page $id: recognition failed", it) }
             }
         }
     }

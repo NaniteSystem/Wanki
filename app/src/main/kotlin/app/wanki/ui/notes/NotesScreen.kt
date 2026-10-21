@@ -1,5 +1,6 @@
 package app.wanki.ui.notes
 
+import android.util.Log
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -133,10 +134,7 @@ fun NoteEditorScreen(id: String?, onBack: () -> Unit) {
     var note by remember { mutableStateOf<TextNoteEntity?>(null) }
     var title by remember { mutableStateOf("") }
     val blocks = remember { mutableStateListOf<BlockState>() }
-    // `version` counts title/text/layout edits; ink layers count their own gestures
-    var version by remember { mutableIntStateOf(0) }
-    var savedVersion by remember { mutableIntStateOf(0) }
-    var recognitionChanged by remember { mutableStateOf(false) }
+    val changes = remember { NoteChanges() }
     var tool by remember { mutableStateOf(graph.settings.tool(InkSection.NOTE)) }
 
     LaunchedEffect(id) { ui {
@@ -152,23 +150,22 @@ fun NoteEditorScreen(id: String?, onBack: () -> Unit) {
         }
         title = n.title
         note = n
-        savedVersion = version + blocks.sumOf { it.layer?.version ?: 0 }
+        changes.loaded(blocks)
     } }
     val inkVersions = blocks.sumOf { it.layer?.version ?: 0 }
     suspend fun save() {
         val n = note ?: return
-        val v = version + blocks.sumOf { it.layer?.version ?: 0 }
-        if (v == savedVersion && !recognitionChanged) return
+        // the snapshot is taken first: changes made while this save runs stay unsaved
+        val v = changes.unsaved(blocks) ?: return
         if (title.isBlank() && blocks.all { it.text.isBlank() && (it.layer?.isEmpty != false) }) return
         graph.repository.saveNoteWithBlocks(n.copy(title = title), blocks.map { it.toEntity(n.id) })
-        savedVersion = v
-        recognitionChanged = false
+        changes.markSaved(v)
     }
     val latestSave by rememberUpdatedState<suspend () -> Unit> { save() }
     val saver = remember { SerialSaver(graph.appScope) { latestSave() } }
     // every text change and every finished ink gesture is saved; recognition waits for a pause
-    LaunchedEffect(version, inkVersions) {
-        if (note == null || version + inkVersions == savedVersion) return@LaunchedEffect
+    LaunchedEffect(changes.edits, inkVersions) {
+        if (note == null || changes.unsaved(blocks) == null) return@LaunchedEffect
         saver.request()
         // recognize handwriting blocks after a longer pause so search finds them
         delay(2500)
@@ -179,12 +176,18 @@ fun NoteEditorScreen(id: String?, onBack: () -> Unit) {
             if (r.text != b.recognizedText) { b.recognizedText = r.text; changed = true }
         }
         if (changed) {
-            recognitionChanged = true
+            changes.recognized()
             saver.request()
         }
     }
     DisposableEffect(Unit) {
-        onDispose { graph.appScope.launch { saver.request(); saver.flush() } }
+        onDispose {
+            graph.appScope.launch {
+                saver.request()
+                saver.flush()
+                saver.error.value?.let { Log.e("Wanki", "note ${note?.id ?: id}: last save failed", it) }
+            }
+        }
     }
 
     Box(Modifier.fillMaxSize()) {
@@ -208,14 +211,14 @@ fun NoteEditorScreen(id: String?, onBack: () -> Unit) {
             )
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 8.dp)) {
                 TextField(
-                    title, { title = it; version++ }, placeholder = { Text("Заголовок") },
+                    title, { title = it; changes.edit() }, placeholder = { Text("Заголовок") },
                     textStyle = MaterialTheme.typography.headlineSmall, colors = colors, singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 blocks.forEachIndexed { i, b ->
                     when (b.type) {
                         NoteBlockType.TEXT -> TextField(
-                            b.text, { b.text = it; version++ }, placeholder = { Text("Текст") },
+                            b.text, { b.text = it; changes.edit() }, placeholder = { Text("Текст") },
                             colors = colors, modifier = Modifier.fillMaxWidth(),
                         )
                         NoteBlockType.INK -> {
@@ -233,15 +236,15 @@ fun NoteEditorScreen(id: String?, onBack: () -> Unit) {
                                     Text(b.recognizedText, style = MaterialTheme.typography.labelSmall, maxLines = 2,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
                                 } else Spacer(Modifier.weight(1f))
-                                TextButton(onClick = { b.heightDp += 200f; version++ }) { Text("Выше") }
-                                TextButton(onClick = { blocks.removeAt(i); version++ }) { Text("Убрать") }
+                                TextButton(onClick = { b.heightDp += 200f; changes.edit() }) { Text("Выше") }
+                                TextButton(onClick = { changes.removed(b); blocks.removeAt(i) }) { Text("Убрать") }
                             }
                         }
                     }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(vertical = 8.dp)) {
-                    OutlinedButton(onClick = { blocks += BlockState(newId(), NoteBlockType.TEXT); version++ }) { Text("+ Текст") }
-                    OutlinedButton(onClick = { blocks += BlockState(newId(), NoteBlockType.INK); version++ }) { Text("+ От руки") }
+                    OutlinedButton(onClick = { blocks += BlockState(newId(), NoteBlockType.TEXT); changes.edit() }) { Text("+ Текст") }
+                    OutlinedButton(onClick = { blocks += BlockState(newId(), NoteBlockType.INK); changes.edit() }) { Text("+ От руки") }
                 }
                 Spacer(Modifier.height(120.dp))
             }
