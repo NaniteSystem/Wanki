@@ -5,6 +5,9 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.MediaPlayer
 import java.io.File
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import java.io.InputStream
 
 /**
@@ -36,19 +39,29 @@ class MediaStore(context: Context) {
         return BitmapFactory.decodeFile(f.path, BitmapFactory.Options().apply { inSampleSize = sample })
     }
 
+    /** What is playing now (null when nothing), so screens can show ▶/■ and react to stops made elsewhere. */
+    data class Playing(val name: String, val loop: Boolean)
+
+    private val _playing = MutableStateFlow<Playing?>(null)
+    val playing: StateFlow<Playing?> = _playing.asStateFlow()
+
     /** Plays a sound, over and over when [loop]; returns false when the file is missing or cannot be played. */
     @Synchronized
     fun play(name: String, loop: Boolean = false): Boolean {
-        val f = file(name) ?: return false
         stop()
+        val f = file(name) ?: return false
         val p = MediaPlayer()
         return runCatching {
             p.setDataSource(f.path)
             p.isLooping = loop
-            p.setOnCompletionListener { done -> synchronized(this@MediaStore) { if (player === done) player = null }; done.release() }
+            p.setOnCompletionListener { done ->
+                synchronized(this@MediaStore) { if (player === done) { player = null; _playing.value = null } }
+                done.release()
+            }
             p.prepare()
             p.start()
             player = p
+            _playing.value = Playing(name, loop)
         }.onFailure { p.release() }.isSuccess
     }
 
@@ -57,6 +70,7 @@ class MediaStore(context: Context) {
     fun stop() {
         player?.let { runCatching { it.stop() }; it.release() }
         player = null
+        _playing.value = null
     }
 
     companion object {

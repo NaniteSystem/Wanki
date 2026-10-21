@@ -29,6 +29,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
@@ -246,6 +247,7 @@ fun StudyScreen(request: StudyRequest, onClose: () -> Unit) {
     LaunchedEffect(state.finished) { if (state.finished) onClose() }
 
     val speak: (TextPieceEntity) -> Unit = { p ->
+        graph.media.stop() // your own recording and TTS never talk over each other
         if (!state.speak(p)) { scope.launch { snackbar.showSnackbar("Нет голоса для этого языка") } }
     }
 
@@ -352,7 +354,9 @@ private fun PieceCard(
                 Spacer(Modifier.width(8.dp))
                 if (markable && error) Text("ошибка", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.error)
                 Spacer(Modifier.weight(1f))
-                IconButton(onClick = { speak(piece) }) { Text("🔊") }
+                // no TTS while the mic is open: it would end up in the recording
+                val recording by LocalContext.current.graph.recorder.active.collectAsState()
+                IconButton(onClick = { speak(piece) }, enabled = !recording) { Text("🔊") }
             }
             PieceWords(piece, state.language(piece), state.wordsOf(piece), display, state.revealedOf(piece.id), allRevealed, pieceStyle(state.language(piece))) {
                 state.revealWord(piece, it)

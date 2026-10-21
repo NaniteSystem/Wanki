@@ -1,6 +1,7 @@
 package app.wanki.media
 
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import org.junit.Test
@@ -18,6 +19,10 @@ class VoiceRecorderTest {
     @Test fun fileNameStaysInsideTheMediaFolder() {
         val name = VoiceRecorder.fileName(listOf("../x/y"))
         assertEquals(MediaStore.safeName(name), name)
+    }
+
+    @Test fun fileNameNeedsAPiece() {
+        assertFailsWith<IllegalArgumentException> { VoiceRecorder.fileName(emptyList()) }
     }
 
     @Test fun shortRecordingsAreDiscarded() {

@@ -3,14 +3,22 @@ package app.wanki.media
 import android.media.MediaRecorder
 import android.os.SystemClock
 import java.io.File
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * Records your own voice reciting a piece or a portion, as AAC in MPEG-4 into files/media.
- * Writes to "<name>.part" and renames on [stop], so a cut-off recording never replaces a good one;
- * recording the same name again overwrites the earlier file.
+ * Writes to "<name>.part" and renames on [stop]; recording the same name again overwrites the earlier file.
+ * A take shorter than 300 ms never replaces anything, but a re-record of 300 ms or more that is
+ * interrupted (Back, leaving the screen, the app going to the background) is stopped and does replace
+ * the previous take.
  */
 class VoiceRecorder(private val media: MediaStore) {
     private var recorder: MediaRecorder? = null
+    private val _active = MutableStateFlow(false)
+    /** [recording] as a flow, for screens that disable other sound while the mic is open. */
+    val active: StateFlow<Boolean> = _active.asStateFlow()
     private var part: File? = null
     private var target: File? = null
     private var startedAt = 0L
@@ -42,6 +50,7 @@ class VoiceRecorder(private val media: MediaStore) {
             throw e
         }
         recorder = r
+        _active.value = true
         part = tmp
         target = out
         startedAt = SystemClock.elapsedRealtime()
@@ -55,6 +64,7 @@ class VoiceRecorder(private val media: MediaStore) {
         val out = target
         val elapsed = SystemClock.elapsedRealtime() - startedAt
         recorder = null
+        _active.value = false
         part = null
         target = null
         // stop() throws when no audio data was written; the file is then unusable
@@ -62,7 +72,7 @@ class VoiceRecorder(private val media: MediaStore) {
         r.release()
         if (tmp == null || out == null) return false
         if (!stopped || !usable(elapsed) || tmp.length() == 0L) { tmp.delete(); return false }
-        out.delete()
+        // rename(2) replaces an existing target atomically
         return tmp.renameTo(out).also { if (!it) tmp.delete() }
     }
 
@@ -71,6 +81,7 @@ class VoiceRecorder(private val media: MediaStore) {
     fun discard() {
         val r = recorder ?: return
         recorder = null
+        _active.value = false
         runCatching { r.stop() }
         r.release()
         part?.delete()
@@ -85,6 +96,7 @@ class VoiceRecorder(private val media: MediaStore) {
 
         /** "rec-<first>.m4a" for one piece, "rec-<first>-<last>.m4a" for a portion. */
         fun fileName(pieceIds: List<String>): String {
+            require(pieceIds.isNotEmpty()) { "no pieces to name a recording after" }
             val first = clean(pieceIds.first())
             val last = clean(pieceIds.last())
             return if (first == last) "rec-$first.m4a" else "rec-$first-$last.m4a"
