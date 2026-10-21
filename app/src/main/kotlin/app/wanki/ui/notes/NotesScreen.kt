@@ -67,6 +67,7 @@ import app.wanki.ui.common.SaveErrorSnackbar
 import app.wanki.ui.common.SerialSaver
 import app.wanki.R
 import app.wanki.ui.common.HeaderAction
+import app.wanki.ui.common.ListState
 import app.wanki.ui.common.ScreenHeader
 import app.wanki.ui.common.drawTemplate
 import app.wanki.ui.common.ui
@@ -79,9 +80,9 @@ import java.util.Date
 @Composable
 fun NotesScreen(onOpen: (String?) -> Unit) {
     val graph = LocalContext.current.graph
-    val notes by remember { graph.repository.observeTextNotes() }.collectAsState(emptyList())
+    val notes by remember { graph.repository.observeTextNotes() }.collectAsState(null)
     var query by remember { mutableStateOf("") }
-    val shown = if (query.isBlank()) notes else notes.filter {
+    val shown = if (query.isBlank()) notes.orEmpty() else notes.orEmpty().filter {
         it.title.contains(query, ignoreCase = true) || it.body.contains(query, ignoreCase = true)
     }
     Box(Modifier.fillMaxSize()) {
@@ -91,8 +92,13 @@ fun NotesScreen(onOpen: (String?) -> Unit) {
                 query, { query = it }, singleLine = true, placeholder = { Text("Поиск") },
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
             )
+            ListState(
+                loading = notes == null, isEmpty = notes.orEmpty().isEmpty(),
+                emptyTitle = "Пока нет заметок", emptyHint = "Текст и рукописные блоки вперемешку",
+                emptyAction = HeaderAction(R.drawable.ic_sticky_note_2, "Новая заметка", "notes-empty-new") { onOpen(null) },
+            ) {
             LazyColumn(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (shown.isEmpty()) item { Text("Пусто", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                if (shown.isEmpty()) item { Text("Ничего не найдено", color = MaterialTheme.colorScheme.onSurfaceVariant) }
                 items(shown, key = { it.id }) { n ->
                     Card(Modifier.fillMaxWidth().clickable { onOpen(n.id) }) {
                         Column(Modifier.padding(12.dp)) {
@@ -106,6 +112,7 @@ fun NotesScreen(onOpen: (String?) -> Unit) {
                         }
                     }
                 }
+            }
             }
         }
         ExtendedFloatingActionButton(onClick = { onOpen(null) }, modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)) {

@@ -487,15 +487,20 @@ class Repository(private val db: WankiDatabase) {
         val old = notebooks.ink(page.id)
         val now = System.currentTimeMillis()
         db.withTransaction {
-            notebooks.upsertInk(
-                PageInkEntity(
-                    pageId = page.id,
-                    strokes = InkCodec.encode(InkDrawing(strokes)),
-                    recognizedText = old?.recognizedText.orEmpty(),
-                    recognizedAt = old?.recognizedAt ?: 0,
-                    updatedAt = now,
-                ),
-            )
+            if (strokes.isEmpty()) {
+                // an emptied page keeps no ink row, so the diary stops marking its day
+                notebooks.deleteInk(page.id)
+            } else {
+                notebooks.upsertInk(
+                    PageInkEntity(
+                        pageId = page.id,
+                        strokes = InkCodec.encode(InkDrawing(strokes)),
+                        recognizedText = old?.recognizedText.orEmpty(),
+                        recognizedAt = old?.recognizedAt ?: 0,
+                        updatedAt = now,
+                    ),
+                )
+            }
             notebooks.insertPageIfMissing(page)
             notebooks.touchPage(page.id, now)
             notebooks.touch(page.notebookId, now)

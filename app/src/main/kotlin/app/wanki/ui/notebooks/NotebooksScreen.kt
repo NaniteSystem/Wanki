@@ -46,6 +46,7 @@ import app.wanki.data.PageTemplate
 import app.wanki.R
 import app.wanki.graph
 import app.wanki.ui.common.HeaderAction
+import app.wanki.ui.common.ListState
 import app.wanki.ui.common.NotebookLanguages
 import app.wanki.ui.common.ScreenHeader
 import app.wanki.ui.common.label
@@ -56,7 +57,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun NotebooksScreen(onOpen: (notebookId: String, pageId: String?) -> Unit) {
     val graph = LocalContext.current.graph
-    val notebooks by remember { graph.repository.observeNotebooks(NotebookKind.NOTEBOOK) }.collectAsState(emptyList())
+    val notebooks by remember { graph.repository.observeNotebooks(NotebookKind.NOTEBOOK) }.collectAsState(null)
     var creating by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
     var hits by remember { mutableStateOf<List<PageSearchHit>>(emptyList()) }
@@ -85,18 +86,18 @@ fun NotebooksScreen(onOpen: (notebookId: String, pageId: String?) -> Unit) {
                         }
                     }
                 }
-            } else if (notebooks.isEmpty()) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("Пока нет тетрадей. Создайте первую.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            } else {
+            } else ListState(
+                loading = notebooks == null, isEmpty = notebooks.orEmpty().isEmpty(),
+                emptyTitle = "Пока нет тетрадей", emptyHint = "Пишите от руки: конспекты, прописи, черновики",
+                emptyAction = HeaderAction(R.drawable.ic_book_2, "Новая тетрадь", "notebooks-empty-new") { creating = true },
+            ) {
                 LazyVerticalGrid(
                     GridCells.Adaptive(180.dp),
                     Modifier.fillMaxSize().padding(16.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    items(notebooks, key = { it.notebook.id }) { n ->
+                    items(notebooks.orEmpty(), key = { it.notebook.id }) { n ->
                         Card(Modifier.fillMaxWidth().clickable { onOpen(n.notebook.id, null) }) {
                             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                 Text(n.notebook.title, style = MaterialTheme.typography.titleMedium)

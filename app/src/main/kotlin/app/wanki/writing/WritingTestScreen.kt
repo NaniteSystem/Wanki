@@ -34,7 +34,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntSize
@@ -71,9 +70,9 @@ fun WritingTestScreen(vm: WritingTestViewModel = viewModel()) {
 @Composable
 private fun CanvasPane(vm: WritingTestViewModel, modifier: Modifier) {
     var canvasSize by remember { mutableStateOf(IntSize.Zero) }
-    val inkColor = MaterialTheme.colorScheme.onSurface
-    val brush = remember(canvasSize.width, inkColor) {
-        ToolSelection(color = inkColor.toArgb(), size = (canvasSize.width / 36f).coerceAtLeast(6f))
+    // the paper is always light, so the ink is always dark
+    val brush = remember(canvasSize.width) {
+        ToolSelection(color = ToolSelection.DEFAULT_INK, size = (canvasSize.width / 36f).coerceAtLeast(6f))
     }
     val attempt = vm.attempt
     val ref = vm.reference

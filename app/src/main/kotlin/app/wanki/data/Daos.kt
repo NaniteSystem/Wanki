@@ -346,8 +346,26 @@ interface NotebookDao {
     @Query("SELECT * FROM pages WHERE notebookId = :notebookId AND date = :epochDay AND deleted = 0 LIMIT 1")
     suspend fun pageForDate(notebookId: String, epochDay: Long): PageEntity?
 
-    @Query("SELECT date FROM pages WHERE notebookId = :notebookId AND deleted = 0 AND date IS NOT NULL")
+    /** Days whose page holds ink (saveInk drops the ink row of an emptied page). */
+    @Query(
+        """
+        SELECT p.date FROM pages p JOIN page_ink i ON i.pageId = p.id
+        WHERE p.notebookId = :notebookId AND p.deleted = 0 AND p.date IS NOT NULL
+        """,
+    )
     fun observeDiaryDates(notebookId: String): Flow<List<Long>>
+
+    @Query("DELETE FROM page_ink WHERE pageId = :pageId")
+    suspend fun deleteInk(pageId: String)
+
+    /** Pages with ink in notebooks of any kind. */
+    @Query(
+        """
+        SELECT COUNT(*) FROM page_ink i JOIN pages p ON p.id = i.pageId JOIN notebooks n ON n.id = p.notebookId
+        WHERE p.deleted = 0 AND n.deleted = 0
+        """,
+    )
+    suspend fun countInkPages(): Int
 
     @Upsert
     suspend fun upsertPage(page: PageEntity)
@@ -390,6 +408,9 @@ interface NotebookDao {
 interface TextNoteDao {
     @Query("SELECT * FROM text_notes WHERE deleted = 0 ORDER BY updatedAt DESC")
     fun observeAll(): Flow<List<TextNoteEntity>>
+
+    @Query("SELECT COUNT(*) FROM text_notes WHERE deleted = 0")
+    suspend fun countNotes(): Int
 
     @Query("SELECT * FROM text_notes WHERE id = :id")
     suspend fun get(id: String): TextNoteEntity?

@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -202,5 +203,48 @@ class RepositoryTest {
         val page = PageEntity(notebookId = diary.id, pageIndex = day.toEpochDay().toInt(), template = diary.template, date = day.toEpochDay())
         repo.saveInk(page, emptyList())
         assertEquals(listOf(page.id), repo.pages(diary.id).map { it.id })
+    }
+
+    private fun stroke() = app.wanki.ink.InkStroke(
+        listOf(app.wanki.ink.InkPoint(1f, 1f, 0), app.wanki.ink.InkPoint(5f, 5f, 10)),
+    )
+
+    private fun backup() = Backup(
+        InstrumentationRegistry.getInstrumentation().targetContext, db,
+        Settings(InstrumentationRegistry.getInstrumentation().targetContext),
+    )
+
+    @Test
+    fun openedDiaryDayIsNotMarked() = runBlocking {
+        val diary = repo.diary()
+        repo.diaryPage(java.time.LocalDate.of(2026, 10, 21))
+        assertTrue(repo.observeDiaryDates(diary.id).first().isEmpty())
+    }
+
+    @Test
+    fun emptiedDiaryDayIsNotMarked() = runBlocking {
+        val diary = repo.diary()
+        val day = java.time.LocalDate.of(2026, 10, 21)
+        val page = repo.diaryPage(day)
+        repo.saveInk(page, listOf(stroke()))
+        assertEquals(listOf(day.toEpochDay()), repo.observeDiaryDates(diary.id).first())
+        repo.saveInk(page, emptyList())
+        assertTrue(repo.observeDiaryDates(diary.id).first().isEmpty())
+    }
+
+    @Test
+    fun hasContentCountsNotebookInk() = runBlocking {
+        assertFalse(backup().hasContent())
+        val nb = repo.createNotebook("Тетрадь", PageTemplate.LINED, "ru")
+        assertFalse(backup().hasContent())
+        repo.saveInk(repo.pages(nb.id).single(), listOf(stroke()))
+        assertTrue(backup().hasContent())
+    }
+
+    @Test
+    fun hasContentCountsNotes() = runBlocking {
+        assertFalse(backup().hasContent())
+        repo.saveTextNote(TextNoteEntity(title = "Т", body = "текст"))
+        assertTrue(backup().hasContent())
     }
 }

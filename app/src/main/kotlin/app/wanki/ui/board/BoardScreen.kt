@@ -37,6 +37,7 @@ import app.wanki.graph
 import app.wanki.ui.common.ScreenHeader
 import app.wanki.R
 import app.wanki.ui.common.HeaderAction
+import app.wanki.ui.common.ListState
 import app.wanki.ui.notebooks.PageEditor
 import app.wanki.ui.notebooks.rememberPageUi
 import app.wanki.ui.notebooks.fitAction
@@ -50,21 +51,21 @@ import java.util.Date
 @Composable
 fun BoardsScreen(onOpen: (String) -> Unit) {
     val graph = LocalContext.current.graph
-    val boards by remember { graph.repository.observeNotebooks(NotebookKind.BOARD) }.collectAsState(emptyList())
+    val boards by remember { graph.repository.observeNotebooks(NotebookKind.BOARD) }.collectAsState(null)
     var creating by remember { mutableStateOf(false) }
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
             ScreenHeader("Доски", subtitle = "Бесконечный холст: рисуйте и пишите где угодно")
-            if (boards.isEmpty()) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("Пока нет досок", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            } else {
+            ListState(
+                loading = boards == null, isEmpty = boards.orEmpty().isEmpty(),
+                emptyTitle = "Пока нет досок", emptyHint = "Большой холст для схем и рисунков",
+                emptyAction = HeaderAction(R.drawable.ic_dashboard, "Новая доска", "boards-empty-new") { creating = true },
+            ) {
                 LazyVerticalGrid(
                     GridCells.Adaptive(180.dp), Modifier.fillMaxSize().padding(16.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    items(boards, key = { it.notebook.id }) { b ->
+                    items(boards.orEmpty(), key = { it.notebook.id }) { b ->
                         Card(Modifier.fillMaxWidth().clickable { onOpen(b.notebook.id) }) {
                             Column(Modifier.padding(16.dp)) {
                                 Text(b.notebook.title, style = MaterialTheme.typography.titleMedium)

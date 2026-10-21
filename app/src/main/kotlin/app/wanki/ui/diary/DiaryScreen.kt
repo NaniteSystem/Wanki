@@ -22,6 +22,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -93,18 +97,23 @@ fun DiaryScreen(onOpenDay: (Long) -> Unit) {
                             if (d != null) {
                                 val date = month.atDay(d)
                                 val isToday = date == today
+                                val epoch = date.toEpochDay()
+                                val hasEntry = epoch in written
+                                val future = date.isAfter(today)
                                 Box(
                                     Modifier.fillMaxSize()
+                                        .testTag("diary-day-$epoch")
+                                        .semantics { if (hasEntry) stateDescription = "есть запись" }
                                         .background(
-                                            if (date.toEpochDay() in written) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
+                                            if (hasEntry) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
                                             RoundedCornerShape(8.dp),
                                         )
                                         .border(if (isToday) 2.dp else 0.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(8.dp))
-                                        .clickable { onOpenDay(date.toEpochDay()) },
+                                        .clickable(enabled = !future) { onOpenDay(epoch) },
                                     contentAlignment = Alignment.Center,
                                 ) {
-                                    Text("$d")
-                                    if (date.toEpochDay() in written) {
+                                    Text("$d", color = if (future) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f) else Color.Unspecified)
+                                    if (hasEntry) {
                                         Box(
                                             Modifier.align(Alignment.BottomCenter).padding(4.dp).size(5.dp)
                                                 .background(MaterialTheme.colorScheme.primary, CircleShape),

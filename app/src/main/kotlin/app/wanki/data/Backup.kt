@@ -41,8 +41,10 @@ class Backup(private val context: Context, private val db: WankiDatabase, privat
         settings.lastBackupAt = System.currentTimeMillis()
     }
 
-    /** Whether there is anything worth an automatic copy: a deck or a text. */
-    suspend fun hasContent(): Boolean = db.decks().count() > 0 || db.texts().countTexts() > 0
+    /** Whether there is anything worth an automatic copy: a deck, a text, a note or a notebook page with ink. */
+    suspend fun hasContent(): Boolean =
+        db.decks().count() > 0 || db.texts().countTexts() > 0 ||
+            db.textNotes().countNotes() > 0 || db.notebooks().countInkPages() > 0
 
     /** One automatic copy a day (only once there is something to keep). */
     suspend fun autoBackupIfDue(now: Long = System.currentTimeMillis()) = withContext(Dispatchers.IO) {
@@ -91,6 +93,7 @@ class Backup(private val context: Context, private val db: WankiDatabase, privat
 
     data class Checked(
         val dbFile: File, val dbVersion: Int, val createdAt: Long, val cards: Int, val settings: JSONObject?,
+        val texts: Int, val notebooks: Int, val pages: Int, val notes: Int,
         /** Media files of the backup (null for backups made before media were included). */
         val media: File?,
     )
@@ -125,7 +128,17 @@ class Backup(private val context: Context, private val db: WankiDatabase, privat
             val version = sdb.version
             if (version < 1 || version > DB_VERSION) error("Копия сделана более новой версией Wanki (схема $version)")
             val cards = sdb.rawQuery("SELECT COUNT(*) FROM cards WHERE deleted = 0", null).use { c -> c.moveToFirst(); c.getInt(0) }
-            Checked(dbFile, version, m.optLong("createdAt"), cards, prefs, media.takeIf { hasMedia })
+            // older backups may lack a table: count it as none
+            fun count(sql: String) = runCatching { sdb.rawQuery(sql, null).use { c -> c.moveToFirst(); c.getInt(0) } }.getOrDefault(0)
+            val inkPages = "FROM page_ink i JOIN pages p ON p.id = i.pageId JOIN notebooks n ON n.id = p.notebookId WHERE p.deleted = 0 AND n.deleted = 0"
+            Checked(
+                dbFile, version, m.optLong("createdAt"), cards, prefs,
+                texts = count("SELECT COUNT(*) FROM texts WHERE deleted = 0"),
+                notebooks = count("SELECT COUNT(DISTINCT n.id) $inkPages"),
+                pages = count("SELECT COUNT(*) $inkPages"),
+                notes = count("SELECT COUNT(*) FROM text_notes WHERE deleted = 0"),
+                media = media.takeIf { hasMedia },
+            )
         }
     }
 
