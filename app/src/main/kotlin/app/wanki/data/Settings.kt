@@ -36,6 +36,9 @@ class Settings(context: Context) {
     /** Last automatic or manual backup, epoch ms. */
     var lastBackupAt by pref("lastBackupAt", 0L)
 
+    /** The one-time deletion of empty ink rows has run. */
+    var emptyInkCleaned by pref("emptyInkCleaned", false)
+
     /** Hifz: how many study days a newly learned piece stays in sabqi. */
     var sabqiDays by pref("sabqiDays", 7)
     /** Hifz: days one full manzil cycle over all learned pieces takes. */

@@ -247,4 +247,21 @@ class RepositoryTest {
         repo.saveTextNote(TextNoteEntity(title = "Т", body = "текст"))
         assertTrue(backup().hasContent())
     }
+
+    @Test
+    fun emptyInkCleanupDeletesOnlyDecodableEmptyRows() = runBlocking {
+        val nb = repo.createNotebook("Тетрадь", PageTemplate.LINED, "ru")
+        val empty = repo.pages(nb.id).single()
+        val full = repo.addPage(nb)
+        val broken = repo.addPage(nb)
+        val dao = db.notebooks()
+        dao.upsertInk(PageInkEntity(empty.id, app.wanki.ink.InkCodec.encode(app.wanki.ink.InkDrawing(emptyList()))))
+        dao.upsertInk(PageInkEntity(full.id, app.wanki.ink.InkCodec.encode(app.wanki.ink.InkDrawing(listOf(stroke())))))
+        dao.upsertInk(PageInkEntity(broken.id, byteArrayOf(1, 2, 3)))
+        assertEquals(1, repo.deleteEmptyInk())
+        assertEquals(null, dao.ink(empty.id))
+        assertTrue(dao.ink(full.id) != null)
+        assertTrue(dao.ink(broken.id) != null)
+        assertEquals(0, repo.deleteEmptyInk())
+    }
 }

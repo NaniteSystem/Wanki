@@ -481,6 +481,19 @@ class Repository(private val db: WankiDatabase) {
     suspend fun loadInk(pageId: String): List<InkStroke> =
         notebooks.ink(pageId)?.let { runCatching { InkCodec.decode(it.strokes).strokes }.getOrNull() }.orEmpty()
 
+    /**
+     * Deletes ink rows whose blob decodes to zero strokes (left by versions that kept the row of an emptied page).
+     * A blob that fails to decode is kept. Returns the number of deleted rows.
+     */
+    suspend fun deleteEmptyInk(): Int {
+        var deleted = 0
+        for (id in notebooks.inkPageIds()) {
+            val strokes = notebooks.ink(id)?.let { runCatching { InkCodec.decode(it.strokes).strokes }.getOrNull() } ?: continue
+            if (strokes.isEmpty()) { notebooks.deleteInk(id); deleted++ }
+        }
+        return deleted
+    }
+
     suspend fun recognizedText(pageId: String): String = notebooks.ink(pageId)?.recognizedText.orEmpty()
 
     suspend fun saveInk(page: PageEntity, strokes: List<InkStroke>) {

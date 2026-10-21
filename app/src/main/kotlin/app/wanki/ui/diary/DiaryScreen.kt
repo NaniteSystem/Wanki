@@ -67,7 +67,7 @@ fun DiaryScreen(onOpenDay: (Long) -> Unit) {
         ScreenHeader("Дневник", subtitle = "Одна страница на день") {
             Button(onClick = { onOpenDay(today.toEpochDay()) }) { Text("Сегодня") }
         }
-        Column(Modifier.fillMaxWidth().padding(16.dp).widthIn(max = 640.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(Modifier.widthIn(max = 640.dp).fillMaxWidth().padding(horizontal = 8.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = { month = month.minusMonths(1) }) { Text("◀") }
                 Text(
@@ -93,7 +93,8 @@ fun DiaryScreen(onOpenDay: (Long) -> Unit) {
             cells.chunked(7).forEach { week ->
                 Row {
                     week.forEach { d ->
-                        Box(Modifier.weight(1f).aspectRatio(1f).padding(2.dp)) {
+                        // the whole cell (at least 48 dp at 360 dp width) is the touch target; the 2 dp inset is only visual
+                        Box(Modifier.weight(1f).aspectRatio(1f)) {
                             if (d != null) {
                                 val date = month.atDay(d)
                                 val isToday = date == today
@@ -104,12 +105,13 @@ fun DiaryScreen(onOpenDay: (Long) -> Unit) {
                                     Modifier.fillMaxSize()
                                         .testTag("diary-day-$epoch")
                                         .semantics { if (hasEntry) stateDescription = "есть запись" }
+                                        .clickable(enabled = !future) { onOpenDay(epoch) }
+                                        .padding(2.dp)
                                         .background(
                                             if (hasEntry) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
                                             RoundedCornerShape(8.dp),
                                         )
-                                        .border(if (isToday) 2.dp else 0.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(8.dp))
-                                        .clickable(enabled = !future) { onOpenDay(epoch) },
+                                        .border(if (isToday) 2.dp else 0.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(8.dp)),
                                     contentAlignment = Alignment.Center,
                                 ) {
                                     Text("$d", color = if (future) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f) else Color.Unspecified)

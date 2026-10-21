@@ -49,6 +49,9 @@ classpath (see build.gradle.kts) so AGP and KGP share a classloader.
 - Text content is stored and shown exactly as saved; normalization (case, marks, letter variants) only
   inside comparisons.
 - Writing canvases stay paper-colored (`WritingPaper`) in the dark theme.
+- Navigation state is saveable (`RouteCodec`); MainActivity handles configuration changes itself.
+- Ink saves after every finished gesture through `SerialSaver`; errors are shown, never swallowed.
+- Icons are Material Symbols vector drawables in res/drawable.
 - Release builds use R8: anything found by reflection needs a keep rule (`app/proguard-rules.pro`).
 - Instrumented tests: run one emulator at a time locally (two at once make Compose screenshots flaky).
   Locally `wanki-phone` runs on port 5558 (`-port 5558`) and `wanki-tablet` on 5556; `emulator-5554`

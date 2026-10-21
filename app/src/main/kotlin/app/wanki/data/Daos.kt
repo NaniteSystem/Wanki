@@ -355,6 +355,9 @@ interface NotebookDao {
     )
     fun observeDiaryDates(notebookId: String): Flow<List<Long>>
 
+    @Query("SELECT pageId FROM page_ink")
+    suspend fun inkPageIds(): List<String>
+
     @Query("DELETE FROM page_ink WHERE pageId = :pageId")
     suspend fun deleteInk(pageId: String)
 

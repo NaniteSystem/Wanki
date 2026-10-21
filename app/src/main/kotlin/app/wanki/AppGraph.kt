@@ -52,6 +52,11 @@ class WankiApp : Application() {
         super.onCreate()
         graph = AppGraph(this)
         Reminders.schedule(this)
+        graph.appScope.launch {
+            if (!graph.settings.emptyInkCleaned) {
+                runCatching { graph.repository.deleteEmptyInk() }.onSuccess { graph.settings.emptyInkCleaned = true }
+            }
+        }
         graph.appScope.launch { runCatching { graph.backup.autoBackupIfDue() } }
     }
 }

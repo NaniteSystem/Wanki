@@ -3,6 +3,9 @@ package app.wanki
 import android.graphics.Bitmap
 import android.util.Log
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
@@ -216,6 +219,27 @@ class SmokeTest {
         rule.onNode(hasText("Закрыть")).performClick()
         rule.onNode(hasTestTag("show-text")).performClick()
         shot("07c-notebook-text")
+        // a second page, back to the first, and the pen popup
+        rule.onNode(hasTestTag("add-page")).performClick()
+        rule.waitUntilAtLeastOneExists(hasText("стр. 2 из 2"), 10_000)
+        rule.onNode(hasTestTag("page-prev")).performClick()
+        rule.waitUntilAtLeastOneExists(hasText("стр. 1 из 2"), 10_000)
+        shot("20-notebook-p1")
+        rule.onNode(hasTestTag("tool-PEN")).performClick()
+        rule.onNode(hasTestTag("tool-PEN")).performClick()
+        rule.waitUntilAtLeastOneExists(hasTestTag("tool-options"), 5_000)
+        shot("21-tool-popup")
+        // a real touch outside the popup (the empty middle of the page header) closes it
+        val inst = InstrumentationRegistry.getInstrumentation()
+        val t = android.os.SystemClock.uptimeMillis()
+        val dm = rule.activity.resources.displayMetrics
+        val top = rule.activity.window.decorView.rootWindowInsets?.systemWindowInsetTop ?: 0
+        val x = dm.widthPixels * 0.5f
+        val y = top + 40 * dm.density
+        for ((i, act) in listOf(android.view.MotionEvent.ACTION_DOWN, android.view.MotionEvent.ACTION_UP).withIndex()) {
+            inst.sendPointerSync(android.view.MotionEvent.obtain(t, t + i * 50L, act, x, y, 0))
+        }
+        Thread.sleep(800); rule.waitForIdle(); shot("21b-popup-closed")
         back()
 
         // Boards: create one, draw on it
@@ -232,6 +256,17 @@ class SmokeTest {
         tab("Дневник")
         rule.waitUntilAtLeastOneExists(hasText("Сегодня"), 10_000)
         shot("09-diary")
+        // open yesterday and leave without writing: the day stays unmarked
+        val yesterday = java.time.LocalDate.now().minusDays(1)
+        if (yesterday.month == java.time.LocalDate.now().month) {
+            val cell = hasTestTag("diary-day-${yesterday.toEpochDay()}")
+            rule.onNode(cell).performClick()
+            rule.waitUntilAtLeastOneExists(hasTestTag("page-canvas"), 10_000)
+            back()
+            rule.waitUntilAtLeastOneExists(cell, 10_000)
+            rule.onNode(cell).assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.StateDescription))
+            shot("22-diary")
+        }
         rule.onNode(hasText("Сегодня")).performClick()
         rule.waitUntilAtLeastOneExists(hasTestTag("page-canvas"), 10_000)
         write("page-canvas", 2)

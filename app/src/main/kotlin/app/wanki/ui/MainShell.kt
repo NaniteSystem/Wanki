@@ -18,6 +18,10 @@ import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.saveable.Saver
@@ -144,6 +148,9 @@ fun MainShell() {
             Column(Modifier.fillMaxSize()) {
                 Box(Modifier.weight(1f)) { Content(nav) }
                 if (!immersive) {
+                    // six labels share the width: the bar's text ignores font scale above 1.0 so «Настройки» is never cut
+                    val density = LocalDensity.current
+                    CompositionLocalProvider(LocalDensity provides Density(density.density, minOf(density.fontScale, 1f))) {
                     NavigationBar {
                         tabs.forEach { t ->
                             NavigationBarItem(
@@ -151,9 +158,10 @@ fun MainShell() {
                                 selected = nav.root == t.route,
                                 onClick = { nav.switchTab(t.route) },
                                 icon = { Icon(painterResource(t.icon), contentDescription = null) },
-                                label = { Text(t.label, maxLines = 1, softWrap = false, style = MaterialTheme.typography.labelSmall) },
+                                label = { Text(t.label, maxLines = 1, softWrap = false, style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, letterSpacing = 0.sp)) },
                             )
                         }
+                    }
                     }
                 }
             }
