@@ -3,6 +3,10 @@ package app.wanki.data
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.compose.runtime.mutableStateOf
+import app.wanki.input.InkSection
+import app.wanki.input.ToolSelection
+import app.wanki.input.decode
+import app.wanki.input.encode
 import app.wanki.scoring.ScoringConfig
 import kotlin.properties.ReadWriteProperty
 import kotlin.reflect.KProperty
@@ -40,6 +44,10 @@ class Settings(context: Context) {
     var manzilPointer by pref("manzilPointer", "")
     /** Epoch day the last manzil chunk was finished. */
     var manzilDoneDay by pref("manzilDoneDay", -1L)
+
+    /** The pen/marker/eraser choice last used in an ink section. */
+    fun tool(section: InkSection): ToolSelection = ToolSelection.decode(prefs.getString("tool.${section.name}", null))
+    fun setTool(section: InkSection, t: ToolSelection) { prefs.edit().putString("tool.${section.name}", t.encode()).apply() }
 
     val autoLanguageList: List<String> get() = autoLanguages.split(',').map { it.trim() }.filter { it.isNotEmpty() }
 

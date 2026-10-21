@@ -53,6 +53,7 @@ import app.wanki.ink.InkStroke
 import app.wanki.input.InkLayer
 import app.wanki.input.InkSurface
 import app.wanki.input.ToolKind
+import app.wanki.input.InkSection
 import app.wanki.input.ToolSelection
 import app.wanki.recognition.AUTO_LANGUAGE
 import app.wanki.ui.common.InkToolbar
@@ -131,7 +132,7 @@ fun NoteEditorScreen(id: String?, onBack: () -> Unit) {
     val blocks = remember { mutableStateListOf<BlockState>() }
     var version by remember { mutableIntStateOf(0) }
     var savedVersion by remember { mutableIntStateOf(0) }
-    var tool by remember { mutableStateOf(ToolSelection()) }
+    var tool by remember { mutableStateOf(graph.settings.tool(InkSection.NOTE)) }
 
     LaunchedEffect(id) { ui {
         val n = id?.let { graph.repository.textNote(it) } ?: TextNoteEntity(title = "", body = "")
@@ -183,7 +184,7 @@ fun NoteEditorScreen(id: String?, onBack: () -> Unit) {
             }
         }
         if (blocks.any { it.type == NoteBlockType.INK }) {
-            InkToolbar(tool, { tool = it }, blocks.firstNotNullOf { it.layer }, Modifier.padding(horizontal = 8.dp),
+            InkToolbar(tool, { tool = it; graph.settings.setTool(InkSection.NOTE, it) }, blocks.firstNotNullOf { it.layer }, Modifier.padding(horizontal = 8.dp),
                 tools = listOf(ToolKind.PEN, ToolKind.MARKER, ToolKind.HIGHLIGHTER, ToolKind.ERASER))
         }
         val colors = TextFieldDefaults.colors(

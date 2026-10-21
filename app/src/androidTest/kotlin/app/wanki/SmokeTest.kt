@@ -199,7 +199,7 @@ class SmokeTest {
         write("page-canvas", 4)
         shot("06-notebook-page")
         // lasso around the writing → text actions
-        rule.onNode(hasText("Лассо")).performClick()
+        rule.onNode(hasTestTag("tool-LASSO")).performClick()
         rule.onNode(hasTestTag("page-canvas")).performTouchInput {
             down(Offset(width * 0.05f, height * 0.15f))
             moveTo(Offset(width * 0.95f, height * 0.15f))

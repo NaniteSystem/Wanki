@@ -38,6 +38,7 @@ import app.wanki.graph
 import app.wanki.ink.InkStroke
 import app.wanki.input.InkLayer
 import app.wanki.input.InkSurface
+import app.wanki.input.InkSection
 import app.wanki.input.ToolSelection
 import app.wanki.input.Viewport
 import app.wanki.recognition.ModelStatus
@@ -63,7 +64,14 @@ class PageEditorState(
         private set
     val layer = InkLayer()
     val viewport = Viewport(minScale = if (infinite) 0.1f else 0.3f, bounds = if (infinite) null else PageGeometry.BOUNDS)
-    var tool by mutableStateOf(ToolSelection())
+    private val section = InkSection.ofNotebookKind(notebook.kind)
+    var tool by mutableStateOf(graph.settings.tool(section))
+        private set
+
+    fun selectTool(t: ToolSelection) {
+        tool = t
+        graph.settings.setTool(section, t)
+    }
     var loaded by mutableStateOf(false)
         private set
     var recognizedText by mutableStateOf("")
@@ -172,7 +180,7 @@ fun PageEditor(
             TextButton(onClick = { state.viewport.fitWidth() }) { Text("Вписать") }
             TextButton(onClick = { showText = !showText }) { Text(if (showText) "Скрыть текст" else "Текст") }
         }
-        InkToolbar(state.tool, { state.tool = it }, state.layer, Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+        InkToolbar(state.tool, state::selectTool, state.layer, Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
         if (state.layer.hasSelection) {
             SelectionBar(state.layer, state.notebook.language, Modifier.padding(horizontal = 8.dp, vertical = 2.dp))
         }

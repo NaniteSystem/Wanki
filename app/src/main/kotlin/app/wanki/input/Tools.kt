@@ -23,7 +23,30 @@ data class ToolSelection(
 
     companion object {
         const val DEFAULT_INK = 0xFF1A1A1A.toInt()
-        val PALETTE = listOf(DEFAULT_INK, 0xFF1E5BD8.toInt(), 0xFFD23C3C.toInt(), 0xFF2E9E5B.toInt(), 0xFFE0A100.toInt())
-        val SIZES = listOf(2.5f, 4f, 7f)
+        val PALETTE = listOf(
+            DEFAULT_INK, 0xFF5F6368.toInt(), 0xFF1E5BD8.toInt(), 0xFFD23C3C.toInt(),
+            0xFF2E9E5B.toInt(), 0xFFE0A100.toInt(), 0xFF8E44AD.toInt(), 0xFFE67E22.toInt(),
+        )
+        val SIZES = listOf(1.5f, 2.5f, 4f, 7f, 11f)
+    }
+}
+
+/** "KIND:color:size"; the colour is stored as a signed int. */
+fun ToolSelection.encode(): String = "${kind.name}:$color:$size"
+
+/** Inverse of [encode]; anything unreadable gives the default selection. */
+fun ToolSelection.Companion.decode(s: String?): ToolSelection {
+    val parts = s?.split(':') ?: return ToolSelection()
+    if (parts.size != 3) return ToolSelection()
+    val kind = ToolKind.entries.firstOrNull { it.name == parts[0] } ?: return ToolSelection()
+    val color = parts[1].toIntOrNull() ?: return ToolSelection()
+    val size = parts[2].toFloatOrNull()?.takeIf { it.isFinite() && it > 0f } ?: return ToolSelection()
+    return ToolSelection(kind, color, size)
+}
+
+/** Which kind of ink surface a remembered tool belongs to. */
+enum class InkSection { NOTEBOOK, DIARY, BOARD, NOTE;
+    companion object {
+        fun ofNotebookKind(kind: String): InkSection = entries.firstOrNull { it.name == kind } ?: NOTEBOOK
     }
 }
