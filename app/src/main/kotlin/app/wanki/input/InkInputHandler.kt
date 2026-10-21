@@ -6,6 +6,7 @@ import android.os.Build
 import android.util.Log
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import androidx.ink.authoring.InProgressStrokeId
 import androidx.ink.authoring.InProgressStrokesFinishedListener
 import androidx.ink.authoring.InProgressStrokesView
@@ -20,9 +21,12 @@ import kotlin.math.hypot
 /**
  * All canvas input in one place, no mode buttons:
  * - stylus tip draws (or erases with the eraser tool), the pen's eraser end and side button erase;
- * - a finger draws only while no stylus is active ([StylusTracker]), otherwise it pans;
+ * - on canvases (a [viewport] or pen [gestures]) a finger draws only while no stylus was seen on this
+ *   screen ([StylusTracker.fingerDraws]) and the touch is neither a palm ([PalmFilter]) nor cancelled
+ *   by the system; otherwise it pans. Review answer cells keep the 5-second stylus window;
  * - two fingers always pan and zoom (when the canvas has a [viewport]);
- * - palm touches reported as cancelled are dropped.
+ * - with a [viewport], a quick two-finger tap undoes and a three-finger tap redoes ([TapGestures]);
+ * - one eraser drag is one undo step ([InkLayer.beginErase]).
  */
 internal class InkInputHandler(
     private val view: InProgressStrokesView,
@@ -64,6 +68,11 @@ internal class InkInputHandler(
     private var lastFx = 0f
     private var lastFy = 0f
 
+    private val taps by lazy { TapGestures(slopPx = ViewConfiguration.get(view.context).scaledTouchSlop.toFloat()) }
+
+    /** Canvases (pages, boards, notes) follow the per-screen pen rule; review cells keep the time window. */
+    private val canvasRules: Boolean get() = viewport != null || gestures
+
     override fun onHover(v: View, event: MotionEvent): Boolean {
         if (event.getToolType(0) == MotionEvent.TOOL_TYPE_STYLUS) StylusTracker.onStylusEvent(event.eventTime)
         return false
@@ -73,13 +82,37 @@ internal class InkInputHandler(
     override fun onTouch(v: View, event: MotionEvent): Boolean {
         // Always consume so a pen landing while the palm already rests on the screen still arrives.
         when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> onDown(v, event)
-            MotionEvent.ACTION_MOVE -> onMove(event)
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP -> onUp(event)
-            MotionEvent.ACTION_CANCEL -> cancelAll(event)
+            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> { trackTapDown(event); onDown(v, event) }
+            MotionEvent.ACTION_MOVE -> { trackTapMove(event); onMove(event) }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP -> {
+                val tap = trackTapUp(event)
+                onUp(event)
+                if (tap != null && enabled) layer?.let { if (tap == Tap.TWO_FINGER) it.undo() else it.redo() }
+            }
+            MotionEvent.ACTION_CANCEL -> { taps.reset(); cancelAll(event) }
         }
         return true
     }
+
+    private fun trackTapDown(e: MotionEvent) {
+        if (viewport == null) return
+        val i = e.actionIndex
+        if (isFinger(e.getToolType(i)) && !isPalm(e, i)) taps.onDown(e.getPointerId(i), e.getX(i), e.getY(i), e.eventTime)
+        else taps.reset() // a pen or a palm in the gesture: not a tap
+    }
+
+    private fun trackTapMove(e: MotionEvent) {
+        if (viewport == null) return
+        for (i in 0 until e.pointerCount) if (isFinger(e.getToolType(i))) taps.onMove(e.getPointerId(i), e.getX(i), e.getY(i))
+    }
+
+    private fun trackTapUp(e: MotionEvent): Tap? {
+        if (viewport == null) return null
+        if (isCanceled(e)) { taps.reset(); return null }
+        return taps.onUp(e.getPointerId(e.actionIndex), e.eventTime)
+    }
+
+    private fun isPalm(e: MotionEvent, i: Int) = PalmFilter.isPalm(e.getTouchMajor(i), view.resources.displayMetrics.density)
 
     private fun isFinger(type: Int) = type == MotionEvent.TOOL_TYPE_FINGER || type == MotionEvent.TOOL_TYPE_UNKNOWN
     private fun isCanceled(e: MotionEvent) =
@@ -99,6 +132,7 @@ internal class InkInputHandler(
         if (stylusLike) {
             // the pen wins over a finger stroke or gesture that was probably the palm
             cancelDraw(e)
+            cancelFingerErase(e)
             endNavigation()
             val erase = type == MotionEvent.TOOL_TYPE_ERASER || tool.isEraser ||
                 (e.buttonState and MotionEvent.BUTTON_STYLUS_PRIMARY) != 0
@@ -115,11 +149,14 @@ internal class InkInputHandler(
         if (nav && fingerCount(e) >= 2) {
             // second finger: this is a pinch/pan, not writing
             if (drawStroke != null && isFingerPointer(e, drawPointer)) cancelDraw(e)
+            cancelFingerErase(e)
             startPinch(e)
             return
         }
         if (drawStroke != null || erasePointer >= 0 || pinching) return
-        if (StylusTracker.isStylusActive(e.eventTime)) {
+        val fingerDraws = if (canvasRules) StylusTracker.fingerDraws() && !isPalm(e, i) && !isCanceled(e)
+        else !StylusTracker.isStylusActive(e.eventTime)
+        if (!fingerDraws) {
             if (nav) startPan(id, e.getX(i), e.getY(i))
             return
         }
@@ -155,7 +192,13 @@ internal class InkInputHandler(
             if (i >= 0) erase(e.getX(i), e.getY(i))
         }
         drawStroke?.let { s ->
-            if (e.findPointerIndex(drawPointer) >= 0) {
+            val di = e.findPointerIndex(drawPointer)
+            if (canvasRules && di >= 0 && isFinger(e.getToolType(di)) && isPalm(e, di)) {
+                // the "finger" spread into a palm: drop the stroke
+                cancelDraw(e)
+                return@let
+            }
+            if (di >= 0) {
                 capture?.let { addPoints(it, e, drawPointer, historical = true) }
                 view.addToStroke(e, drawPointer, s)
             }
@@ -189,7 +232,7 @@ internal class InkInputHandler(
                 l.lasso = null
             }
         }
-        if (id == erasePointer) erasePointer = -1
+        if (id == erasePointer) finishErase()
         if (id == drawPointer) {
             drawStroke?.let { s ->
                 if (isCanceled(e)) {
@@ -213,7 +256,7 @@ internal class InkInputHandler(
         if (movePointer >= 0) { movePointer = -1; layer?.endMove() }
         lassoPointer = -1
         layer?.lasso = null
-        erasePointer = -1
+        finishErase()
         endNavigation()
     }
 
@@ -263,7 +306,9 @@ internal class InkInputHandler(
     }
 
     private fun startErase(pointerId: Int, x: Float, y: Float) {
+        if (erasePointer >= 0) finishErase()
         erasePointer = pointerId
+        layer?.beginErase()
         onStrokeStarted()
         erase(x, y)
     }
@@ -271,9 +316,22 @@ internal class InkInputHandler(
     private fun erase(sx: Float, sy: Float) {
         val l = layer ?: return
         val vp = viewport
-        val changed = if (vp == null) l.eraseAt(sx, sy, eraserRadiusPx)
+        if (vp == null) l.eraseAt(sx, sy, eraserRadiusPx)
         else l.eraseAt(vp.toWorldX(sx), vp.toWorldY(sy), eraserRadiusPx / vp.scale)
-        if (changed) onStrokeFinished()
+    }
+
+    /** The eraser lifted: the whole drag becomes one undo step. */
+    private fun finishErase() {
+        if (erasePointer < 0) return
+        erasePointer = -1
+        if (layer?.endErase() == true) onStrokeFinished()
+    }
+
+    /** A finger eraser drag that turned out to be a pinch, a tap or a palm under the pen: undo it silently. */
+    private fun cancelFingerErase(e: MotionEvent) {
+        if (erasePointer < 0 || !isFingerPointer(e, erasePointer)) return
+        erasePointer = -1
+        layer?.cancelErase()
     }
 
     private fun startPan(pointerId: Int, x: Float, y: Float) {

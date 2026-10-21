@@ -15,7 +15,8 @@ import kotlin.math.hypot
 
 /**
  * The strokes of one canvas (world coordinates) with undo/redo. Renderable androidx.ink strokes
- * and bounds are cached per stroke. [version] changes on every edit (for autosave/recognition).
+ * and bounds are cached per stroke. [version] changes once per finished edit — one stroke, one
+ * eraser drag, one lasso move — so autosave and recognition run once per gesture.
  */
 class InkLayer(initial: List<InkStroke> = emptyList()) {
     val strokes = mutableStateListOf<InkStroke>().apply { addAll(initial) }
@@ -129,12 +130,41 @@ class InkLayer(initial: List<InkStroke> = emptyList()) {
         }
         if (hit.isEmpty()) return false
         hit.asReversed().forEach { strokes.removeAt(it.index) }
-        push(Edit.Removed(hit.map { it.index to it.value }))
+        if (eraseBefore != null) eraseChanged = true else push(Edit.Removed(hit.map { it.index to it.value }))
         return true
+    }
+
+    private var eraseBefore: List<InkStroke>? = null
+    private var eraseChanged = false
+
+    /**
+     * Starts an eraser drag: [eraseAt] then removes strokes live without undo steps or [version]
+     * changes, and [endErase] records the whole drag as one undo step.
+     */
+    fun beginErase() {
+        eraseBefore = strokes.toList()
+        eraseChanged = false
+    }
+
+    /** Ends the eraser drag; true when it removed anything (one undo step was pushed). */
+    fun endErase(): Boolean {
+        val before = eraseBefore ?: return false
+        eraseBefore = null
+        if (!eraseChanged) return false
+        push(Edit.Replaced(before, strokes.toList()))
+        return true
+    }
+
+    /** Drops the eraser drag and puts back what it removed (e.g. it turned out to be a pinch). */
+    fun cancelErase() {
+        val before = eraseBefore ?: return
+        eraseBefore = null
+        if (eraseChanged) { strokes.clear(); strokes.addAll(before) }
     }
 
     fun replaceAll(newStrokes: List<InkStroke>, undoable: Boolean = true) {
         val before = strokes.toList()
+        eraseBefore = null // a reload or replace ends any eraser drag in progress
         strokes.clear()
         strokes.addAll(newStrokes)
         if (undoable) push(Edit.Replaced(before, newStrokes)) else {

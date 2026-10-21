@@ -11,12 +11,14 @@ import androidx.annotation.DrawableRes
 import androidx.compose.material3.Icon
 import androidx.compose.ui.res.painterResource
 import app.wanki.R
+import app.wanki.input.StylusTracker
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -113,6 +115,8 @@ class Navigator(initial: List<Route> = listOf(Route.Decks)) {
 fun MainShell() {
     val nav = rememberSaveable(saver = Navigator.Saver) { Navigator() }
     BackHandler(enabled = nav.stack.size > 1) { nav.back() }
+    // the pen rule is per screen: a pen seen on one page does not stop fingers drawing on the next
+    LaunchedEffect(nav.current) { StylusTracker.onScreenChanged() }
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val wide = maxWidth >= 600.dp
