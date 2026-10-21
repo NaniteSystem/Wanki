@@ -79,13 +79,13 @@ class SmokeTest {
     fun walkThroughAllSections() {
         // Install a deck from the catalog: on a fresh install from the empty deck list, otherwise
         // (data left by an earlier run) from the menu; the deck may already be there
-        rule.waitUntilAtLeastOneExists(hasTestTag("decks-menu"), 15_000)
+        rule.waitUntilAtLeastOneExists(hasTestTag("menu"), 15_000)
         rule.waitForIdle()
         shot("00-start")
         if (rule.onAllNodes(hasTestTag("open-catalog")).fetchSemanticsNodes().isNotEmpty()) {
             rule.onNode(hasTestTag("open-catalog")).performClick()
         } else {
-            rule.onNode(hasText("⋮")).performClick()
+            rule.onNode(hasTestTag("menu")).performClick()
             rule.onNode(hasText("Готовые колоды")).performClick()
         }
         rule.waitUntilAtLeastOneExists(hasTestTag("catalog"), 10_000)
@@ -117,13 +117,14 @@ class SmokeTest {
         rule.waitForIdle()
         shot("05-review-next")
         rule.onAllNodes(hasText("‹ Закрыть")).onFirst().performClick()
+        rule.onNode(hasTestTag("menu")).performClick()
         rule.onNode(hasText("Статистика")).performClick()
         rule.waitUntilAtLeastOneExists(hasText("Прогноз"), 10_000)
         shot("05b-stats")
         back()
 
         // Card browser: search, open a card in the editor
-        rule.onNode(hasText("Поиск")).performClick()
+        rule.onNode(hasTestTag("decks-search")).performClick()
         rule.waitUntilAtLeastOneExists(hasTestTag("card-search"), 10_000)
         rule.onNode(hasTestTag("card-search")).performTextInput("日")
         rule.waitUntilAtLeastOneExists(hasText("день; солнце", substring = true), 10_000)
@@ -145,7 +146,7 @@ class SmokeTest {
         back()
 
         // Handwriting practice from the menu (the queue may be empty on a fresh install)
-        rule.onNode(hasText("⋮")).performClick()
+        rule.onNode(hasTestTag("menu")).performClick()
         rule.onNode(hasText("Тренировка почерка")).performClick()
         rule.waitUntilAtLeastOneExists(hasText("Тренировка почерка"), 10_000)
         rule.waitForIdle()

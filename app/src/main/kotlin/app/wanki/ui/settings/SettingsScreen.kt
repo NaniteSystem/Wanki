@@ -249,6 +249,7 @@ private fun About() {
             "© EDRDG (CC BY-SA 4.0); HSK — Complete HSK Vocabulary (MIT) со значениями CC-CEDICT (CC BY-SA 4.0); " +
             "корейские слова — 한국어기초사전 © 국립국어원 (CC BY-SA 2.0 KR). Изменённые данные распространяются " +
             "на тех же условиях.\n" +
+            "Значки — Material Symbols © Google (Apache License 2.0).\n" +
             "Распознавание рукописи, определение языка и перевод — ML Kit (Google), работают на устройстве после загрузки моделей.",
         style = MaterialTheme.typography.bodySmall,
     )

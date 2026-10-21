@@ -78,6 +78,7 @@ debug-APK как артефакт сборки (`wanki-debug-apk`).
 - KanjiVG © Ulrich Apel, CC BY-SA 3.0 — эталоны черт японских знаков (`app/src/main/assets/kanjivg`).
 - KANJIDIC2 и JMdict © EDRDG, CC BY-SA 4.0 — кандзи и японские слова.
 - Complete HSK Vocabulary (MIT), значения CC-CEDICT (CC BY-SA 4.0) — HSK.
+- Значки — Material Symbols © Google, Apache License 2.0 (`app/src/main/res/drawable/ic_*.xml`).
 - 한국어기초사전 © 국립국어원, CC BY-SA 2.0 KR — корейские слова.
 
 Изменённые данные (`app/src/main/assets/decks`, `kanjivg`) распространяются на тех же условиях.

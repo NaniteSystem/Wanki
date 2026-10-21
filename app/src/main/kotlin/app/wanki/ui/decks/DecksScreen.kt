@@ -55,7 +55,8 @@ import app.wanki.importer.TextImporter
 import app.wanki.practice.CharQuality
 import app.wanki.ui.common.DeckPickerDialog
 import app.wanki.ui.common.Languages
-import app.wanki.ui.common.MenuButton
+import app.wanki.R
+import app.wanki.ui.common.HeaderAction
 import app.wanki.ui.common.ScreenHeader
 import app.wanki.ui.common.languageName
 import app.wanki.ui.common.ui
@@ -138,20 +139,17 @@ fun DecksScreen(
 
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
-            ScreenHeader("Колоды", subtitle = "Сегодня повторено: $reviewedToday") {
-                TextButton(onClick = onBrowse) { Text("Поиск") }
-                TextButton(onClick = onStats) { Text("Статистика") }
-                MenuButton(
-                    "⋮",
-                    listOf(
-                        "Готовые колоды" to onCatalog,
-                        "Импорт колоды Anki (.apkg)" to { pickApkg.launch(arrayOf("*/*")) },
-                        "Импорт текста (CSV, TSV)" to { pickText.launch(arrayOf("text/*", "application/csv", "*/*")) },
-                        "Тренировка почерка" to onPractice,
-                    ),
-                    Modifier.testTag("decks-menu"),
-                )
-            }
+            ScreenHeader(
+                "Колоды", subtitle = "Сегодня повторено: $reviewedToday",
+                primary = listOf(HeaderAction(R.drawable.ic_search, "Поиск", tag = "decks-search", onClick = onBrowse)),
+                menu = listOf(
+                    HeaderAction(0, "Статистика", tag = "decks-stats", onClick = onStats),
+                    HeaderAction(0, "Готовые колоды", onClick = onCatalog),
+                    HeaderAction(0, "Импорт колоды Anki (.apkg)") { pickApkg.launch(arrayOf("*/*")) },
+                    HeaderAction(0, "Импорт текста (CSV, TSV)") { pickText.launch(arrayOf("text/*", "application/csv", "*/*")) },
+                    HeaderAction(0, "Тренировка почерка", onClick = onPractice),
+                ),
+            )
             LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 item("texts") { TextsRow(texts?.isNotEmpty(), textToday?.pieces, onTexts) }
                 if (weak.isNotEmpty()) item("practice") { PracticeBanner(weak, onPractice) }

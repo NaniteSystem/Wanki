@@ -7,6 +7,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
+import androidx.annotation.DrawableRes
+import androidx.compose.material3.Icon
+import androidx.compose.ui.res.painterResource
+import app.wanki.R
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationRail
@@ -72,15 +76,15 @@ sealed interface Route {
     data object WritingLab : Route
 }
 
-private data class Tab(val route: Route, val glyph: String, val label: String)
+private data class Tab(val route: Route, @DrawableRes val icon: Int, val label: String)
 
 private val tabs = listOf(
-    Tab(Route.Decks, "▤", "Колоды"),
-    Tab(Route.Notebooks, "▥", "Тетради"),
-    Tab(Route.Notes, "✎", "Заметки"),
-    Tab(Route.Diary, "◷", "Дневник"),
-    Tab(Route.Boards, "◻", "Доски"),
-    Tab(Route.Settings, "⚙", "Настройки"),
+    Tab(Route.Decks, R.drawable.ic_style, "Колоды"),
+    Tab(Route.Notebooks, R.drawable.ic_book_2, "Тетради"),
+    Tab(Route.Notes, R.drawable.ic_sticky_note_2, "Заметки"),
+    Tab(Route.Diary, R.drawable.ic_calendar_month, "Дневник"),
+    Tab(Route.Boards, R.drawable.ic_dashboard, "Доски"),
+    Tab(Route.Settings, R.drawable.ic_settings, "Настройки"),
 )
 
 /** Back stack navigation: each tab is a root, screens push on top of it. */
@@ -125,7 +129,7 @@ fun MainShell() {
                             modifier = Modifier.testTag("tab-${t.label}"),
                             selected = nav.root == t.route,
                             onClick = { nav.switchTab(t.route) },
-                            icon = { Text(t.glyph) },
+                            icon = { Icon(painterResource(t.icon), contentDescription = null) },
                             label = { Text(t.label) },
                         )
                     }
@@ -142,7 +146,7 @@ fun MainShell() {
                                 modifier = Modifier.testTag("tab-${t.label}"),
                                 selected = nav.root == t.route,
                                 onClick = { nav.switchTab(t.route) },
-                                icon = { Text(t.glyph) },
+                                icon = { Icon(painterResource(t.icon), contentDescription = null) },
                                 label = { Text(t.label, maxLines = 1, softWrap = false, style = MaterialTheme.typography.labelSmall) },
                             )
                         }
