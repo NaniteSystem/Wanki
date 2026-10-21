@@ -6,6 +6,8 @@
     <!-- Daily review reminder; alarms are cleared on reboot and set again. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Recording your own voice reciting a text (asked at the first tap on the mic). -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <application
         android:name=".WankiApp"

@@ -8,7 +8,7 @@ import java.io.File
 import java.io.InputStream
 
 /**
- * Pictures and sounds of imported cards, in files/media under their Anki names (paths stripped,
+ * Pictures and sounds of imported cards and your own voice recordings, in files/media under their Anki names (paths stripped,
  * so a name can never point outside the folder).
  */
 class MediaStore(context: Context) {
@@ -36,19 +36,27 @@ class MediaStore(context: Context) {
         return BitmapFactory.decodeFile(f.path, BitmapFactory.Options().apply { inSampleSize = sample })
     }
 
-    /** Plays a sound; returns false when the file is missing or cannot be played. */
+    /** Plays a sound, over and over when [loop]; returns false when the file is missing or cannot be played. */
     @Synchronized
-    fun play(name: String): Boolean {
+    fun play(name: String, loop: Boolean = false): Boolean {
         val f = file(name) ?: return false
-        player?.release()
+        stop()
+        val p = MediaPlayer()
         return runCatching {
-            player = MediaPlayer().apply {
-                setDataSource(f.path)
-                setOnCompletionListener { it.release(); if (player === it) player = null }
-                prepare()
-                start()
-            }
-        }.isSuccess
+            p.setDataSource(f.path)
+            p.isLooping = loop
+            p.setOnCompletionListener { done -> synchronized(this@MediaStore) { if (player === done) player = null }; done.release() }
+            p.prepare()
+            p.start()
+            player = p
+        }.onFailure { p.release() }.isSuccess
+    }
+
+    /** Stops whatever is playing. */
+    @Synchronized
+    fun stop() {
+        player?.let { runCatching { it.stop() }; it.release() }
+        player = null
     }
 
     companion object {

@@ -10,6 +10,7 @@ import app.wanki.data.Settings
 import app.wanki.data.TextRepository
 import app.wanki.data.WankiDatabase
 import app.wanki.media.MediaStore
+import app.wanki.media.VoiceRecorder
 import app.wanki.recognition.RecognizerPool
 import app.wanki.recognition.Speaker
 import app.wanki.recognition.TextRecognition
@@ -38,6 +39,7 @@ class AppGraph(context: Context) {
     val speaker = Speaker(context)
     val backup = Backup(context, db, settings)
     val media = MediaStore(context)
+    val recorder = VoiceRecorder(media)
     val catalog = Catalog(context.assets)
     val catalogInstaller = CatalogInstaller(catalog, repository, appScope)
 }

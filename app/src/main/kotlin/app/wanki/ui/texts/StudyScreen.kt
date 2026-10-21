@@ -30,6 +30,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -258,6 +259,10 @@ fun StudyScreen(request: StudyRequest, onClose: () -> Unit) {
             }
             if (request.kind == StudyKind.LEARN) ModeBar(state, StudyMode.entries)
             else if (request.kind != StudyKind.REVIEW) ModeBar(state, listOf(StudyMode.RECITE, StudyMode.CUES))
+            // your own voice: the current piece in a review, otherwise the whole portion/block
+            val voiceIds = if (request.kind == StudyKind.REVIEW) listOfNotNull(state.pieces.getOrNull(state.reviewIndex)?.id)
+            else state.pieces.map { it.id }
+            if (voiceIds.isNotEmpty()) key(voiceIds) { VoiceBar(voiceIds, snackbar, scope) }
 
             when (request.kind) {
                 StudyKind.REVIEW -> ReviewBody(state, scope, speak)
