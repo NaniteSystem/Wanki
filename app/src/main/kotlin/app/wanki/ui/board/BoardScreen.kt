@@ -35,7 +35,11 @@ import app.wanki.data.NotebookKind
 import app.wanki.data.PageEntity
 import app.wanki.graph
 import app.wanki.ui.common.ScreenHeader
+import app.wanki.R
+import app.wanki.ui.common.HeaderAction
 import app.wanki.ui.notebooks.PageEditor
+import app.wanki.ui.notebooks.fitAction
+import app.wanki.ui.notebooks.textAction
 import app.wanki.ui.notebooks.PageEditorState
 import kotlinx.coroutines.launch
 import java.text.DateFormat
@@ -102,13 +106,13 @@ fun BoardScreen(boardId: String, onBack: () -> Unit) {
     val (notebook, page) = board ?: return
     val state = remember(page.id) { PageEditorState(graph, notebook, page, infinite = true) }
     var confirmDelete by remember { mutableStateOf(false) }
-    PageEditor(state, Modifier.fillMaxSize()) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onBack) { Text("‹") }
-            Text(notebook.title, style = MaterialTheme.typography.titleMedium, maxLines = 1, modifier = Modifier.weight(1f, fill = false))
-            TextButton(onClick = { confirmDelete = true }) { Text("Удалить") }
-        }
-    }
+    PageEditor(
+        state, notebook.title, onBack, Modifier.fillMaxSize(),
+        menu = listOf(
+            state.fitAction(), state.textAction(),
+            HeaderAction(R.drawable.ic_delete, "Удалить", "menu-delete") { confirmDelete = true },
+        ),
+    )
     if (confirmDelete) {
         AlertDialog(
             onDismissRequest = { confirmDelete = false },

@@ -3,7 +3,7 @@ package app.wanki.ui.notebooks
 import android.util.Log
 import app.wanki.ui.common.ui
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -14,8 +14,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -27,11 +29,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import app.wanki.AppGraph
+import app.wanki.R
+import app.wanki.ui.common.HeaderAction
+import app.wanki.ui.common.ScreenHeader
 import app.wanki.data.NotebookEntity
 import app.wanki.data.PageEntity
 import app.wanki.data.PageTemplate
@@ -94,6 +100,10 @@ class PageEditorState(
     }
     var loaded by mutableStateOf(false)
         private set
+
+    /** Screen-only UI state, opened from the header menu. */
+    var showText by mutableStateOf(false)
+    var showPaper by mutableStateOf(false)
     var recognizedText by mutableStateOf("")
         private set
     var recognizing by mutableStateOf(false)
@@ -163,21 +173,31 @@ class PageEditorState(
     }
 }
 
+/** Header actions shared by every page screen. «Бумага…» only makes sense for sheets, not for boards. */
+fun PageEditorState.paperAction() = HeaderAction(0, "Бумага…", "menu-template") { showPaper = true }
+fun PageEditorState.fitAction() = HeaderAction(R.drawable.ic_fit_screen, "Вписать", "fit") { viewport.fitWidth() }
+fun PageEditorState.textAction() = HeaderAction(R.drawable.ic_notes, "Текст", "show-text") { showText = !showText }
+
 /**
- * Full-screen page: toolbar, the zoomable canvas and (optionally) the recognized text.
+ * Full-screen page: header, one-row toolbar, the zoomable canvas, [pageBar] and the recognized
+ * text (side panel on wide windows, bottom sheet on phones).
  * Pinch with two fingers to zoom; with a pen nearby one finger pans.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PageEditor(
     state: PageEditorState,
+    title: String,
+    onBack: () -> Unit,
     modifier: Modifier = Modifier,
-    header: @Composable () -> Unit = {},
+    subtitle: String? = null,
+    primary: List<HeaderAction> = emptyList(),
+    menu: List<HeaderAction> = emptyList(),
+    pageBar: @Composable () -> Unit = {},
 ) {
     val context = LocalContext.current
     val graph = context.graph
-    var showText by remember { mutableStateOf(false) }
     var translateAll by remember { mutableStateOf(false) }
-    var templateMenu by remember { mutableStateOf(false) }
 
     LaunchedEffect(state) { ui { state.load() } }
     // version only changes when a gesture ends: save each one; recognize after a pause
@@ -201,26 +221,11 @@ fun PageEditor(
         }
     }
 
-    Box(modifier) {
+    BoxWithConstraints(modifier) {
+        val wide = maxWidth >= 600.dp
+        val sheetMax = maxHeight / 2
         Column(Modifier.fillMaxSize()) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                Box(Modifier.weight(1f)) { header() }
-                if (!state.infinite) {
-                    Box {
-                        TextButton(onClick = { templateMenu = true }) { Text(state.template.label()) }
-                        DropdownMenu(expanded = templateMenu, onDismissRequest = { templateMenu = false }) {
-                            PageTemplate.entries.forEach { t ->
-                                DropdownMenuItem(text = { Text(t.label()) }, onClick = {
-                                    templateMenu = false
-                                    graph.appScope.launch { state.setTemplate(t) }
-                                })
-                            }
-                        }
-                    }
-                }
-                TextButton(onClick = { state.viewport.fitWidth() }) { Text("Вписать") }
-                TextButton(onClick = { showText = !showText }) { Text(if (showText) "Скрыть текст" else "Текст") }
-            }
+            ScreenHeader(title, onBack = onBack, subtitle = subtitle, subtitleMaxLines = 1, primary = primary, menu = menu)
             InkToolbar(state.tool, state::selectTool, state.layer, Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
             if (state.layer.hasSelection) {
                 SelectionBar(state.layer, state.notebook.language, Modifier.padding(horizontal = 8.dp, vertical = 2.dp))
@@ -238,41 +243,85 @@ fun PageEditor(
                         else drawPage(state.template)
                     },
                 )
-                if (showText) {
+                if (state.showText && wide) {
                     Surface(tonalElevation = 1.dp, modifier = Modifier.width(280.dp).fillMaxSize()) {
-                        Column(Modifier.padding(12.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text("Распознанный текст", style = MaterialTheme.typography.titleSmall)
-                            val status = state.modelStatus
+                        RecognizedTextPanel(state, onTranslate = { translateAll = true })
+                    }
+                }
+            }
+            pageBar()
+        }
+        SaveErrorSnackbar(state.saver, Modifier.align(Alignment.BottomCenter))
+        if (state.showText && !wide) {
+            ModalBottomSheet(
+                onDismissRequest = { state.showText = false },
+                sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+                modifier = Modifier.heightIn(max = sheetMax),
+            ) {
+                RecognizedTextPanel(state, onTranslate = { translateAll = true })
+            }
+        }
+    }
+    if (state.showPaper && !state.infinite) {
+        AlertDialog(
+            onDismissRequest = { state.showPaper = false },
+            title = { Text("Бумага") },
+            text = {
+                Column {
+                    PageTemplate.entries.forEach { t ->
+                        TextButton(
+                            onClick = {
+                                state.showPaper = false
+                                graph.appScope.launch { state.setTemplate(t) }
+                            },
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                        ) {
                             Text(
-                                when {
-                                    state.recognizing -> "распознаю…"
-                                    status == ModelStatus.DOWNLOADING -> "загрузка модели распознавания…"
-                                    status == ModelStatus.UNAVAILABLE -> "распознавание недоступно (нет модели или сети)"
-                                    else -> "обновляется автоматически после паузы"
-                                },
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            SelectionContainer {
-                                Text(state.recognizedText.ifBlank { "—" }, modifier = Modifier.heightIn(min = 40.dp))
-                            }
-                            if (state.recognizedText.isNotBlank()) {
-                                Row {
-                                    TextButton(onClick = { copyToClipboard(context, state.recognizedText) }) { Text("Копировать") }
-                                    TextButton(onClick = { translateAll = true }) { Text("Перевести") }
-                                }
-                            }
-                            Text(
-                                "Чтобы взять часть текста — обведите её инструментом «Лассо».",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                (if (t == state.template) "✓ " else "") + t.label(),
+                                modifier = Modifier.fillMaxWidth(),
                             )
                         }
                     }
                 }
-            }
-        }
-        SaveErrorSnackbar(state.saver, Modifier.align(androidx.compose.ui.Alignment.BottomCenter))
+            },
+            confirmButton = { TextButton(onClick = { state.showPaper = false }) { Text("Закрыть") } },
+        )
     }
     if (translateAll) TextActionsDialog(initialText = state.recognizedText, onDismiss = { translateAll = false })
+}
+
+@Composable
+private fun RecognizedTextPanel(state: PageEditorState, onTranslate: () -> Unit) {
+    val context = LocalContext.current
+    Column(
+        Modifier.padding(12.dp).verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text("Распознанный текст", style = MaterialTheme.typography.titleSmall)
+        val status = state.modelStatus
+        Text(
+            when {
+                state.recognizing -> "распознаю…"
+                status == ModelStatus.DOWNLOADING -> "загрузка модели распознавания…"
+                status == ModelStatus.UNAVAILABLE -> "распознавание недоступно (нет модели или сети)"
+                else -> "обновляется автоматически после паузы"
+            },
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        SelectionContainer {
+            Text(state.recognizedText.ifBlank { "—" }, modifier = Modifier.heightIn(min = 40.dp))
+        }
+        if (state.recognizedText.isNotBlank()) {
+            Row {
+                TextButton(onClick = { copyToClipboard(context, state.recognizedText) }) { Text("Копировать") }
+                TextButton(onClick = onTranslate) { Text("Перевести") }
+            }
+        }
+        Text(
+            "Чтобы взять часть текста — обведите её инструментом «Лассо».",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
 }

@@ -40,7 +40,11 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import app.wanki.data.NoteBlockEntity
@@ -61,6 +65,8 @@ import app.wanki.recognition.AUTO_LANGUAGE
 import app.wanki.ui.common.InkToolbar
 import app.wanki.ui.common.SaveErrorSnackbar
 import app.wanki.ui.common.SerialSaver
+import app.wanki.R
+import app.wanki.ui.common.HeaderAction
 import app.wanki.ui.common.ScreenHeader
 import app.wanki.ui.common.drawTemplate
 import app.wanki.ui.common.ui
@@ -136,6 +142,7 @@ fun NoteEditorScreen(id: String?, onBack: () -> Unit) {
     val blocks = remember { mutableStateListOf<BlockState>() }
     val changes = remember { NoteChanges() }
     var tool by remember { mutableStateOf(graph.settings.tool(InkSection.NOTE)) }
+    var activeBlockId by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(id) { ui {
         val n = id?.let { graph.repository.textNote(it) } ?: TextNoteEntity(title = "", body = "")
@@ -192,18 +199,21 @@ fun NoteEditorScreen(id: String?, onBack: () -> Unit) {
 
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
-            ScreenHeader("Заметка", onBack = onBack) {
-                if (id != null) {
-                    TextButton(onClick = {
+            ScreenHeader(
+                title.ifBlank { "Заметка" }, onBack = onBack,
+                menu = if (id == null) emptyList() else listOf(
+                    HeaderAction(R.drawable.ic_delete, "Удалить", "menu-delete") {
                         note = null
                         // a save still running must not bring the note back after it is deleted
                         graph.appScope.launch { saver.flush(); graph.repository.deleteTextNote(id) }
                         onBack()
-                    }) { Text("Удалить") }
-                }
-            }
+                    },
+                ),
+            )
             if (blocks.any { it.type == NoteBlockType.INK }) {
-                InkToolbar(tool, { tool = it; graph.settings.setTool(InkSection.NOTE, it) }, blocks.firstNotNullOf { it.layer }, Modifier.padding(horizontal = 8.dp),
+                // undo/redo act on the handwriting block touched last
+                val active = blocks.firstOrNull { it.id == activeBlockId && it.layer != null } ?: blocks.first { it.layer != null }
+                InkToolbar(tool, { tool = it; graph.settings.setTool(InkSection.NOTE, it) }, active.layer!!, Modifier.padding(horizontal = 8.dp),
                     tools = listOf(ToolKind.PEN, ToolKind.MARKER, ToolKind.HIGHLIGHTER, ToolKind.ERASER))
             }
             val colors = TextFieldDefaults.colors(
@@ -224,7 +234,14 @@ fun NoteEditorScreen(id: String?, onBack: () -> Unit) {
                         NoteBlockType.INK -> {
                             Surface(
                                 shape = RoundedCornerShape(10.dp), color = WritingPaper,
-                                modifier = Modifier.fillMaxWidth().height(b.heightDp.dp).padding(vertical = 4.dp),
+                                modifier = Modifier.fillMaxWidth().height(b.heightDp.dp).padding(vertical = 4.dp)
+                                    .pointerInput(b.id) {
+                                        // only watches: the touch still reaches the canvas
+                                        awaitEachGesture {
+                                            awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                                            activeBlockId = b.id
+                                        }
+                                    },
                             ) {
                                 InkSurface(
                                     layer = b.layer!!, tool = tool, modifier = Modifier.fillMaxSize(), gestures = true,

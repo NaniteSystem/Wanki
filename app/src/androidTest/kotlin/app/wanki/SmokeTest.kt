@@ -214,7 +214,7 @@ class SmokeTest {
         rule.waitForIdle()
         shot("07b-text-dialog")
         rule.onNode(hasText("Закрыть")).performClick()
-        rule.onAllNodes(hasText("Текст")).onFirst().performClick()
+        rule.onNode(hasTestTag("show-text")).performClick()
         shot("07c-notebook-text")
         back()
 

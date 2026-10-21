@@ -123,7 +123,7 @@ fun MainShell() {
         // Screens pushed on top of a tab (review, a page) take the whole screen; tab roots keep the bar.
         val immersive = nav.stack.size > 1 &&
             (nav.current is Route.Review || nav.current is Route.Practice || nav.current is Route.Notebook ||
-                nav.current is Route.DiaryDay || nav.current is Route.Board || nav.current is Route.TextEditor ||
+                nav.current is Route.DiaryDay || nav.current is Route.Board || nav.current is Route.Note || nav.current is Route.TextEditor ||
                 nav.current is Route.TextStudy)
         if (wide) {
             Row(Modifier.fillMaxSize()) {

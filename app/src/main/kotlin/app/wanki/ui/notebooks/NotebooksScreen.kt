@@ -43,7 +43,9 @@ import app.wanki.data.NotebookKind
 import app.wanki.data.PageEntity
 import app.wanki.data.PageSearchHit
 import app.wanki.data.PageTemplate
+import app.wanki.R
 import app.wanki.graph
+import app.wanki.ui.common.HeaderAction
 import app.wanki.ui.common.NotebookLanguages
 import app.wanki.ui.common.ScreenHeader
 import app.wanki.ui.common.label
@@ -166,6 +168,8 @@ fun NotebookScreen(notebookId: String, initialPageId: String?, onBack: () -> Uni
     val notebook by produceState<app.wanki.data.NotebookEntity?>(null, notebookId) { value = ui { graph.repository.notebook(notebookId) } }
     val pages by remember(notebookId) { graph.repository.observePages(notebookId) }.collectAsState(emptyList<PageEntity>())
     var index by rememberSaveable(notebookId) { mutableStateOf<Int?>(null) }
+    // a page that was just added: the current page stays on screen until it arrives through the flow
+    var pendingIndex by remember(notebookId) { mutableStateOf<Int?>(null) }
     val scope = rememberUiScope()
 
     LaunchedEffect(pages, initialPageId) {
@@ -173,24 +177,33 @@ fun NotebookScreen(notebookId: String, initialPageId: String?, onBack: () -> Uni
             index = initialPageId?.let { id -> pages.indexOfFirst { it.id == id }.takeIf { it >= 0 } } ?: 0
         }
     }
+    LaunchedEffect(pages, pendingIndex) {
+        val p = pendingIndex
+        if (p != null && p < pages.size) {
+            index = p
+            pendingIndex = null
+        }
+    }
     val nb = notebook ?: return
     val i = index ?: return
     val page = pages.getOrNull(i) ?: return
     val state = remember(page.id) { PageEditorState(graph, nb, page, infinite = false) }
 
-    PageEditor(state, Modifier.fillMaxSize()) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onBack) { Text("‹") }
-            Text(nb.title, style = MaterialTheme.typography.titleMedium, maxLines = 1, modifier = Modifier.weight(1f, fill = false))
-            TextButton(onClick = { index = (i - 1).coerceAtLeast(0) }, enabled = i > 0) { Text("◀") }
-            Text("${i + 1}/${pages.size}", style = MaterialTheme.typography.labelLarge)
-            TextButton(onClick = { index = (i + 1).coerceAtMost(pages.lastIndex) }, enabled = i < pages.lastIndex) { Text("▶") }
-            TextButton(onClick = {
+    PageEditor(
+        state, nb.title, onBack, Modifier.fillMaxSize(),
+        subtitle = "стр. ${i + 1} из ${pages.size}",
+        primary = listOf(
+            HeaderAction(R.drawable.ic_add, "Добавить страницу", "add-page", enabled = pendingIndex == null) {
+                // set before the insert: the flow may deliver the new page before addPage returns
+                val target = pages.size
+                pendingIndex = target
                 scope.launch {
-                    graph.repository.addPage(nb, state.template)
-                    index = pages.size // the new page arrives through the flow
+                    runCatching { graph.repository.addPage(nb, state.template) }.onFailure { pendingIndex = null; throw it }
                 }
-            }) { Text("+ стр.") }
-        }
-    }
+            },
+            state.textAction(),
+        ),
+        menu = listOf(state.paperAction(), state.fitAction()),
+        pageBar = { PageNavBar(i, pages.size, { index = it.coerceIn(0, pages.lastIndex) }) },
+    )
 }

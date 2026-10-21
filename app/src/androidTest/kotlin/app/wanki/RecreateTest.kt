@@ -1,6 +1,8 @@
 package app.wanki
 
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -29,14 +31,30 @@ class RecreateTest {
         rule.onNode(hasTestTag("tab-Тетради")).performClick()
         rule.waitUntilAtLeastOneExists(hasText(title), 10_000)
         rule.onNode(hasText(title)).performClick()
-        rule.waitUntilAtLeastOneExists(hasText("1/2"), 10_000)
-        rule.onNodeWithText("▶").performClick()
-        rule.waitUntilAtLeastOneExists(hasText("2/2"), 10_000)
+        rule.waitUntilAtLeastOneExists(hasText("стр. 1 из 2"), 10_000)
+        rule.onNode(hasTestTag("page-next")).performClick()
+        rule.waitUntilAtLeastOneExists(hasText("стр. 2 из 2"), 10_000)
 
         rule.activityRule.scenario.recreate()
 
-        rule.waitUntilAtLeastOneExists(hasText("2/2"), 10_000)
+        rule.waitUntilAtLeastOneExists(hasText("стр. 2 из 2"), 10_000)
         rule.onNodeWithText(title).assertExists()
-        rule.onNodeWithText("2/2").assertExists()
+        rule.onNodeWithText("2 / 2").assertExists()
+    }
+
+    /** The header stays usable at phone width: «Добавить страницу» is visible and the new page appears. */
+    @Test
+    fun addPageWorksAtPhoneWidth() {
+        val title = "Add ${System.currentTimeMillis()}"
+        runBlocking { rule.activity.graph.repository.createNotebook(title, PageTemplate.LINED, "auto") }
+        rule.waitUntilAtLeastOneExists(hasTestTag("tab-Тетради"), 15_000)
+        rule.onNode(hasTestTag("tab-Тетради")).performClick()
+        rule.waitUntilAtLeastOneExists(hasText(title), 10_000)
+        rule.onNode(hasText(title)).performClick()
+        rule.waitUntilAtLeastOneExists(hasText("стр. 1 из 1"), 10_000)
+        rule.onNode(hasTestTag("add-page")).assertIsDisplayed().performClick()
+        rule.waitUntilAtLeastOneExists(hasText("стр. 2 из 2"), 10_000)
+        rule.onNode(hasTestTag("page-canvas")).assertIsDisplayed()
+        rule.onNode(hasTestTag("page-prev")).assertIsDisplayed().assertIsEnabled()
     }
 }
