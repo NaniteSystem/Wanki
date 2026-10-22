@@ -46,16 +46,21 @@ object FirstLetters {
     private fun normalize(s: String): String {
         val sb = StringBuilder()
         for (c in Normalizer.normalize(s, Normalizer.Form.NFD).replace(mark, "").lowercase()) {
-            when (c) {
-                'ё' -> sb.append('е')
-                'آ', 'أ', 'إ', 'ٱ' -> sb.append('ا')
-                'ى', 'ئ' -> sb.append('ي')
-                'ؤ' -> sb.append('و')
-                'ة' -> sb.append('ه')
-                'ـ' -> {}
-                else -> sb.append(c)
-            }
+            sb.append(LetterFolding.fold(c))
         }
         return sb.toString()
+    }
+}
+
+/** Letter variants that count as the same letter when comparing: Russian ё, Arabic alef/yaa/waw/taa forms. */
+object LetterFolding {
+    fun fold(c: Char): String = when (c) {
+        'ё' -> "е"
+        'آ', 'أ', 'إ', 'ٱ' -> "ا"
+        'ى', 'ئ' -> "ي"
+        'ؤ' -> "و"
+        'ة' -> "ه"
+        'ـ' -> ""
+        else -> c.toString()
     }
 }

@@ -1,0 +1,40 @@
+package app.wanki.texts
+
+import kotlin.test.Test
+import kotlin.test.assertContentEquals
+import kotlin.test.assertEquals
+
+class TypingTextTest {
+    private fun chars(s: String) = TypingText.fold(s).chars.toList()
+
+    @Test
+    fun punctuationAndSpacesAreIgnored() {
+        assertEquals(chars("helloworld"), chars("Hello, world!"))
+    }
+
+    @Test
+    fun katakanaFoldsToHiragana() {
+        assertEquals(chars("にほん"), chars("ニホン"))
+    }
+
+    @Test
+    fun fullWidthDigits() {
+        assertEquals(chars("3"), chars("３"))
+    }
+
+    @Test
+    fun arabicWithoutMarksMatches() {
+        assertEquals(chars("بسم الله"), chars("بِسْمِ اللَّهِ"))
+        assertEquals(chars("احمد"), chars("أحمد"))
+    }
+
+    @Test
+    fun russianYoAndCase() {
+        assertEquals(chars("елка"), chars("Ёлка"))
+    }
+
+    @Test
+    fun sourceIndexPointsBack() {
+        assertContentEquals(intArrayOf(0, 3), TypingText.fold("a, b").source)
+    }
+}
