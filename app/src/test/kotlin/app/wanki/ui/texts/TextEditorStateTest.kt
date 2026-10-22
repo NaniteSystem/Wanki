@@ -5,6 +5,8 @@ import androidx.compose.ui.text.input.TextFieldValue
 import app.wanki.data.EditedPiece
 import app.wanki.data.TextEntity
 import app.wanki.data.TextPieceEntity
+import app.wanki.texts.PieceWords
+import app.wanki.texts.ReadingOverride
 import app.wanki.texts.TextKind
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
@@ -140,5 +142,31 @@ class TextEditorStateTest {
         // re-aligned through the whole-text field: a blank line in between, then the text as it was
         s.type(ayat.joinToString("\n\n"), ayat.joinToString("\n"))
         check()
+    }
+
+    @Test
+    fun pastedMarkupBecomesPlainTextWithReadings() {
+        val s = loaded(language = "ja")
+        s.editContent("{日本|にほん}の{春|はる}")
+        assertEquals("日本の春", s.content)
+        assertEquals(listOf("日本の春"), s.pieces().map { it.content })
+        assertEquals(mapOf("日本" to ReadingOverride("にほん"), "春" to ReadingOverride("はる")), s.readings)
+        assertTrue(s.changed)
+        // a later paste merges with what is there
+        s.editContent("日本の春{夏|なつ|か}")
+        assertEquals("日本の春夏", s.content)
+        assertEquals(setOf("日本", "春", "夏"), s.readings.keys)
+        assertEquals(ReadingOverride("なつ", listOf("か")), s.readings["夏"])
+    }
+
+    @Test
+    fun loadKeepsReadings() {
+        val r = mapOf("春" to ReadingOverride("はる", listOf("ハル")))
+        val s = TextEditorState()
+        s.load(
+            TextEntity(id = "t", title = "x", language = "ja", readings = PieceWords.encodeReadings(r)),
+            listOf(TextPieceEntity(id = "p1", textId = "t", pieceIndex = 0, content = "春")),
+        )
+        assertEquals(r, s.readings)
     }
 }

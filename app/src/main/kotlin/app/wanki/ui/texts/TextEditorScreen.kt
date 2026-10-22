@@ -86,12 +86,13 @@ fun TextEditorScreen(id: String?, onBack: () -> Unit, onSaved: (String) -> Unit)
         val kind = state.kind
         val schedule = state.schedule
         val portion = state.portion
+        val readings = state.readings
         graph.appScope.launch {
             // saved right after pasting: the debounced detection may not have run yet
             val language = detect?.let { graph.textRecognition.identify(it) } ?: picked
             graph.texts.saveText(
                 base.copy(title = title, language = language, kind = kind.name, schedule = schedule.name, portionSize = portion),
-                pieces,
+                pieces, readings,
             )
             saving = false
             onSaved(base.id)

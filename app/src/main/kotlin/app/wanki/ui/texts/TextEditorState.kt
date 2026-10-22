@@ -11,6 +11,9 @@ import androidx.compose.ui.text.input.TextFieldValue
 import app.wanki.data.EditedPiece
 import app.wanki.data.TextEntity
 import app.wanki.data.TextPieceEntity
+import app.wanki.texts.PieceWords
+import app.wanki.texts.ReadingMarkup
+import app.wanki.texts.ReadingOverride
 import app.wanki.texts.TextKind
 import app.wanki.texts.TextSchedule
 import app.wanki.texts.Words
@@ -47,6 +50,9 @@ internal class TextEditorState {
     private var portionTouched = false
     var content by mutableStateOf("")
         private set
+    /** Reading overrides for typing, carried through the editor (and filled from pasted `{表記|よみ}` markup). */
+    var readings by mutableStateOf<Map<String, ReadingOverride>>(emptyMap())
+        private set
     val drafts = mutableStateListOf<Draft>()
     var changed by mutableStateOf(false)
         private set
@@ -65,6 +71,7 @@ internal class TextEditorState {
         schedule = scheduleOf(t.schedule)
         portion = t.portionSize
         portionTouched = true
+        readings = PieceWords.decodeReadings(t.readings)
         drafts.clear()
         drafts += pieces.map { Draft(nextKey++, it.id, TextFieldValue(it.content), it.note) }
         content = pieces.joinToString("\n") { it.content }
@@ -89,7 +96,14 @@ internal class TextEditorState {
         resplit(PieceDrafts.split(content, k))
     }
 
-    fun editContent(text: String) {
+    /** Pasted `{表記|よみ}` markup stays out of the field: the plain text goes in, its readings are merged into [readings]. */
+    fun editContent(typed: String) {
+        var text = typed
+        if (ReadingMarkup.has(typed)) {
+            val m = ReadingMarkup.parse(typed)
+            text = m.plain
+            if (m.readings.isNotEmpty()) { readings = readings + m.readings; changed = true }
+        }
         if (text == content) return
         content = text
         changed = true

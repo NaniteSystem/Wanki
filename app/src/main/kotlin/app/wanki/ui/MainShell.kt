@@ -51,6 +51,7 @@ import app.wanki.ui.texts.StudyRequest
 import app.wanki.ui.texts.StudyScreen
 import app.wanki.ui.texts.TextDetailScreen
 import app.wanki.ui.texts.TextEditorScreen
+import app.wanki.ui.texts.TextReadingsScreen
 import app.wanki.ui.texts.TextsScreen
 import app.wanki.writing.WritingTestScreen
 
@@ -76,6 +77,7 @@ sealed interface Route {
     /** [id] null = a new text. */
     data class TextEditor(val id: String?) : Route
     data class TextDetail(val id: String) : Route
+    data class TextReadings(val id: String) : Route
     data class TextStudy(val request: StudyRequest) : Route
     data object Settings : Route
     data object Stats : Route
@@ -206,8 +208,10 @@ private fun Content(nav: Navigator) {
             r.id,
             onBack = { nav.back() },
             onEdit = { nav.open(Route.TextEditor(it)) },
+            onReadings = { nav.open(Route.TextReadings(it)) },
             onStudy = { nav.open(Route.TextStudy(it)) },
         )
+        is Route.TextReadings -> TextReadingsScreen(r.id, onBack = { nav.back() })
         is Route.TextStudy -> StudyScreen(r.request, onClose = { nav.back() })
         Route.Catalog -> CatalogScreen(onBack = { nav.back() }, onOpenDeck = { nav.open(Route.Deck(it)) })
         Route.Stats -> StatsScreen(onBack = { nav.back() }, onPractice = { nav.open(Route.Practice()) })

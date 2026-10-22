@@ -32,6 +32,7 @@ object RouteCodec {
         Route.Texts -> name("Texts")
         is Route.TextEditor -> name("TextEditor", opt(route.id))
         is Route.TextDetail -> name("TextDetail", str(route.id))
+        is Route.TextReadings -> name("TextReadings", str(route.id))
         is Route.TextStudy -> name(
             "TextStudy", route.request.kind.name, opt(route.request.textId), list(route.request.pieceIds),
         )
@@ -64,6 +65,7 @@ object RouteCodec {
             "Texts" -> Route.Texts
             "TextEditor" -> Route.TextEditor(unOpt(f[0]))
             "TextDetail" -> Route.TextDetail(unStr(f[0]))
+            "TextReadings" -> Route.TextReadings(unStr(f[0]))
             "TextStudy" -> Route.TextStudy(StudyRequest(StudyKind.valueOf(f[0]), unOpt(f[1]), unList(f[2])))
             "Settings" -> Route.Settings
             "Stats" -> Route.Stats

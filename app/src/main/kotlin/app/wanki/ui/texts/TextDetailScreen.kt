@@ -49,7 +49,7 @@ import app.wanki.data.TextPieceEntity
 import app.wanki.graph
 import app.wanki.texts.TextSchedule
 import app.wanki.ui.common.ConfirmDialog
-import app.wanki.ui.common.MenuButton
+import app.wanki.ui.common.HeaderAction
 import app.wanki.ui.common.ScreenHeader
 import app.wanki.ui.common.ui
 import kotlinx.coroutines.launch
@@ -64,7 +64,7 @@ private fun status(p: TextPieceEntity, schedule: TextSchedule, now: Long) = when
 }
 
 @Composable
-fun TextDetailScreen(id: String, onBack: () -> Unit, onEdit: (String) -> Unit, onStudy: (StudyRequest) -> Unit) {
+fun TextDetailScreen(id: String, onBack: () -> Unit, onEdit: (String) -> Unit, onReadings: (String) -> Unit, onStudy: (StudyRequest) -> Unit) {
     val graph = LocalContext.current.graph
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LifecycleResumeEffect(Unit) {
@@ -86,10 +86,13 @@ fun TextDetailScreen(id: String, onBack: () -> Unit, onEdit: (String) -> Unit, o
         ScreenHeader(
             t?.title.orEmpty(), onBack = onBack,
             subtitle = t?.let { "${textLanguageName(it.language)} · ${kindName(it.kind)}" }, subtitleMaxLines = 1,
-        ) {
             // "Изменить" sits with the other actions below: header actions squeeze the title at large font sizes
-            if (t != null && !t.deleted) MenuButton("⋮", listOf("Изменить" to { onEdit(id) }, "Удалить" to { deleting = true }))
-        }
+            menu = if (t == null || t.deleted) emptyList() else buildList {
+                add(HeaderAction(0, "Изменить") { onEdit(id) })
+                if (t.language.substringBefore('-').substringBefore('_').lowercase() == "ja") add(HeaderAction(0, "Чтения…", tag = "menu-readings") { onReadings(id) })
+                add(HeaderAction(0, "Удалить") { deleting = true })
+            },
+        )
         if (t == null || ps == null) return@Column
         if (t.deleted) {
             Text("Текст удалён", modifier = Modifier.padding(16.dp))

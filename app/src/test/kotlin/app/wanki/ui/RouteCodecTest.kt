@@ -12,7 +12,7 @@ class RouteCodecTest {
         Route.CardEditor("c1"), Route.Practice(null, "ja"), Route.Practice("字", "zh"),
         Route.Notebooks, Route.Notebook("n1", "p2"), Route.Notebook("n1", null),
         Route.Notes, Route.Note("x1"), Route.Note(null), Route.Diary, Route.DiaryDay(20_000L), Route.Boards, Route.Board("b1"),
-        Route.Texts, Route.TextEditor("t1"), Route.TextEditor(null), Route.TextDetail("t1"),
+        Route.Texts, Route.TextEditor("t1"), Route.TextEditor(null), Route.TextDetail("t1"), Route.TextReadings("x"), Route.TextReadings("a|b"),
         Route.TextStudy(StudyRequest(StudyKind.MANZIL, null, listOf("a", "b"))),
         Route.TextStudy(StudyRequest(StudyKind.LEARN, "t1", emptyList())),
         Route.Settings, Route.Stats, Route.WritingLab,
