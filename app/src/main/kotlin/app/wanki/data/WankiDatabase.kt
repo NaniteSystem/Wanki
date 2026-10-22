@@ -12,6 +12,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         DeckEntity::class, NoteEntity::class, CardEntity::class, ReviewLogEntity::class, InkAttemptEntity::class,
         NotebookEntity::class, PageEntity::class, PageInkEntity::class, TextNoteEntity::class, NoteBlockEntity::class,
         CharScoreEntity::class, NoteTypeEntity::class, TextEntity::class, TextPieceEntity::class, RecitationEntity::class,
+        TextWordStatEntity::class, TypingDraftEntity::class,
     ],
     version = WankiDatabase.VERSION,
     exportSchema = true,
@@ -29,7 +30,7 @@ abstract class WankiDatabase : RoomDatabase() {
 
     companion object {
         const val NAME = "wanki.db"
-        const val VERSION = 7
+        const val VERSION = 8
 
         fun create(context: Context): WankiDatabase =
             Room.databaseBuilder(context, WankiDatabase::class.java, NAME)
@@ -137,6 +138,26 @@ abstract class WankiDatabase : RoomDatabase() {
             }
         }
 
-        val MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+        /** v8: typing from text: reading overrides, per-piece word lists, per-word history, unfinished runs. */
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `texts` ADD COLUMN `readings` TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE `text_pieces` ADD COLUMN `words` TEXT")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `text_word_stats` (`pieceId` TEXT NOT NULL, `wordIndex` INTEGER NOT NULL, " +
+                        "`cleanStreak` INTEGER NOT NULL, `recent` INTEGER NOT NULL, `cue` INTEGER NOT NULL, " +
+                        "`updatedAt` INTEGER NOT NULL, PRIMARY KEY(`pieceId`, `wordIndex`))",
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_text_word_stats_pieceId` ON `text_word_stats` (`pieceId`)")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `typing_drafts` (`key` TEXT NOT NULL, `typed` TEXT NOT NULL, `level` TEXT NOT NULL, " +
+                        "`startedAt` INTEGER NOT NULL, `day` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`key`))",
+                )
+            }
+        }
+
+        val MIGRATIONS = arrayOf(
+            MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8,
+        )
     }
 }

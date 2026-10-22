@@ -9,21 +9,34 @@ import app.wanki.texts.FsrsTextPlan
 import app.wanki.texts.HifzPlan
 import app.wanki.texts.PieceLog
 import app.wanki.texts.PieceOutcome
+import app.wanki.texts.Morphology
 import app.wanki.texts.PieceSplitter
+import app.wanki.texts.PieceWord
+import app.wanki.texts.PieceWords
 import app.wanki.texts.PlanPiece
 import app.wanki.texts.PlanText
 import app.wanki.texts.Portions
+import app.wanki.texts.ReadingOverride
 import app.wanki.texts.ScheduleSwitch
 import app.wanki.texts.TextKind
 import app.wanki.texts.TextSchedule
+import app.wanki.texts.TextWords
 import app.wanki.texts.WeakPieces
+import app.wanki.texts.WordHistory
+import app.wanki.texts.WordOutcome
+import app.wanki.texts.WordStat
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
 import java.time.Instant
 import java.time.ZoneId
 
 /** A piece as the editor saves it; [id] null = a new piece, which copies the schedule of [scheduleFrom] (split/join). */
 data class EditedPiece(val id: String?, val content: String, val note: String = "", val scheduleFrom: String? = null)
+
+/** A word of a piece: its index in the piece's word list. */
+data class WordKey(val pieceId: String, val index: Int)
 
 /** One block of today's text work. */
 sealed interface TodayItem {
@@ -46,7 +59,12 @@ data class TextToday(val items: List<TodayItem>) {
  * Texts learned by heart: pieces, new portions, FSRS and hifz (sabaq/sabqi/manzil) reviews and the
  * recitation log. A day is the local calendar day of `now`; the log is append-only.
  */
-class TextRepository(private val db: WankiDatabase, private val settings: Settings) {
+class TextRepository(
+    private val db: WankiDatabase,
+    private val settings: Settings,
+    /** The Japanese analyser; its first use loads a dictionary, so it is only called on [Dispatchers.Default]. */
+    private val morphology: () -> Morphology? = { null },
+) {
     private val dao = db.texts()
 
     fun observeTexts(): Flow<List<TextEntity>> = dao.observeTexts()
@@ -66,16 +84,20 @@ class TextRepository(private val db: WankiDatabase, private val settings: Settin
     /** Splits [content] into pieces and saves a new text; null when there is no piece (blank or punctuation only). */
     suspend fun createText(
         title: String, language: String, kind: TextKind, schedule: TextSchedule, portionSize: Int, content: String,
+        readings: Map<String, ReadingOverride> = emptyMap(),
     ): TextEntity? {
         val parts = PieceSplitter.split(content, kind)
         if (parts.isEmpty()) return null
         val text = TextEntity(
             title = title.trim().ifBlank { "Текст" }, language = language, kind = kind.name, schedule = schedule.name,
-            portionSize = portionSize.coerceAtLeast(1),
+            portionSize = portionSize.coerceAtLeast(1), readings = PieceWords.encodeReadings(readings),
         )
+        val words = computeWords(parts, language, readings)
         db.withTransaction {
             dao.upsertText(text)
-            dao.upsertPieces(parts.mapIndexed { i, s -> TextPieceEntity(textId = text.id, pieceIndex = i, content = s) })
+            dao.upsertPieces(parts.mapIndexed { i, s ->
+                TextPieceEntity(textId = text.id, pieceIndex = i, content = s, words = words[i])
+            })
         }
         return text
     }
@@ -85,14 +107,29 @@ class TextRepository(private val db: WankiDatabase, private val settings: Settin
      * an id keeps its row and schedule; a new one copies learnedAt, FSRS and hifz fields and the recitation
      * log of [EditedPiece.scheduleFrom], so a later schedule switch replays the same history; pieces left out
      * are deleted (their recitations stay). A changed schedule goes through [switchSchedule]. An empty piece
-     * list leaves the pieces alone (a text never has none).
+     * list leaves the pieces alone (a text never has none). [readings] null keeps the stored overrides. Each
+     * piece's words are recomputed (outside the transaction) when its content, the language or the readings
+     * changed; a piece whose words changed loses its word history.
      */
-    suspend fun saveText(text: TextEntity, pieces: List<EditedPiece>) {
+    suspend fun saveText(text: TextEntity, pieces: List<EditedPiece>, readings: Map<String, ReadingOverride>? = null) {
         val now = System.currentTimeMillis()
+        val before = dao.getText(text.id)
+        val readingsCode = readings?.let(PieceWords::encodeReadings) ?: before?.readings.orEmpty()
+        val sameSetup = before != null && before.language == text.language && before.readings == readingsCode
+        val known = if (sameSetup) dao.pieces(text.id).associateBy { it.id } else emptyMap()
+        val fresh = if (pieces.isEmpty()) emptyMap() else {
+            val todo = pieces.withIndex().filter { (_, e) ->
+                val old = e.id?.let(known::get)
+                old == null || old.words == null || old.content != e.content
+            }
+            val computed = computeWords(todo.map { it.value.content }, text.language, PieceWords.decodeReadings(readingsCode))
+            todo.mapIndexed { n, (i, _) -> i to computed[n] }.toMap()
+        }
         db.withTransaction {
             val stored = dao.getText(text.id)
             if (pieces.isNotEmpty()) {
                 val existing = dao.pieces(text.id).associateBy { it.id }
+                val changed = ArrayList<String>() // pieces whose words differ from the stored ones
                 val used = HashSet<String>()
                 val split = ArrayList<Pair<String, String>>() // new piece id to the piece it was split from
                 val rows = pieces.mapIndexed { i, e ->
@@ -103,8 +140,11 @@ class TextRepository(private val db: WankiDatabase, private val settings: Settin
                         parent != null -> parent.copy(id = newId()).also { split += it.id to parent.id }
                         else -> TextPieceEntity(textId = text.id, pieceIndex = i, content = e.content)
                     }
-                    base.copy(pieceIndex = i, content = e.content, note = e.note, updatedAt = now)
+                    val words = fresh[i] ?: known[e.id]?.words ?: base.words
+                    if (own != null && own.words != words) changed += own.id
+                    base.copy(pieceIndex = i, content = e.content, note = e.note, words = words, updatedAt = now)
                 }
+                changed.chunked(500).forEach { dao.deleteWordStats(it) }
                 dao.upsertPieces(rows)
                 if (split.isNotEmpty()) {
                     val logs = dao.recitations(text.id).groupBy { it.pieceId }
@@ -113,11 +153,11 @@ class TextRepository(private val db: WankiDatabase, private val settings: Settin
                     })
                 }
                 val kept = rows.mapTo(HashSet()) { it.id }
-                existing.keys.filter { it !in kept }.chunked(500).forEach { dao.deletePieces(it) }
+                existing.keys.filter { it !in kept }.chunked(500).forEach { dao.deleteWordStats(it); dao.deletePieces(it) }
             }
             val edited = (stored ?: text).copy(
                 title = text.title.trim().ifBlank { "Текст" }, language = text.language, kind = text.kind,
-                portionSize = text.portionSize.coerceAtLeast(1), updatedAt = now,
+                portionSize = text.portionSize.coerceAtLeast(1), readings = readingsCode, updatedAt = now,
             )
             dao.upsertText(edited)
             if (stored != null && stored.schedule != text.schedule) switchIn(text.id, schedule(text), now)
@@ -164,6 +204,72 @@ class TextRepository(private val db: WankiDatabase, private val settings: Settin
         dao.upsertText(text.copy(schedule = to.name, updatedAt = now))
     }
 
+    // --- typing: words, readings, history, drafts ----------------------------------------------
+
+    /** Words of [pieces] by piece id: stored lists are decoded, missing ones computed and stored. */
+    suspend fun words(pieces: List<TextPieceEntity>): Map<String, List<PieceWord>> {
+        val out = HashMap<String, List<PieceWord>>()
+        val missing = ArrayList<TextPieceEntity>()
+        for (p in pieces) p.words?.let { out[p.id] = PieceWords.decode(it) } ?: run { missing += p }
+        for ((textId, group) in missing.groupBy { it.textId }) {
+            val text = dao.getText(textId) ?: continue
+            val codes = computeWords(group.map { it.content }, text.language, PieceWords.decodeReadings(text.readings))
+            group.forEachIndexed { i, p ->
+                dao.setPieceWords(p.id, p.content, codes[i])
+                out[p.id] = PieceWords.decode(codes[i])
+            }
+        }
+        return out
+    }
+
+    /** Replaces the text's reading overrides; pieces whose words change lose their word history. */
+    suspend fun setReadings(textId: String, readings: Map<String, ReadingOverride>) {
+        val before = dao.getText(textId) ?: return
+        val code = PieceWords.encodeReadings(readings)
+        val pieces = dao.pieces(textId)
+        val codes = computeWords(pieces.map { it.content }, before.language, readings)
+        db.withTransaction {
+            val text = dao.getText(textId) ?: return@withTransaction
+            val now = System.currentTimeMillis()
+            val current = dao.pieces(textId).associateBy { it.id }
+            val rows = pieces.mapIndexedNotNull { i, p ->
+                // a piece edited meanwhile keeps its own words; they are filled in on first use
+                current[p.id]?.takeIf { it.content == p.content }?.copy(words = codes[i], updatedAt = now)
+            }
+            rows.filter { current[it.id]?.words != it.words }.map { it.id }.chunked(500).forEach { dao.deleteWordStats(it) }
+            dao.upsertPieces(rows)
+            dao.upsertText(text.copy(readings = code, updatedAt = now))
+        }
+    }
+
+    suspend fun wordStats(pieceIds: List<String>): Map<WordKey, WordStat> =
+        pieceIds.distinct().chunked(500).flatMap { dao.wordStats(it) }
+            .associate { WordKey(it.pieceId, it.wordIndex) to WordStat(it.cleanStreak, it.recent, it.cue) }
+
+    /** Applies [WordHistory.after] to the current history of each word. */
+    suspend fun recordWords(outcomes: Map<WordKey, WordOutcome>, now: Long = System.currentTimeMillis()) {
+        if (outcomes.isEmpty()) return
+        db.withTransaction {
+            val current = wordStats(outcomes.keys.map { it.pieceId })
+            dao.upsertWordStats(outcomes.map { (k, o) ->
+                val s = WordHistory.after(current[k] ?: WordStat(), o)
+                TextWordStatEntity(k.pieceId, k.index, s.cleanStreak, s.recent, s.cue, now)
+            })
+        }
+    }
+
+    suspend fun draft(key: String): TypingDraftEntity? = dao.draft(key)
+    suspend fun saveDraft(d: TypingDraftEntity) = dao.upsertDraft(d)
+    suspend fun clearDraft(key: String) = dao.deleteDraft(key)
+
+    /** Encoded word lists of [contents]; the analyser may load its dictionary, so this runs off the main thread. */
+    private suspend fun computeWords(contents: List<String>, language: String, readings: Map<String, ReadingOverride>): List<String> =
+        withContext(Dispatchers.Default) {
+            val breaker = TextWords.breaker(language)
+            val morph = morphology()
+            contents.map { PieceWords.encode(PieceWords.build(it, language, breaker, morph, readings)) }
+        }
+
     // --- learning and reviews ----------------------------------------------------------------
 
     /** Already known pieces up to [upToIndex] skip new portions: FSRS rates them Easy, hifz puts them in manzil. */
@@ -176,11 +282,13 @@ class TextRepository(private val db: WankiDatabase, private val settings: Settin
             if (fsrs) p.withSrs(scheduler.review(p.srs(), Rating.EASY, now, p.seed), now) else p.copy(sabqiLeft = 0, hifzDay = null)
         }
         dao.upsertPieces(known)
-        dao.insertRecitations(logRows(known, RecitationPart.KNOWN, now, 0, 0, emptySet()) { Rating.EASY.value })
+        dao.insertRecitations(logRows(known, RecitationPart.KNOWN, now, 0, 0, emptySet(), MODE_NONE) { Rating.EASY.value })
     }
 
     /** A portion recited cleanly: its new pieces become learned and the text gets no other portion today. */
-    suspend fun completePortion(textId: String, pieceIds: List<String>, durationMs: Long, now: Long = System.currentTimeMillis()) =
+    suspend fun completePortion(
+        textId: String, pieceIds: List<String>, durationMs: Long, now: Long = System.currentTimeMillis(), check: String = MODE_SELF,
+    ) =
         db.withTransaction {
             val text = dao.getText(textId) ?: return@withTransaction
             val today = day(now)
@@ -196,18 +304,20 @@ class TextRepository(private val db: WankiDatabase, private val settings: Settin
             if (learned.isEmpty()) return@withTransaction
             dao.upsertPieces(learned)
             val part = if (fsrs) RecitationPart.NEW else RecitationPart.SABAQ
-            dao.insertRecitations(logRows(learned, part, now, durationMs, 0, emptySet()) { Rating.GOOD.value })
+            dao.insertRecitations(logRows(learned, part, now, durationMs, 0, emptySet(), check) { Rating.GOOD.value })
             dao.upsertText(text.copy(lastPortionDay = today, updatedAt = now))
         }
 
     /** One FSRS review of a piece; Again counts as an error. */
-    suspend fun reviewPiece(pieceId: String, rating: Rating, hints: Int, durationMs: Long, now: Long = System.currentTimeMillis()) =
+    suspend fun reviewPiece(
+        pieceId: String, rating: Rating, hints: Int, durationMs: Long, now: Long = System.currentTimeMillis(), check: String = MODE_SELF,
+    ) =
         db.withTransaction {
             val piece = dao.getPiece(pieceId) ?: return@withTransaction
             val next = piece.withSrs(scheduler().review(piece.srs(), rating, now, piece.seed), now)
             dao.upsertPieces(listOf(next))
             val errors = if (rating == Rating.AGAIN) setOf(pieceId) else emptySet()
-            dao.insertRecitations(logRows(listOf(next), RecitationPart.REVIEW, now, durationMs, hints, errors) { rating.value })
+            dao.insertRecitations(logRows(listOf(next), RecitationPart.REVIEW, now, durationMs, hints, errors, check) { rating.value })
         }
 
     /**
@@ -216,6 +326,7 @@ class TextRepository(private val db: WankiDatabase, private val settings: Settin
      */
     suspend fun completeSabqi(
         textId: String, pieceIds: List<String>, errorIds: Set<String>, durationMs: Long, now: Long = System.currentTimeMillis(),
+        check: String = MODE_SELF,
     ) = db.withTransaction {
         val today = day(now)
         val byId = dao.pieces(textId).associateBy { it.id }
@@ -226,14 +337,16 @@ class TextRepository(private val db: WankiDatabase, private val settings: Settin
         }
         if (done.isEmpty()) return@withTransaction
         dao.upsertPieces(done)
-        dao.insertRecitations(logRows(done, RecitationPart.SABQI, now, durationMs, 0, errorIds, ::hifzRating))
+        dao.insertRecitations(logRows(done, RecitationPart.SABQI, now, durationMs, 0, errorIds, check, ::hifzRating))
     }
 
     /**
      * Today's manzil chunk: a piece with an error goes back to sabqi; the pointer moves past the chunk. Once
      * a day: when today's manzil is already done (a double submit), nothing changes.
      */
-    suspend fun completeManzil(pieceIds: List<String>, errorIds: Set<String>, durationMs: Long, now: Long = System.currentTimeMillis()) =
+    suspend fun completeManzil(
+        pieceIds: List<String>, errorIds: Set<String>, durationMs: Long, now: Long = System.currentTimeMillis(), check: String = MODE_SELF,
+    ) =
         db.withTransaction {
             val today = day(now)
             if (settings.manzilDoneDay == today) return@withTransaction
@@ -245,7 +358,7 @@ class TextRepository(private val db: WankiDatabase, private val settings: Settin
                 .associateBy { it.id }
             val done = pieceIds.distinct().mapNotNull { byId[it] }
             dao.upsertPieces(done)
-            dao.insertRecitations(logRows(done, RecitationPart.MANZIL, now, durationMs, 0, errorIds, ::hifzRating))
+            dao.insertRecitations(logRows(done, RecitationPart.MANZIL, now, durationMs, 0, errorIds, check, ::hifzRating))
             val after = all.map { byId[it.id] ?: it }.groupBy { it.textId }
             val pointer = HifzPlan.nextPointer(texts.map { plan(it, after[it.id].orEmpty()) }, pieceIds)
             // last, so the change is in place before Room tells observers about the commit
@@ -256,9 +369,10 @@ class TextRepository(private val db: WankiDatabase, private val settings: Settin
     /** A free recital: logged (it marks weak pieces) but never moves a schedule. */
     suspend fun logPractice(
         textId: String, pieceIds: List<String>, errorIds: Set<String>, hints: Int, durationMs: Long, now: Long = System.currentTimeMillis(),
+        check: String = MODE_SELF,
     ) = db.withTransaction {
         val byId = dao.pieces(textId).associateBy { it.id }
-        dao.insertRecitations(logRows(pieceIds.distinct().mapNotNull { byId[it] }, RecitationPart.PRACTICE, now, durationMs, hints, errorIds) { null })
+        dao.insertRecitations(logRows(pieceIds.distinct().mapNotNull { byId[it] }, RecitationPart.PRACTICE, now, durationMs, hints, errorIds, check) { null })
     }
 
     /** Pieces with repeated recent mistakes over every recitation of the text. */
@@ -326,12 +440,12 @@ class TextRepository(private val db: WankiDatabase, private val settings: Settin
     /** One log row per piece; the session's duration and hints are shared out so their sums stay exact. */
     private fun logRows(
         pieces: List<TextPieceEntity>, part: RecitationPart, now: Long, durationMs: Long, hints: Int,
-        errorIds: Set<String>, rating: (error: Boolean) -> Int?,
+        errorIds: Set<String>, check: String, rating: (error: Boolean) -> Int?,
     ) = pieces.mapIndexed { i, p ->
         val error = p.id in errorIds
         RecitationEntity(
             textId = p.textId, pieceId = p.id, at = now, part = part.name,
-            mode = if (part == RecitationPart.KNOWN) MODE_NONE else MODE_SELF,
+            mode = if (part == RecitationPart.KNOWN) MODE_NONE else check,
             rating = rating(error), error = error,
             hints = share(hints.toLong(), pieces.size, i).toInt(), durationMs = share(durationMs, pieces.size, i),
         )
@@ -341,6 +455,7 @@ class TextRepository(private val db: WankiDatabase, private val settings: Settin
 
     companion object {
         const val MODE_SELF = "SELF"
+        const val MODE_TYPED = "TYPED"
         const val MODE_NONE = "NONE"
     }
 }

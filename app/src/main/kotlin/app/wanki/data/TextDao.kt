@@ -60,4 +60,28 @@ interface TextDao {
 
     @Query("SELECT * FROM recitations WHERE textId = :textId ORDER BY at")
     suspend fun recitations(textId: String): List<RecitationEntity>
+
+    /** Stores computed words unless the piece changed meanwhile. */
+    @Query("UPDATE text_pieces SET words = :words WHERE id = :id AND content = :content")
+    suspend fun setPieceWords(id: String, content: String, words: String): Int
+
+    /** At most 500 ids per call (SQLite variable limit). */
+    @Query("SELECT * FROM text_word_stats WHERE pieceId IN (:pieceIds)")
+    suspend fun wordStats(pieceIds: List<String>): List<TextWordStatEntity>
+
+    @Upsert
+    suspend fun upsertWordStats(stats: List<TextWordStatEntity>)
+
+    /** At most 500 ids per call (SQLite variable limit). */
+    @Query("DELETE FROM text_word_stats WHERE pieceId IN (:pieceIds)")
+    suspend fun deleteWordStats(pieceIds: List<String>)
+
+    @Query("SELECT * FROM typing_drafts WHERE `key` = :key")
+    suspend fun draft(key: String): TypingDraftEntity?
+
+    @Upsert
+    suspend fun upsertDraft(draft: TypingDraftEntity)
+
+    @Query("DELETE FROM typing_drafts WHERE `key` = :key")
+    suspend fun deleteDraft(key: String)
 }

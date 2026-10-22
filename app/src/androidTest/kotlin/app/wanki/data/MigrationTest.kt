@@ -113,7 +113,33 @@ class MigrationTest {
         }
     }
 
+    @Test
+    fun migrate7To8AddsTypingTables() {
+        helper.createDatabase(DB8, 7).apply {
+            execSQL(
+                "INSERT INTO texts (id, title, language, kind, schedule, portionSize, active, lastPortionDay, position, createdAt, updatedAt, deleted) " +
+                    "VALUES ('t', 'T', 'ru', 'POEM', 'FSRS', 4, 1, NULL, 1, 1, 1, 0)",
+            )
+            execSQL(
+                "INSERT INTO text_pieces (id, textId, pieceIndex, content, note, learnedAt, state, step, stability, difficulty, due, lastReview, " +
+                    "reps, lapses, seed, sabqiLeft, hifzDay, updatedAt) VALUES ('p', 't', 0, 'a b', '', NULL, 'LEARNING', 0, NULL, NULL, 0, NULL, 0, 0, 7, 0, NULL, 1)",
+            )
+            close()
+        }
+        val db = helper.runMigrationsAndValidate(DB8, 8, true, WankiDatabase.MIGRATION_7_8)
+        db.query("SELECT readings FROM texts").use { c -> c.moveToFirst(); assertEquals("", c.getString(0)) }
+        db.query("SELECT words FROM text_pieces").use { c -> c.moveToFirst(); assertEquals(true, c.isNull(0)) }
+        db.execSQL("INSERT INTO text_word_stats VALUES ('p', 0, 1, 2, 0, 5)")
+        db.execSQL("INSERT INTO typing_drafts VALUES ('k', 'x', 'MEMORY', 1, 2, 3)")
+        db.query("SELECT (SELECT COUNT(*) FROM text_word_stats), (SELECT COUNT(*) FROM typing_drafts)").use { c ->
+            c.moveToFirst()
+            assertEquals(1, c.getInt(0))
+            assertEquals(1, c.getInt(1))
+        }
+    }
+
     private companion object {
+        const val DB8 = "migration-test-8"
         const val DB7 = "migration-test-7"
         const val DB6 = "migration-test-6"
         const val DB5 = "migration-test-5"

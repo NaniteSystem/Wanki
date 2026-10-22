@@ -34,7 +34,7 @@ class AppGraph(context: Context) {
     val recognizers = RecognizerPool(appScope)
     val references = ReferenceRepository(context.assets)
     val repository = Repository(db)
-    val texts = TextRepository(db, settings)
+    val texts = TextRepository(db, settings) { morphology }
     val grader = AnswerGrader(references, recognizers, settings)
     val textRecognition = TextRecognition(recognizers, settings)
     val translation = TranslationService(textRecognition)

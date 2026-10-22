@@ -7,12 +7,19 @@ import androidx.test.platform.app.InstrumentationRegistry
 import app.wanki.srs.FsrsScheduler
 import app.wanki.srs.Rating
 import app.wanki.srs.Review
+import app.wanki.texts.MorphToken
+import app.wanki.texts.Morphology
+import app.wanki.texts.PieceWords
+import app.wanki.texts.ReadingOverride
 import app.wanki.texts.TextKind
 import app.wanki.texts.TextSchedule
+import app.wanki.texts.WordOutcome
+import app.wanki.texts.WordStat
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -37,7 +44,7 @@ class TextRepositoryTest {
         context.getSharedPreferences(Settings.NAME, Context.MODE_PRIVATE).edit().clear().commit()
         db = Room.inMemoryDatabaseBuilder(context, WankiDatabase::class.java).build()
         settings = Settings(context)
-        texts = TextRepository(db, settings)
+        texts = TextRepository(db, settings) { CharMorphology }
     }
 
     @After
@@ -243,8 +250,86 @@ class TextRepositoryTest {
     fun backupRunsWithOnlyTexts() = runBlocking {
         val backup = Backup(context, db, settings)
         assertFalse(backup.hasContent())
-        texts.createText("Т", "ru", TextKind.POEM, TextSchedule.FSRS, 1, "a")
+        val t = texts.createText("Т", "ru", TextKind.POEM, TextSchedule.FSRS, 1, "a")!!
         assertTrue(backup.hasContent())
+        texts.recordWords(mapOf(WordKey(texts.pieces(t.id)[0].id, 0) to WordOutcome.WRONG))
+        // the archive carries the whole database file, so the word history survives a restore
+        val bytes = java.io.ByteArrayOutputStream().also { backup.write(it, includeMedia = false) }.toByteArray()
+        val checked = backup.check(bytes.inputStream())
+        android.database.sqlite.SQLiteDatabase.openDatabase(checked.dbFile.path, null, android.database.sqlite.SQLiteDatabase.OPEN_READONLY).use {
+            it.rawQuery("SELECT COUNT(*) FROM text_word_stats", null).use { c -> c.moveToFirst(); assertEquals(1, c.getInt(0)) }
+        }
+    }
+
+    @Test
+    fun wordsStoredOnCreate() = runBlocking {
+        val t = texts.createText("Т", "ru", TextKind.POEM, TextSchedule.FSRS, 2, "Мама мыла\nраму")!!
+        val pieces = texts.pieces(t.id)
+        assertTrue(pieces.all { it.words != null })
+        assertEquals(listOf("Мама", "мыла"), pieces[0].words!!.let(PieceWords::decode).map { pieces[0].content.substring(it.start, it.end) })
+        assertEquals(1, PieceWords.decode(pieces[1].words!!).size)
+    }
+
+    @Test
+    fun editKeepsHistoryOfUnchangedPieces() = runBlocking {
+        val t = texts.createText("Т", "ru", TextKind.POEM, TextSchedule.FSRS, 2, "один два\nтри четыре")!!
+        val (a, b) = texts.pieces(t.id)
+        texts.recordWords(mapOf(WordKey(a.id, 0) to WordOutcome.WRONG, WordKey(b.id, 0) to WordOutcome.CORRECT))
+        texts.saveText(t, listOf(EditedPiece(a.id, a.content), EditedPiece(b.id, "три пять шесть")))
+        val stats = texts.wordStats(listOf(a.id, b.id))
+        assertEquals(setOf(WordKey(a.id, 0)), stats.keys)
+        assertEquals(WordStat(0, 1, 1), stats[WordKey(a.id, 0)])
+    }
+
+    @Test
+    fun setReadingsRecomputesAndResets() = runBlocking {
+        val t = texts.createText("Т", "ja", TextKind.POEM, TextSchedule.FSRS, 2, "日本\n語")!!
+        val (a, b) = texts.pieces(t.id)
+        texts.recordWords(mapOf(WordKey(a.id, 0) to WordOutcome.WRONG, WordKey(b.id, 0) to WordOutcome.WRONG))
+        texts.setReadings(t.id, mapOf("日本" to ReadingOverride("にほん", emptyList())))
+        val after = texts.pieces(t.id)
+        assertEquals(listOf("にほん"), PieceWords.decode(after[0].words!!).map { it.reading })
+        assertEquals(b.words, after[1].words)
+        assertEquals(setOf(WordKey(b.id, 0)), texts.wordStats(listOf(a.id, b.id)).keys)
+        assertEquals(mapOf("日本" to ReadingOverride("にほん", emptyList())), PieceWords.decodeReadings(texts.text(t.id)!!.readings))
+    }
+
+    @Test
+    fun missingWordsAreBackfilled() = runBlocking {
+        val t = texts.createText("Т", "ru", TextKind.POEM, TextSchedule.FSRS, 1, "один два")!!
+        val p = texts.pieces(t.id)[0]
+        db.texts().upsertPieces(listOf(p.copy(words = null)))
+        val loaded = texts.pieces(t.id)
+        assertNull(loaded[0].words)
+        assertEquals(2, texts.words(loaded)[p.id]!!.size)
+        assertNotNull(texts.pieces(t.id)[0].words)
+    }
+
+    @Test
+    fun draftRoundTrip() = runBlocking {
+        assertNull(texts.draft("k"))
+        val d = TypingDraftEntity("k", "при", "MEMORY", 5, 20_000, 6)
+        texts.saveDraft(d)
+        assertEquals(d, texts.draft("k"))
+        texts.saveDraft(d.copy(typed = "привет"))
+        assertEquals("привет", texts.draft("k")!!.typed)
+        texts.clearDraft("k")
+        assertNull(texts.draft("k"))
+    }
+
+    @Test
+    fun typedReviewLogsTypedMode() = runBlocking {
+        val t = texts.createText("Т", "ru", TextKind.POEM, TextSchedule.FSRS, 1, "a")!!
+        val p = texts.pieces(t.id)[0].id
+        texts.completePortion(t.id, listOf(p), 0, now)
+        texts.reviewPiece(p, Rating.GOOD, 0, 0, now + DAY, TextRepository.MODE_TYPED)
+        val modes = db.texts().recitations(t.id).map { it.part to it.mode }
+        assertEquals(listOf("NEW" to "SELF", "REVIEW" to "TYPED"), modes)
+    }
+
+    /** One token per character, no readings. */
+    private object CharMorphology : Morphology {
+        override fun tokens(text: String) = text.indices.map { MorphToken(it, it + 1, null) }
     }
 
     private companion object {
