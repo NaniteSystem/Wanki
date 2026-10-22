@@ -23,7 +23,9 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.movableContentOf
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
@@ -133,6 +135,9 @@ fun MainShell() {
     // the pen rule is per screen: a pen seen on one page does not stop fingers drawing on the next
     LaunchedEffect(nav.current) { StylusTracker.onScreenChanged() }
 
+    // composed once and placed in either layout: a rotation across 600 dp keeps every screen's state
+    val content = remember { movableContentOf { n: Navigator -> Content(n) } }
+
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val wide = maxWidth >= 600.dp
         // Screens pushed on top of a tab (review, a page) take the whole screen; tab roots keep the bar.
@@ -153,11 +158,11 @@ fun MainShell() {
                         )
                     }
                 }
-                Box(Modifier.weight(1f)) { Content(nav) }
+                Box(Modifier.weight(1f)) { content(nav) }
             }
         } else {
             Column(Modifier.fillMaxSize()) {
-                Box(Modifier.weight(1f)) { Content(nav) }
+                Box(Modifier.weight(1f)) { content(nav) }
                 if (!immersive) {
                     // six labels share the width: the bar's text ignores font scale above 1.0 so «Настройки» is never cut
                     val density = LocalDensity.current

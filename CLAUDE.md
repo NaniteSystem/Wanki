@@ -20,7 +20,7 @@ Plan and decisions: `docs/PLAN.md` (Russian). The user writes in Russian.
   card browser + editor), `writing` (writing lab, review drawing), `texts` (`TextWords`: ICU word
   breaking for ja/zh), `ui/texts` (texts list, editor, detail, study screen with cue modes, `VoiceBar`
   recording, `TypingSession`/`TypingBody` = «Печать» mode); `data/TextRepository` owns texts, pieces and the
-  recitation log (DB v8); `KuromojiMorphology` is the Japanese analyser (release APK +12.8 MB).
+  recitation log (DB v8); `KuromojiMorphology` is the Japanese analyser (release APK +13.4 MB).
 
 ## Build & test
 ```
@@ -53,7 +53,7 @@ classpath (see build.gradle.kts) so AGP and KGP share a classloader.
   inside comparisons.
 - Each piece stores its word list (`text_pieces.words`, `PieceWords`); it is recomputed when the content,
   language or readings change. Per-word typing stats (`text_word_stats`) reset when the word's piece is edited
-  (`WordHistory`). Typed runs are logged with recitation mode `TYPED`; unfinished attempts live in `typing_drafts`.
+  (`WordHistory`). `{表記|よみ}` markup is accepted in any text. Typed runs are logged with recitation mode `TYPED`; unfinished attempts live in `typing_drafts`.
 - Writing canvases stay paper-colored (`WritingPaper`) in the dark theme.
 - Navigation state is saveable (`RouteCodec`); MainActivity handles configuration changes itself.
 - Ink saves after every finished gesture through `SerialSaver`; errors are shown, never swallowed.

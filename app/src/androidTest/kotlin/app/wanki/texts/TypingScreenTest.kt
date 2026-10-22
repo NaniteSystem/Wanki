@@ -73,7 +73,7 @@ class TypingScreenTest {
         for (i in 0 until lists) {
             if (runCatching { rule.onAllNodes(hasScrollAction())[i].performScrollToNode(row) }.isSuccess) return
         }
-        rule.onAllNodes(hasScrollAction()).onFirst().performScrollToNode(row)
+        throw AssertionError("no list holds the row: $row")
     }
 
     private fun practiceFromDetail() {
@@ -160,6 +160,30 @@ class TypingScreenTest {
         rule.onNode(hasTestTag("typing-continue")).performClick()
         rule.waitForIdle()
         assertEquals("Мороз и солнце", typedText())
+    }
+
+    /** Crossing the 600 dp breakpoint (phone rotation) swaps the shell layout: the screen's state must survive. */
+    @Test
+    fun rotationKeepsTypingMode() {
+        val t = newText("Мороз и солнце, день чудесный!\nЕщё ты дремлешь, друг прелестный")
+        openPractice(t.title)
+        type("Мороз и солнце ")
+        assertEquals("Мороз и солнце ", typedText())
+        fun orient(o: Int) {
+            rule.activityRule.scenario.onActivity { it.requestedOrientation = o }
+            rule.waitForIdle()
+        }
+        try {
+            orient(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE)
+            rule.waitUntilAtLeastOneExists(hasTestTag("typing-input"), 10_000)
+            assertEquals("Мороз и солнце ", typedText())
+            rule.onNode(hasTestTag("typing-word-0")).assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "верно"))
+            orient(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT)
+            rule.waitUntilAtLeastOneExists(hasTestTag("typing-input"), 10_000)
+            assertEquals("Мороз и солнце ", typedText())
+        } finally {
+            orient(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED)
+        }
     }
 
     @Test
