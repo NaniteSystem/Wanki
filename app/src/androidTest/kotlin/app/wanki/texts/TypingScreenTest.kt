@@ -61,10 +61,19 @@ class TypingScreenTest {
 
     private fun openPractice(title: String) {
         openTexts()
-        rule.waitUntil(10_000) { rule.onAllNodes(hasScrollAction()).fetchSemanticsNodes().isNotEmpty() }
-        rule.onAllNodes(hasScrollAction()).onFirst().performScrollToNode(hasText(title))
+        scrollToRow(hasText(title))
         rule.onNode(hasText(title)).performClick()
         practiceFromDetail()
+    }
+
+    /** The list may be split into two columns on a tablet: scroll whichever one holds the row. */
+    private fun scrollToRow(row: SemanticsMatcher) {
+        rule.waitUntil(10_000) { rule.onAllNodes(hasScrollAction()).fetchSemanticsNodes().isNotEmpty() }
+        val lists = rule.onAllNodes(hasScrollAction()).fetchSemanticsNodes().size
+        for (i in 0 until lists) {
+            if (runCatching { rule.onAllNodes(hasScrollAction())[i].performScrollToNode(row) }.isSuccess) return
+        }
+        rule.onAllNodes(hasScrollAction()).onFirst().performScrollToNode(row)
     }
 
     private fun practiceFromDetail() {
@@ -163,8 +172,7 @@ class TypingScreenTest {
         }
         openTexts()
         val row = hasText("Повторить", substring = true) and hasText(t.title, substring = true)
-        rule.waitUntil(10_000) { rule.onAllNodes(hasScrollAction()).fetchSemanticsNodes().isNotEmpty() }
-        rule.onAllNodes(hasScrollAction()).onFirst().performScrollToNode(row)
+        scrollToRow(row)
         rule.onNode(row).performClick()
         chooseTyping()
         type("Ветер по морю гуляет и кораблик подгоняет он бижит себе")

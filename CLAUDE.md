@@ -10,14 +10,17 @@ Plan and decisions: `docs/PLAN.md` (Russian). The user writes in Russian.
 - `core/srs` (JVM) — FSRS-6 port of py-fsrs, verified against reference data in tests.
 - `core/texts` (JVM) — texts learned by heart: `PieceSplitter` (verse lines / prose sentences), `Words`,
   `VanishingCues`, `FirstLetters`, `Chain`, `TextRating` (recital → FSRS rating), `Portions`, `FsrsTextPlan`,
-  `HifzPlan` (sabaq/sabqi/manzil), `ScheduleSwitch`, `WeakPieces`, `TextLoad`.
+  `HifzPlan` (sabaq/sabqi/manzil), `ScheduleSwitch`, `WeakPieces`, `TextLoad`; typing practice: `TypingText`
+  (folding for comparison), `TypingMatcher` (incremental alignment of typed text to word units), `PieceWords`
+  (stored per-piece word lists, ja readings), `ReadingMarkup` (`{表記|よみ}`), `JapaneseNumbers`, `WordHistory`, `TypingScore`.
 - `app` (Android, Compose, Room, androidx.ink, ML Kit Digital Ink / Language ID / Translate).
   Packages: `input` (canvas + touch handling), `data` (Room, `DeckTree` limits, `CardQuery` search,
   `Backup`), `recognition` (ML Kit, TTS `Speaker`), `review`, `practice` (weak-character queue and
   handwriting practice), `reminders`, `importer` (Anki .apkg, CSV/TSV), `ui/*` screens (`browser` =
   card browser + editor), `writing` (writing lab, review drawing), `texts` (`TextWords`: ICU word
   breaking for ja/zh), `ui/texts` (texts list, editor, detail, study screen with cue modes, `VoiceBar`
-  recording); `data/TextRepository` owns texts, pieces and the recitation log (DB v6).
+  recording, `TypingSession`/`TypingBody` = «Печать» mode); `data/TextRepository` owns texts, pieces and the
+  recitation log (DB v8); `KuromojiMorphology` is the Japanese analyser (release APK +12.8 MB).
 
 ## Build & test
 ```
@@ -48,6 +51,9 @@ classpath (see build.gradle.kts) so AGP and KGP share a classloader.
   a clean recall.
 - Text content is stored and shown exactly as saved; normalization (case, marks, letter variants) only
   inside comparisons.
+- Each piece stores its word list (`text_pieces.words`, `PieceWords`); it is recomputed when the content,
+  language or readings change. Per-word typing stats (`text_word_stats`) reset when the word's piece is edited
+  (`WordHistory`). Typed runs are logged with recitation mode `TYPED`; unfinished attempts live in `typing_drafts`.
 - Writing canvases stay paper-colored (`WritingPaper`) in the dark theme.
 - Navigation state is saveable (`RouteCodec`); MainActivity handles configuration changes itself.
 - Ink saves after every finished gesture through `SerialSaver`; errors are shown, never swallowed.
