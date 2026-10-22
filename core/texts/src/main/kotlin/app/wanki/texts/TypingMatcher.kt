@@ -39,7 +39,8 @@ class TypingMatcher(private val units: List<TypingUnit>) {
     private val m: Int
     private val width: Int
 
-    private var dp: IntArray
+    /** DP rows, one 16-bit array each: costs saturate at [MAX_COST], rows are never copied when the text grows. */
+    private val rows = ArrayList<CharArray>()
     private var prevT = IntArray(0)
 
     init {
@@ -60,12 +61,11 @@ class TypingMatcher(private val units: List<TypingUnit>) {
             val own = folds[k].toList()
             for (form in u.forms) {
                 val f = TypingText.fold(form).chars
-                if (f.isEmpty() || f.toList() == own) continue
+                if (unitStart[k] == unitEnd[k] || f.isEmpty() || f.toList() == own) continue
                 (byEnd[unitEnd[k]] ?: ArrayList<Jump>().also { byEnd[unitEnd[k]] = it }).add(Jump(unitStart[k], f))
             }
         }
-        dp = IntArray(width * 16)
-        for (j in 0..m) dp[j] = 2 * j
+        rows.add(CharArray(width) { cost(2 * it) })
     }
 
     fun update(typed: String): TypingResult {
@@ -75,34 +75,39 @@ class TypingMatcher(private val units: List<TypingUnit>) {
         var p = 0
         val limit = minOf(n, prevT.size)
         while (p < limit && t[p] == prevT[p]) p++
-        if (dp.size < (n + 1) * width) dp = dp.copyOf(maxOf((n + 1) * width, dp.size * 3 / 2))
-        for (i in p + 1..n) computeRow(i, t)
+        while (rows.size > n + 1) rows.removeAt(rows.size - 1)
+        for (i in p + 1..n) {
+            if (rows.size <= i) rows.add(CharArray(width))
+            computeRow(i, t)
+        }
         prevT = t
-        val last = n * width
+        val last = rows[n]
         var end = 0
-        for (j in 0..m) if (dp[last + j] <= dp[last + end]) end = j
+        for (j in 0..m) if (last[j] <= last[end]) end = j
         return judge(typed, folded, end, traceback(t, n, end))
     }
 
+    private fun cost(v: Int): Char = (if (v > MAX_COST) MAX_COST else v).toChar()
+
     private fun computeRow(i: Int, t: IntArray) {
-        val row = i * width
-        val prev = row - width
-        dp[row] = dp[prev] + 3
+        val row = rows[i]
+        val prev = rows[i - 1]
+        row[0] = cost(prev[0].code + 3)
         for (j in 1..m) {
-            var best = dp[row + j - 1] + 2
-            val diag = dp[prev + j - 1] + if (t[i - 1] == reading[j - 1]) 0 else 3
+            var best = row[j - 1].code + 2
+            val diag = prev[j - 1].code + if (t[i - 1] == reading[j - 1]) 0 else 3
             if (diag < best) best = diag
-            val ins = dp[prev + j] + 3
+            val ins = prev[j].code + 3
             if (ins < best) best = ins
             val jumps = byEnd[j]
             if (jumps != null) {
                 for (jump in jumps) {
                     if (!formEndsAt(t, i, jump.form)) continue
-                    val v = dp[(i - jump.form.size) * width + jump.start]
+                    val v = rows[i - jump.form.size][jump.start].code
                     if (v < best) best = v
                 }
             }
-            dp[row + j] = best
+            row[j] = cost(best)
         }
     }
 
@@ -119,16 +124,15 @@ class TypingMatcher(private val units: List<TypingUnit>) {
         var i = n
         var j = end
         while (i > 0 || j > 0) {
-            val cur = dp[i * width + j]
-            val prev = (i - 1) * width
-            if (j > 0 && dp[i * width + j - 1] + 2 == cur) {
+            val cur = rows[i][j].code
+            if (j > 0 && cost(rows[i][j - 1].code + 2).code == cur) {
                 ops.add(Op(DEL, -1, j - 1, 0)); j--
-            } else if (i > 0 && j > 0 && dp[prev + j - 1] + (if (t[i - 1] == reading[j - 1]) 0 else 3) == cur) {
+            } else if (i > 0 && j > 0 && cost(rows[i - 1][j - 1].code + (if (t[i - 1] == reading[j - 1]) 0 else 3)).code == cur) {
                 ops.add(Op(if (t[i - 1] == reading[j - 1]) OK else SUB, i - 1, j - 1, 0)); i--; j--
-            } else if (i > 0 && dp[prev + j] + 3 == cur) {
+            } else if (i > 0 && cost(rows[i - 1][j].code + 3).code == cur) {
                 ops.add(Op(INS, i - 1, -1, 0)); i--
             } else {
-                val jump = byEnd[j]!!.first { formEndsAt(t, i, it.form) && dp[(i - it.form.size) * width + it.start] == cur }
+                val jump = byEnd[j]!!.first { formEndsAt(t, i, it.form) && rows[i - it.form.size][it.start].code == cur }
                 ops.add(Op(JUMP, i, jump.start, jump.form.size))
                 i -= jump.form.size; j = jump.start
             }
@@ -229,6 +233,7 @@ class TypingMatcher(private val units: List<TypingUnit>) {
     }
 
     private companion object {
+        const val MAX_COST = 65535
         const val OK = 1
         const val SUB = 2
         const val DEL = 3

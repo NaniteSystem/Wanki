@@ -40,6 +40,7 @@ class TypingMatcherTest {
         assertEquals(1, r.mistakes)
     }
 
+    // The word after the skipped run must be long: substituting a short word (3/char) beats skipping (2/char).
     @Test
     fun runOfSkippedWordsCountsOnce() {
         val r = TypingMatcher(words("abc", "def", "ghi", "jkl", "mnopqrstuv")).update("abc mnopqrstuv")
@@ -127,5 +128,39 @@ class TypingMatcherTest {
         assertEquals(TypingMatcher(units).update(text), r)
         assertTrue(r.finished)
         assertEquals(600, r.correct)
+    }
+
+    @Test
+    fun pasteLaterInTheTextReusesRows() {
+        val u = words("abcdef", "ghijkl")
+        val m = TypingMatcher(u)
+        m.update("abcdefghi")
+        assertEquals(TypingMatcher(u).update("abcxefghi"), m.update("abcxefghi"))
+    }
+
+    @Test
+    fun extraCharInsideWordMakesItWrong() {
+        val r = TypingMatcher(abc).update("abc dxef ghi")
+        assertEquals(UnitState.WRONG, r.units[1].state)
+        assertEquals(4..7, r.units[1].typed)
+    }
+
+    @Test
+    fun rangesSkipIgnoredCharsAndSurrogates() {
+        val r = TypingMatcher(listOf(TypingUnit("a\uD83D\uDE00b"), TypingUnit("c"))).update("a, b c")
+        assertEquals(UnitState.OK, r.units[1].state)
+        assertEquals(5..5, r.units[1].typed)
+    }
+
+    @Test
+    fun hugeRunCompletes() {
+        val rnd = Random(3)
+        val kana = "あいうえおかきくけこさしすせそ"
+        val units = List(1200) { TypingUnit(String(CharArray(5) { kana[rnd.nextInt(kana.length)] })) }
+        val text = units.joinToString("") { it.reading }
+        val r = TypingMatcher(units).update(text)
+        assertTrue(r.finished)
+        assertEquals(1200, r.correct)
+        assertEquals(6000, r.total)
     }
 }

@@ -21,15 +21,24 @@ object TypingText {
         }
     }
 
-    /** NFKC, drop ignored characters, lowercase, letter variants, katakana to hiragana; per source character. */
+    private fun isMark(cp: Int): Boolean = when (Character.getType(cp).toByte()) {
+        Character.NON_SPACING_MARK, Character.ENCLOSING_MARK, Character.COMBINING_SPACING_MARK -> true
+        else -> false
+    }
+
+    /**
+     * NFKC, drop ignored characters, lowercase, letter variants, katakana to hiragana. A base character is
+     * folded together with the marks after it (so decomposed か+゛ equals が); [Folded.source] is the base.
+     */
     fun fold(s: String): Folded {
         val chars = ArrayList<Int>(s.length)
         val source = ArrayList<Int>(s.length)
         var i = 0
         while (i < s.length) {
             val cp = s.codePointAt(i)
-            val len = Character.charCount(cp)
-            for (n in Normalizer.normalize(s.substring(i, i + len), Normalizer.Form.NFKC).codePoints()) {
+            var next = i + Character.charCount(cp)
+            while (next < s.length && isMark(s.codePointAt(next))) next += Character.charCount(s.codePointAt(next))
+            for (n in Normalizer.normalize(s.substring(i, next), Normalizer.Form.NFKC).codePoints()) {
                 if (isIgnored(n)) continue
                 for (lower in String(Character.toChars(n)).lowercase().codePoints()) {
                     if (isIgnored(lower)) continue
@@ -40,7 +49,7 @@ object TypingText {
                     }
                 }
             }
-            i += len
+            i = next
         }
         return Folded(chars.toIntArray(), source.toIntArray())
     }
