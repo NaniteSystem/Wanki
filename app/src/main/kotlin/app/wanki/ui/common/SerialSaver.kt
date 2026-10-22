@@ -83,12 +83,29 @@ class SerialSaver(private val scope: CoroutineScope, private val save: suspend (
  */
 @Composable
 fun SaveErrorSnackbar(saver: SerialSaver, modifier: Modifier = Modifier) {
-    val host = remember { SnackbarHostState() }
     val error by saver.error.collectAsState()
+    ErrorSnackbar(error, "Не удалось сохранить", onRetry = saver::request, modifier = modifier)
+}
+
+/**
+ * Shows [message] while [error] is set, with «Повторить» ([onRetry]) and, when [onDismiss] is
+ * given, a close button. It goes away by itself once [error] is cleared.
+ */
+@Composable
+fun ErrorSnackbar(
+    error: Throwable?,
+    message: String,
+    onRetry: () -> Unit,
+    modifier: Modifier = Modifier,
+    onDismiss: (() -> Unit)? = null,
+) {
+    val host = remember { SnackbarHostState() }
     LaunchedEffect(error) {
         if (error == null) return@LaunchedEffect
-        val result = host.showSnackbar("Не удалось сохранить", actionLabel = "Повторить", duration = SnackbarDuration.Indefinite)
-        if (result == SnackbarResult.ActionPerformed) saver.request()
+        val result = host.showSnackbar(
+            message, actionLabel = "Повторить", withDismissAction = onDismiss != null, duration = SnackbarDuration.Indefinite,
+        )
+        if (result == SnackbarResult.ActionPerformed) onRetry() else onDismiss?.invoke()
     }
     SnackbarHost(host, modifier)
 }

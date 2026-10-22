@@ -16,7 +16,8 @@ import kotlin.math.hypot
 /**
  * The strokes of one canvas (world coordinates) with undo/redo. Renderable androidx.ink strokes
  * and bounds are cached per stroke. [version] changes once per finished edit — one stroke, one
- * eraser drag, one lasso move — so autosave and recognition run once per gesture.
+ * eraser drag, one lasso move, or a cancelled drag that put strokes back — so autosave and
+ * recognition run once per gesture.
  */
 class InkLayer(initial: List<InkStroke> = emptyList()) {
     val strokes = mutableStateListOf<InkStroke>().apply { addAll(initial) }
@@ -93,10 +94,13 @@ class InkLayer(initial: List<InkStroke> = emptyList()) {
     fun cancelMove() {
         val before = moveBefore ?: return
         moveBefore = null
+        val moved = before != strokes.toList()
         strokes.clear()
         strokes.addAll(before)
         selection.clear()
         selection.addAll(moveIndices.mapNotNull { before.getOrNull(it) })
+        // a save during the drag may have stored the moved strokes: the restored ones must be saved again
+        if (moved) version++
     }
 
     /** Removes the selected strokes (undoable). */
@@ -169,7 +173,12 @@ class InkLayer(initial: List<InkStroke> = emptyList()) {
     fun cancelErase() {
         val before = eraseBefore ?: return
         eraseBefore = null
-        if (eraseChanged) { strokes.clear(); strokes.addAll(before) }
+        if (eraseChanged) {
+            strokes.clear()
+            strokes.addAll(before)
+            // a save during the drag may have stored the half-erased strokes: save the restored ones again
+            version++
+        }
     }
 
     fun replaceAll(newStrokes: List<InkStroke>, undoable: Boolean = true) {

@@ -69,17 +69,19 @@ fun PracticeScreen(glyph: String?, language: String, onBack: () -> Unit) {
     val scope = rememberUiScope()
     val queue = remember { mutableStateListOf<CharQuality>() }
     var loaded by remember { mutableStateOf(false) }
+    var index by rememberSaveable { mutableIntStateOf(0) }
+    var round by rememberSaveable { mutableIntStateOf(0) }
     LaunchedEffect(glyph) {
         ui {
             val items = if (glyph != null) listOf(CharQuality(glyph, language, 0.0, 0, 0))
             else graph.repository.charQuality().filter { it.weak }
             queue.clear()
             queue.addAll(items.filter { graph.references.get(it.glyph, it.language) != null })
+            // a restored position may point past the rebuilt queue
+            practicePosition(index, round, queue.size).let { (i, r) -> index = i; round = r }
             loaded = true
         }
     }
-    var index by rememberSaveable { mutableIntStateOf(0) }
-    var round by rememberSaveable { mutableIntStateOf(0) }
     val layer = remember { InkLayer() }
     var grade by remember { mutableStateOf<CellGrade?>(null) }
     var checking by remember { mutableStateOf(false) }
@@ -230,3 +232,10 @@ private fun Summary(best: List<Pair<String, Double?>>, onBack: () -> Unit) {
         Button(onClick = onBack) { Text("Готово") }
     }
 }
+
+/**
+ * Character and attempt to continue at in a queue of [size] (the queue is rebuilt after process death and
+ * may be shorter now): outside it, practice resumes at the nearest character's first attempt.
+ */
+internal fun practicePosition(index: Int, round: Int, size: Int): Pair<Int, Int> =
+    if (index in 0 until size) index to round else index.coerceIn(0, (size - 1).coerceAtLeast(0)) to 0

@@ -38,4 +38,20 @@ class RouteCodecTest {
         assertEquals(listOf<Route>(Route.Decks), Navigator.restore(listOf("Nope|x")).stack.toList())
         assertEquals(listOf<Route>(Route.Decks), Navigator.restore(emptyList()).stack.toList())
     }
+
+    @Test
+    fun restoredStackWithoutTabRootStartsAtDecks() {
+        // the saved root could not be decoded: the screens above it stay, with the decks tab under them
+        val saved = listOf("Nope|x", RouteCodec.encode(Route.Note("n1")))
+        assertEquals(listOf(Route.Decks, Route.Note("n1")), Navigator.restore(saved).stack.toList())
+        val ok = listOf(Route.Notes, Route.Note("n1"))
+        assertEquals(ok, Navigator.restore(ok.map(RouteCodec::encode)).stack.toList())
+    }
+
+    @Test
+    fun replaceTopKeepsTheStackBelow() {
+        val nav = Navigator(listOf(Route.Notes, Route.Note(null)))
+        nav.replaceTop(Route.Note("n1"))
+        assertEquals(listOf(Route.Notes, Route.Note("n1")), nav.stack.toList())
+    }
 }

@@ -106,9 +106,32 @@ class InkLayerEraseTest {
         layer.moveSelectionBy(5f, 0f)
         layer.cancelMove()
         assertEquals(listOf(a, b), layer.strokes.toList())
-        assertEquals(v, layer.version)
+        // a save during the drag may have stored the moved strokes: the restored ones are a new version
+        assertEquals(v + 1, layer.version)
         assertFalse(layer.canUndo)
         layer.endMove() // no open move any more: nothing pushed
         assertFalse(layer.canUndo)
+    }
+
+    @Test
+    fun cancelledEraseThatChangedStrokesIsANewVersion() {
+        // a save may have stored the half-erased strokes: putting them back must be saved again
+        val layer = InkLayer(listOf(a, b, c))
+        val v0 = layer.version
+        layer.beginErase()
+        assertTrue(layer.eraseAt(0f, 5f, 5f))
+        layer.cancelErase()
+        assertEquals(listOf(a, b, c), layer.strokes.toList())
+        assertTrue(layer.version > v0)
+        assertFalse(layer.canUndo, "a cancelled drag is not an undo step")
+    }
+
+    @Test
+    fun cancelledEraseThatChangedNothingKeepsTheVersion() {
+        val layer = InkLayer(listOf(a, b, c))
+        val v0 = layer.version
+        layer.beginErase()
+        layer.cancelErase()
+        assertEquals(v0, layer.version)
     }
 }

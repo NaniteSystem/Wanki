@@ -1,6 +1,7 @@
 package app.wanki.ui.notebooks
 
 import app.wanki.ui.common.ui
+import app.wanki.ui.common.ErrorSnackbar
 import app.wanki.ui.common.rememberUiScope
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -170,42 +171,36 @@ fun NotebookScreen(notebookId: String, initialPageId: String?, onBack: () -> Uni
     val pages by remember(notebookId) { graph.repository.observePages(notebookId) }.collectAsState(emptyList<PageEntity>())
     var index by rememberSaveable(notebookId) { mutableStateOf<Int?>(null) }
     // a page that was just added: the current page stays on screen until it arrives through the flow
-    var pendingIndex by remember(notebookId) { mutableStateOf<Int?>(null) }
     val scope = rememberUiScope()
+    val adder = remember(notebookId) { PageAdder(scope) }
+    val addError by adder.error.collectAsState()
 
     LaunchedEffect(pages, initialPageId) {
         if (index == null && pages.isNotEmpty()) {
             index = initialPageId?.let { id -> pages.indexOfFirst { it.id == id }.takeIf { it >= 0 } } ?: 0
         }
     }
-    LaunchedEffect(pages, pendingIndex) {
-        val p = pendingIndex
-        if (p != null && p < pages.size) {
-            index = p
-            pendingIndex = null
-        }
+    LaunchedEffect(pages, adder.pendingIndex) {
+        adder.arrived(pages.size)?.let { index = it }
     }
     val nb = notebook ?: return
     val i = index ?: return
     val page = pages.getOrNull(i) ?: return
     val pageUi = rememberPageUi()
     val state = remember(page.id) { PageEditorState(graph, nb, page, infinite = false, ui = pageUi) }
+    fun addPage() = adder.add(pages.size) { graph.repository.addPage(nb, state.template) }
 
-    PageEditor(
-        state, nb.title, onBack, Modifier.fillMaxSize(),
-        subtitle = "стр. ${i + 1} из ${pages.size}",
-        primary = listOf(
-            HeaderAction(R.drawable.ic_add, "Добавить страницу", "add-page", enabled = pendingIndex == null) {
-                // set before the insert: the flow may deliver the new page before addPage returns
-                val target = pages.size
-                pendingIndex = target
-                scope.launch {
-                    runCatching { graph.repository.addPage(nb, state.template) }.onFailure { pendingIndex = null; throw it }
-                }
-            },
-            state.textAction(),
-        ),
-        menu = listOf(state.paperAction(), state.fitAction()),
-        pageBar = { PageNavBar(i, pages.size, { index = it.coerceIn(0, pages.lastIndex) }) },
-    )
+    Box(Modifier.fillMaxSize()) {
+        PageEditor(
+            state, nb.title, onBack, Modifier.fillMaxSize(),
+            subtitle = "стр. ${i + 1} из ${pages.size}",
+            primary = listOf(
+                HeaderAction(R.drawable.ic_add, "Добавить страницу", "add-page", enabled = adder.pendingIndex == null) { addPage() },
+                state.textAction(),
+            ),
+            menu = listOf(state.paperAction(), state.fitAction()),
+            pageBar = { PageNavBar(i, pages.size, { index = it.coerceIn(0, pages.lastIndex) }) },
+        )
+        ErrorSnackbar(addError, "Не удалось добавить страницу", ::addPage, Modifier.align(Alignment.BottomCenter), adder::dismissError)
+    }
 }

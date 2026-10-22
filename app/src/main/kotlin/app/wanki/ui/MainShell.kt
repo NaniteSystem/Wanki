@@ -102,10 +102,19 @@ class Navigator(initial: List<Route> = listOf(Route.Decks)) {
     fun open(route: Route) { stack.add(route) }
     fun back(): Boolean = if (stack.size > 1) { stack.removeAt(stack.lastIndex); true } else false
     fun switchTab(route: Route) { stack.clear(); stack.add(route) }
+    /** Swaps the screen on top for [route], e.g. a new note once it has an id. */
+    fun replaceTop(route: Route) { stack[stack.lastIndex] = route }
 
     companion object {
-        /** A navigator from saved route strings; undecodable entries are dropped, none left means the decks tab. */
-        fun restore(saved: List<String>): Navigator = Navigator(saved.mapNotNull(RouteCodec::decode))
+        /**
+         * A navigator from saved route strings; undecodable entries are dropped. The stack always starts
+         * at a tab root: when the saved root was lost, the decks tab goes under the screens left.
+         */
+        fun restore(saved: List<String>): Navigator {
+            val routes = saved.mapNotNull(RouteCodec::decode)
+            val root = routes.firstOrNull()
+            return Navigator(if (root != null && tabs.none { it.route == root }) listOf(Route.Decks) + routes else routes)
+        }
 
         /** Keeps the back stack across recreation and process death. */
         val Saver: Saver<Navigator, List<String>> = Saver(

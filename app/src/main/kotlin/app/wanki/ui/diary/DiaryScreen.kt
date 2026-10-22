@@ -30,6 +30,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -59,7 +60,8 @@ fun DiaryScreen(onOpenDay: (Long) -> Unit) {
     val dates by remember(diary?.id) {
         diary?.let { graph.repository.observeDiaryDates(it.id) } ?: flowOf(emptyList())
     }.collectAsState(emptyList())
-    var month by remember { mutableStateOf(YearMonth.now()) }
+    // the month shown survives process death (YearMonth is Serializable)
+    var month by rememberSaveable { mutableStateOf(YearMonth.now()) }
     val today = LocalDate.now()
     val written = dates.toSet()
 
