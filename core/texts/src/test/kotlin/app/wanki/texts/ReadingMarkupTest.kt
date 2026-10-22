@@ -34,4 +34,10 @@ class ReadingMarkupTest {
         assertFalse(ReadingMarkup.has("function() { return 1; }"))
         assertFalse(ReadingMarkup.has("plain"))
     }
+    @Test fun proseBracesStayVerbatim() {
+        val m = ReadingMarkup.parse("{日本|にほん}と{ return 1; }")
+        assertEquals("日本と{ return 1; }", m.plain)
+        assertEquals(setOf("日本"), m.readings.keys)
+        assertEquals("{x}", ReadingMarkup.parse("{x}").plain)
+    }
 }

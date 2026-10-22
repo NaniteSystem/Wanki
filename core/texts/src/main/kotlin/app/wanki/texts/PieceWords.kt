@@ -28,7 +28,7 @@ object PieceWords {
         if (Words.base(language) != "ja") {
             for (w in breaker.words(content)) {
                 val surface = content.substring(w.start, w.end)
-                make(w.start, w.end, surface, null, overrides[surface])?.let { out += it }
+                make(w.start, w.end, surface, null, overrides[surface], false)?.let { out += it }
             }
             return out
         }
@@ -39,7 +39,7 @@ object PieceWords {
             val hit = surfaces.firstOrNull { content.startsWith(it, i) }
             if (hit == null) { i++; continue }
             gap(content, gapStart, i, breaker, morphology, overrides, out)
-            make(i, i + hit.length, hit, null, overrides[hit])?.let { out += it }
+            make(i, i + hit.length, hit, null, overrides[hit], true)?.let { out += it }
             i += hit.length
             gapStart = i
         }
@@ -57,17 +57,17 @@ object PieceWords {
         for (t in tokens) {
             if (t.start < 0 || t.end > text.length || t.start >= t.end) continue
             val surface = text.substring(t.start, t.end)
-            make(from + t.start, from + t.end, surface, t.reading, overrides[surface])?.let { out += it }
+            make(from + t.start, from + t.end, surface, t.reading, overrides[surface], true)?.let { out += it }
         }
     }
 
-    private fun make(start: Int, end: Int, surface: String, tokenReading: String?, override: ReadingOverride?): PieceWord? {
-        if (surface.none { Character.isLetterOrDigit(it) }) return null
+    private fun make(start: Int, end: Int, surface: String, tokenReading: String?, override: ReadingOverride?, japanese: Boolean): PieceWord? {
+        if (surface.codePoints().noneMatch { Character.isLetterOrDigit(it) }) return null
         val reading = override?.reading ?: tokenReading?.takeIf { it.isNotEmpty() }?.let(::hiragana) ?: surface
         val forms = LinkedHashSet<String>()
         if (!sameFold(surface, reading)) forms += surface
         override?.forms?.let { forms += it }
-        forms += JapaneseNumbers.forms(surface)
+        if (japanese) forms += JapaneseNumbers.forms(surface)
         return PieceWord(start, end, reading, forms.toList())
     }
 

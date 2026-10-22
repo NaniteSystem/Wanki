@@ -8,15 +8,14 @@ data class Markup(val plain: String, val readings: Map<String, ReadingOverride>)
 
 /** The `{display|reading|alt1|alt2…}` markup; an empty reading means the display itself is the reading. */
 object ReadingMarkup {
-    private val any = Regex("\\{([^}]*)\\}")
-    private val reading = Regex("\\{[^{}|]*\\|[^{}]*\\}")
+    private val reading = Regex("\\{([^{}|]*\\|[^{}]*)\\}")
 
     /** True when [s] has at least one `{x|y}` group; `{x}` and plain braces in prose do not count. */
     fun has(s: String): Boolean = reading.containsMatchIn(s)
 
     fun parse(s: String): Markup {
         val readings = LinkedHashMap<String, ReadingOverride>()
-        val plain = any.replace(s) { m ->
+        val plain = reading.replace(s) { m ->
             val parts = m.groupValues[1].split("|")
             val display = parts[0]
             if (display.isNotEmpty()) {

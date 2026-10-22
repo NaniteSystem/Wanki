@@ -63,4 +63,10 @@ class PieceWordsTest {
         assertEquals(m, PieceWords.decodeReadings(PieceWords.encodeReadings(m)))
         assertEquals(emptyMap(), PieceWords.decodeReadings(""))
     }
+    @Test fun numberFormsOnlyForJapanese() = assertEquals(emptyList(), build("3", "ru")[0].forms)
+    @Test fun supplementaryKanjiIsAWord() = assertEquals(1, build("\uD842\uDFB7", "ja", { listOf(MorphToken(0, 2, null)) }).size)
+    @Test fun codecKeepsBackslashBeforeEscapeLetters() {
+        val w = listOf(PieceWord(0, 1, "a\\e", listOf("\\f", "\\g")))
+        assertEquals(w, PieceWords.decode(PieceWords.encode(w)))
+    }
 }
