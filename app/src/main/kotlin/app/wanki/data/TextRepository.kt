@@ -127,6 +127,16 @@ class TextRepository(
         }
         db.withTransaction {
             val stored = dao.getText(text.id)
+            // language or readings changed under us (setReadings committed while words were computed): keep the
+            // stored ones and leave the words to be recomputed on first use
+            val raced = stored != null && before != null && (stored.language != before.language || stored.readings != before.readings)
+            val setupChanged = raced || (stored != null && (stored.language != text.language || stored.readings != readingsCode))
+            val code = if (raced && readings == null) stored!!.readings else readingsCode
+            if (pieces.isEmpty() && setupChanged) {
+                val all = dao.pieces(text.id)
+                all.map { it.id }.chunked(500).forEach { dao.deleteWordStats(it) }
+                dao.upsertPieces(all.map { it.copy(words = null) })
+            }
             if (pieces.isNotEmpty()) {
                 val existing = dao.pieces(text.id).associateBy { it.id }
                 val changed = ArrayList<String>() // pieces whose words differ from the stored ones
@@ -140,7 +150,7 @@ class TextRepository(
                         parent != null -> parent.copy(id = newId()).also { split += it.id to parent.id }
                         else -> TextPieceEntity(textId = text.id, pieceIndex = i, content = e.content)
                     }
-                    val words = fresh[i] ?: known[e.id]?.words ?: base.words
+                    val words = if (raced) null else fresh[i] ?: known.getValue(e.id!!).words
                     if (own != null && own.words != words) changed += own.id
                     base.copy(pieceIndex = i, content = e.content, note = e.note, words = words, updatedAt = now)
                 }
@@ -157,7 +167,7 @@ class TextRepository(
             }
             val edited = (stored ?: text).copy(
                 title = text.title.trim().ifBlank { "Текст" }, language = text.language, kind = text.kind,
-                portionSize = text.portionSize.coerceAtLeast(1), readings = readingsCode, updatedAt = now,
+                portionSize = text.portionSize.coerceAtLeast(1), readings = code, updatedAt = now,
             )
             dao.upsertText(edited)
             if (stored != null && stored.schedule != text.schedule) switchIn(text.id, schedule(text), now)
@@ -231,12 +241,16 @@ class TextRepository(
         db.withTransaction {
             val text = dao.getText(textId) ?: return@withTransaction
             val now = System.currentTimeMillis()
-            val current = dao.pieces(textId).associateBy { it.id }
-            val rows = pieces.mapIndexedNotNull { i, p ->
-                // a piece edited meanwhile keeps its own words; they are filled in on first use
-                current[p.id]?.takeIf { it.content == p.content }?.copy(words = codes[i], updatedAt = now)
+            val current = dao.pieces(textId)
+            val computed = pieces.indices.associateBy { pieces[it].id }
+            val rows = current.map { cur ->
+                val i = computed[cur.id]
+                // a piece edited or added meanwhile has no words for these readings: null = computed on first use
+                cur.copy(words = if (i != null && pieces[i].content == cur.content) codes[i] else null, updatedAt = now)
             }
-            rows.filter { current[it.id]?.words != it.words }.map { it.id }.chunked(500).forEach { dao.deleteWordStats(it) }
+            val old = current.associate { it.id to it.words }
+            rows.filter { old[it.id] != it.words }.map { it.id }
+                .chunked(500).forEach { dao.deleteWordStats(it) }
             dao.upsertPieces(rows)
             dao.upsertText(text.copy(readings = code, updatedAt = now))
         }
@@ -445,7 +459,7 @@ class TextRepository(
         val error = p.id in errorIds
         RecitationEntity(
             textId = p.textId, pieceId = p.id, at = now, part = part.name,
-            mode = if (part == RecitationPart.KNOWN) MODE_NONE else check,
+            mode = check,
             rating = rating(error), error = error,
             hints = share(hints.toLong(), pieces.size, i).toInt(), durationMs = share(durationMs, pieces.size, i),
         )

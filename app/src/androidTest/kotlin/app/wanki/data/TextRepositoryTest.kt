@@ -305,6 +305,78 @@ class TextRepositoryTest {
         assertNotNull(texts.pieces(t.id)[0].words)
     }
 
+    private val nihon = mapOf("日本" to ReadingOverride("にほん", emptyList()))
+
+    @Test
+    fun setReadingsNullsWordsOfPieceEditedMeanwhile() = runBlocking {
+        val t = texts.createText("Т", "ja", TextKind.POEM, TextSchedule.FSRS, 2, "日本\n語")!!
+        val a = texts.pieces(t.id)[0]
+        CharMorphology.hook = { runBlocking { db.texts().upsertPieces(listOf(a.copy(content = "日本語"))) } }
+        texts.setReadings(t.id, nihon)
+        // the edited piece was skipped; its words must not stay computed under the old readings
+        assertNull(texts.pieces(t.id)[0].words)
+        val rebuilt = texts.words(texts.pieces(t.id))[a.id]!!
+        assertEquals(listOf("にほん"), rebuilt.map { it.reading }.take(1))
+    }
+
+    @Test
+    fun backfillDoesNotOverwriteFreshWords() = runBlocking {
+        val t = texts.createText("Т", "ja", TextKind.POEM, TextSchedule.FSRS, 1, "日本")!!
+        val p = texts.pieces(t.id)[0]
+        db.texts().upsertPieces(listOf(p.copy(words = null)))
+        // setReadings commits while the backfill is still computing under the old readings
+        CharMorphology.hook = { runBlocking { db.texts().setPieceWords(p.id, p.content, "FRESH") } }
+        texts.words(texts.pieces(t.id))
+        assertEquals("FRESH", texts.pieces(t.id)[0].words)
+    }
+
+    @Test
+    fun saveTextKeepsReadingsSetMeanwhile() = runBlocking {
+        val t = texts.createText("Т", "ja", TextKind.POEM, TextSchedule.FSRS, 1, "日本")!!
+        val a = texts.pieces(t.id)[0]
+        val code = PieceWords.encodeReadings(nihon)
+        CharMorphology.hook = { runBlocking { db.texts().upsertText(db.texts().getText(t.id)!!.copy(readings = code)) } }
+        texts.saveText(t, listOf(EditedPiece(a.id, "日本語")))
+        assertEquals(code, texts.text(t.id)!!.readings)
+        // words are either recomputed under the new readings or left to be backfilled
+        val words = texts.words(texts.pieces(t.id))[a.id]!!
+        assertEquals("にほん", words[0].reading)
+    }
+
+    @Test
+    fun languageChangeRecomputesAllPieces() = runBlocking {
+        val t = texts.createText("Т", "ru", TextKind.POEM, TextSchedule.FSRS, 2, "日本\n語")!!
+        val before = texts.pieces(t.id)
+        texts.recordWords(before.associate { WordKey(it.id, 0) to WordOutcome.WRONG })
+        texts.saveText(t.copy(language = "ja"), before.map { EditedPiece(it.id, it.content) })
+        val after = texts.pieces(t.id)
+        assertEquals(listOf(2, 1), after.map { PieceWords.decode(it.words!!).size }) // per-character tokens now
+        // only the piece whose words really changed loses its history
+        assertEquals(setOf(WordKey(before[1].id, 0)), texts.wordStats(before.map { it.id }).keys)
+    }
+
+    @Test
+    fun languageChangeWithoutPiecesClearsWords() = runBlocking {
+        val t = texts.createText("Т", "ru", TextKind.POEM, TextSchedule.FSRS, 1, "один")!!
+        texts.saveText(t.copy(language = "ja"), emptyList())
+        assertNull(texts.pieces(t.id)[0].words)
+    }
+
+    @Test
+    fun checkModeIsWrittenByEveryCompletion() = runBlocking {
+        settings.sabqiDays = 2
+        val t = texts.createText("Сура", "ar", TextKind.POEM, TextSchedule.HIFZ, 2, "a\nb")!!
+        val (a, b) = texts.pieces(t.id)
+        texts.completePortion(t.id, listOf(a.id), 0, now, TextRepository.MODE_TYPED)
+        texts.completeSabqi(t.id, listOf(a.id), emptySet(), 0, now + DAY, TextRepository.MODE_TYPED)
+        texts.logPractice(t.id, listOf(b.id), emptySet(), 0, 0, now + DAY, TextRepository.MODE_TYPED)
+        texts.markLearned(t.id, 1, now + 2 * DAY)
+        assertEquals(
+            listOf("SABAQ" to "TYPED", "SABQI" to "TYPED", "PRACTICE" to "TYPED", "KNOWN" to "NONE"),
+            db.texts().recitations(t.id).map { it.part to it.mode },
+        )
+    }
+
     @Test
     fun draftRoundTrip() = runBlocking {
         assertNull(texts.draft("k"))
@@ -327,9 +399,13 @@ class TextRepositoryTest {
         assertEquals(listOf("NEW" to "SELF", "REVIEW" to "TYPED"), modes)
     }
 
-    /** One token per character, no readings. */
+    /** One token per character, no readings. [hook] runs once on the next call: it plays a write that lands mid-compute. */
     private object CharMorphology : Morphology {
-        override fun tokens(text: String) = text.indices.map { MorphToken(it, it + 1, null) }
+        @Volatile var hook: (() -> Unit)? = null
+        override fun tokens(text: String): List<MorphToken> {
+            hook?.let { hook = null; it() }
+            return text.indices.map { MorphToken(it, it + 1, null) }
+        }
     }
 
     private companion object {

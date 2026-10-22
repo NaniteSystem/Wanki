@@ -61,8 +61,8 @@ interface TextDao {
     @Query("SELECT * FROM recitations WHERE textId = :textId ORDER BY at")
     suspend fun recitations(textId: String): List<RecitationEntity>
 
-    /** Stores computed words unless the piece changed meanwhile. */
-    @Query("UPDATE text_pieces SET words = :words WHERE id = :id AND content = :content")
+    /** Backfills words: only into a piece whose content is unchanged and that still has none (fresher words win). */
+    @Query("UPDATE text_pieces SET words = :words WHERE id = :id AND content = :content AND words IS NULL")
     suspend fun setPieceWords(id: String, content: String, words: String): Int
 
     /** At most 500 ids per call (SQLite variable limit). */
