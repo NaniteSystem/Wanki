@@ -161,6 +161,75 @@ class TypingSessionTest {
         assertEquals(WordOutcome.CORRECT, s.finish().words[WordKey("p1", 2)])
     }
 
+    @Test fun sampleBeforeTypingDoesNotCount() {
+        val s = session(SampleLevel.SAMPLE)
+        s.level = SampleLevel.MEMORY
+        s.type("Мороз и солнце день чудесный")
+        val run = s.finish()
+        assertTrue(run.pieces.values.none { it.withSample })
+        assertTrue(run.pieces.values.all { app.wanki.texts.TypingScore.clean(it) })
+    }
+
+    @Test fun sampleWhileTypingCounts() {
+        val s = session(SampleLevel.SAMPLE)
+        s.type("Мор")
+        s.level = SampleLevel.MEMORY
+        s.type("Мороз и солнце день чудесный")
+        val run = s.finish()
+        assertTrue(run.pieces.getValue("p1").withSample)
+        assertTrue(run.pieces.getValue("p2").withSample) // it was ahead while the sample was on
+    }
+
+    @Test fun sampleRunIsARecitalError() {
+        val m = session(SampleLevel.MEMORY)
+        m.type("Мороз и солнце")
+        m.level = SampleLevel.SAMPLE
+        m.type("Мороз и солнце день чудесный")
+        assertEquals(setOf("p2"), m.finish().recitalErrors())
+    }
+
+    @Test fun draftLevelKeepsHints() {
+        val stats = mapOf(WordKey("p1", 1) to WordStat(cue = 2))
+        val s = session(SampleLevel.MEMORY, stats)
+        s.type("Мороз и солнце")
+        s.showSample()
+        val code = encodeDraftLevel(s.snapshot())
+        val back = decodeDraftLevel(code, typed = "Мороз и солнце", elapsedMs = 0)
+        val again = session(SampleLevel.MEMORY)
+        again.resume(back)
+        assertEquals(s.finish(), again.finish())
+        assertTrue(again.sampleShown)
+        // an old draft holds only the level name
+        assertEquals(SampleLevel.STRICT, decodeDraftLevel("STRICT", "x", 0).level)
+        assertEquals(emptySet(), decodeDraftLevel("STRICT", "x", 0).hinted)
+    }
+
+    @Test fun compositionFinishesLastWord() {
+        val s = session(SampleLevel.MEMORY, pieces = listOf(p1))
+        s.onValue(TextFieldValue("Мороз и солнце", TextRange(14), composition = TextRange(8, 14)))
+        assertTrue(s.ended)
+        assertEquals(WordOutcome.CORRECT, s.finish().words[WordKey("p1", 2)])
+    }
+
+    @Test fun compositionWithWrongLastWordWaits() {
+        val s = session(SampleLevel.MEMORY, pieces = listOf(p1))
+        s.onValue(TextFieldValue("Мороз и солнцу", TextRange(14), composition = TextRange(8, 14)))
+        assertFalse(s.ended)
+    }
+
+    @Test fun romajiTailDoesNotFinish() {
+        val p = TextPieceEntity(id = "j", textId = "t", pieceIndex = 0, content = "すべてない")
+        fun ja() = TypingSession(listOf(p), mapOf("j" to listOf(PieceWord(0, 3, "すべて", emptyList()), PieceWord(3, 5, "ない", emptyList()))), emptyMap(), SampleLevel.MEMORY)
+        val s = ja()
+        s.onValue(TextFieldValue("すべてなn", TextRange(5), composition = TextRange(4, 5)))
+        assertFalse(s.ended)
+        assertEquals("すべてな", s.committed)
+        val k = ja()
+        k.onValue(TextFieldValue("すべてない", TextRange(5), composition = TextRange(4, 5)))
+        assertTrue(k.ended)
+        assertEquals(WordOutcome.CORRECT, k.finish().words[WordKey("j", 1)])
+    }
+
     @Test fun defaultLevels() {
         assertEquals(SampleLevel.SAMPLE, defaultLevel(StudyKind.LEARN))
         StudyKind.entries.filter { it != StudyKind.LEARN }.forEach { assertEquals(SampleLevel.MEMORY, defaultLevel(it)) }

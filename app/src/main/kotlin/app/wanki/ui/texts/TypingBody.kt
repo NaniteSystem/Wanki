@@ -271,6 +271,8 @@ private class TypingHolder(var saved: TypingSnapshot? = null, var recorded: Bool
     var asking by mutableStateOf<TypingDraftEntity?>(null)
     var value by mutableStateOf(TextFieldValue())
     var words: Map<String, List<PieceWord>> = emptyMap()
+    /** The word-history write of the last result; «Ещё раз» waits for it before reading the stats. */
+    var recording: kotlinx.coroutines.Job? = null
 
     fun start(s: TypingSession) {
         session = s
@@ -278,13 +280,6 @@ private class TypingHolder(var saved: TypingSnapshot? = null, var recorded: Bool
     }
 
     companion object {
-        private const val SEP = '\u001E'
-        private const val FIELD = '\u001F'
-
-        private fun keys(k: Set<WordKey>) = k.joinToString(SEP.toString()) { "${it.pieceId}$FIELD${it.index}" }
-        private fun unkeys(s: String) = if (s.isEmpty()) emptySet()
-        else s.split(SEP).map { e -> e.split(FIELD).let { WordKey(it[0], it[1].toInt()) } }.toSet()
-
         val Saver: Saver<TypingHolder, List<String>> = Saver(
             save = { h ->
                 // while the draft question is open nothing is saved: a recreated screen asks again
@@ -292,7 +287,7 @@ private class TypingHolder(var saved: TypingSnapshot? = null, var recorded: Bool
                 snap?.let {
                     listOf(
                         it.typed, it.level.name, it.elapsedMs.toString(), it.sampleShown.toString(), it.ended.toString(),
-                        h.recorded.toString(), keys(it.hinted), it.samplePieces.joinToString(SEP.toString()),
+                        h.recorded.toString(), encodeKeys(it.hinted), encodeIds(it.samplePieces),
                     )
                 } ?: emptyList()
             },
@@ -300,8 +295,8 @@ private class TypingHolder(var saved: TypingSnapshot? = null, var recorded: Bool
                 if (l.size < 8) TypingHolder()
                 else TypingHolder(
                     TypingSnapshot(
-                        typed = l[0], level = SampleLevel.valueOf(l[1]), elapsedMs = l[2].toLong(), hinted = unkeys(l[6]),
-                        samplePieces = if (l[7].isEmpty()) emptySet() else l[7].split(SEP).toSet(),
+                        typed = l[0], level = SampleLevel.valueOf(l[1]), elapsedMs = l[2].toLong(), hinted = decodeKeys(l[6]),
+                        samplePieces = decodeIds(l[7]),
                         sampleShown = l[3].toBoolean(), ended = l[4].toBoolean(),
                     ),
                     recorded = l[5].toBoolean(),
@@ -340,7 +335,7 @@ private fun TypingRun(state: StudyState, targets: List<TextPieceEntity>, draftKe
             if (s.ended || s.typedAll.isEmpty()) texts.clearDraft(draftKey)
             else {
                 val now = System.currentTimeMillis()
-                texts.saveDraft(TypingDraftEntity(draftKey, s.typedAll, s.level.name, s.startedAt, epochDay(now), now))
+                texts.saveDraft(TypingDraftEntity(draftKey, s.typedAll, encodeDraftLevel(s.snapshot()), s.startedAt, epochDay(now), now))
             }
         }
     }
@@ -371,6 +366,7 @@ private fun TypingRun(state: StudyState, targets: List<TextPieceEntity>, draftKe
     val ended = session.ended
 
     fun restart(reloadStats: Boolean) = scope.launch {
+        holder.recording?.join()
         val stats = if (reloadStats) texts.wordStats(targets.map { it.id }) else null
         ui {
             val level = session.level
@@ -387,8 +383,14 @@ private fun TypingRun(state: StudyState, targets: List<TextPieceEntity>, draftKe
         saver.request()
         if (holder.recorded) return@LaunchedEffect
         holder.recorded = true
-        ui {
-            runCatching { texts.recordWords(session.finish().words) }.onFailure {
+        val words = session.finish().words
+        // on the app scope: leaving the screen right away («Готово») must not cancel the write
+        holder.recording = graph.appScope.launch {
+            try {
+                texts.recordWords(words)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
                 holder.recorded = false
                 snackbar.showSnackbar("Не удалось сохранить историю слов")
             }
@@ -419,7 +421,7 @@ private fun TypingRun(state: StudyState, targets: List<TextPieceEntity>, draftKe
         if (!ended) TypingStats(session, elapsed)
         if (!ended) TypingTools(session, settings, onRestart = { restart(reloadStats = false) }, onChange = saver::request)
         Box(
-            Modifier.weight(1f).fillMaxWidth().pointerInput(Unit) {
+            Modifier.weight(1f).fillMaxWidth().pointerInput(session) {
                 detectTapGestures { if (!session.ended) { focus.requestFocus(); keyboard?.show() } }
             },
         ) {
@@ -470,9 +472,8 @@ private fun TypingRun(state: StudyState, targets: List<TextPieceEntity>, draftKe
             confirmButton = {
                 TextButton(onClick = {
                     holder.asking = null
-                    session.level = SampleLevel.entries.firstOrNull { it.name == draft.level } ?: session.level
-                    session.startedAt = System.currentTimeMillis() - (draft.updatedAt - draft.startedAt).coerceAtLeast(0)
-                    session.restore(draft.typed)
+                    // hints and sample use come back with the text: leaving does not clean a run
+                    session.resume(decodeDraftLevel(draft.level, draft.typed, (draft.updatedAt - draft.startedAt).coerceAtLeast(0)))
                     holder.start(session)
                 }, modifier = Modifier.testTag("typing-continue")) { Text("Продолжить") }
             },
@@ -618,7 +619,8 @@ private fun PieceTyping(render: PieceRender, style: TextStyle, colors: TypingCol
         if (l != null && l.layoutInput.text == render.text) {
             for (w in render.words) {
                 val r = l.getPathForRange(w.start, w.end).getBounds()
-                val shown = render.text.text.substring(w.start, w.end)
+                val typedWord = render.text.text.substring(w.start, w.end)
+                val shown = if (w.state == UnitState.WRONG) "$typedWord, правильно: ${w.correct}" else typedWord
                 Box(
                     Modifier.offset { IntOffset(r.left.roundToInt(), r.top.roundToInt()) }
                         .size(with(density) { r.width.toDp() }, with(density) { r.height.toDp() })
@@ -759,7 +761,7 @@ private fun TypingResultButtons(state: StudyState, s: TypingSession, scope: kotl
                     ) { Text("Легко") }
                 }
                 else -> Button(
-                    onClick = { scope.launch { state.typedDone(run.errorPieces + run.hintedPieces, run.pieces.values.sumOf { it.hints }, duration) } },
+                    onClick = { scope.launch { state.typedDone(run.recitalErrors(), run.pieces.values.sumOf { it.hints }, duration) } },
                     enabled = !state.busy, modifier = Modifier.testTag("typing-done"),
                 ) { Text("Готово") }
             }
