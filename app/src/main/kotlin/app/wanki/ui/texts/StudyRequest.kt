@@ -10,7 +10,7 @@ import app.wanki.texts.VanishingCues
 enum class StudyKind { LEARN, REVIEW, SABQI, MANZIL, PRACTICE }
 
 /** How a piece is shown while studying it. */
-enum class StudyMode { READ, CUES, FIRST_LETTERS, CHAIN, RECITE }
+enum class StudyMode { READ, CUES, FIRST_LETTERS, CHAIN, RECITE, TYPE }
 
 /** What to study: the [kind], the text it belongs to ([textId] is null only for manzil, which may span texts) and the [pieceIds]. */
 data class StudyRequest(val kind: StudyKind, val textId: String?, val pieceIds: List<String>)

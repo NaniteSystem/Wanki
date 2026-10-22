@@ -48,6 +48,12 @@ class Settings(context: Context) {
     /** Epoch day the last manzil chunk was finished. */
     var manzilDoneDay by pref("manzilDoneDay", -1L)
 
+    private var typingFontRaw by pref("typingFontSp", 22)
+    /** Text size in the «Печать» study mode, sp. */
+    var typingFontSp: Int
+        get() = typingFontRaw.coerceIn(TYPING_FONT_MIN, TYPING_FONT_MAX)
+        set(v) { typingFontRaw = v.coerceIn(TYPING_FONT_MIN, TYPING_FONT_MAX) }
+
     /** The pen/marker/eraser choice last used in an ink section. */
     fun tool(section: InkSection): ToolSelection = ToolSelection.decode(prefs.getString("tool.${section.name}", null))
     fun setTool(section: InkSection, t: ToolSelection) { prefs.edit().putString("tool.${section.name}", t.encode()).apply() }
@@ -74,6 +80,8 @@ class Settings(context: Context) {
 
     companion object {
         const val NAME = "settings"
+        const val TYPING_FONT_MIN = 16
+        const val TYPING_FONT_MAX = 32
 
         @Suppress("UNCHECKED_CAST")
         private fun <T> read(prefs: SharedPreferences, key: String, default: T): T = runCatching {

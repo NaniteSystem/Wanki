@@ -34,7 +34,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -44,6 +46,8 @@ import androidx.compose.ui.unit.dp
 import app.wanki.AppGraph
 import app.wanki.data.TextEntity
 import app.wanki.data.TextPieceEntity
+import app.wanki.data.TextRepository
+import app.wanki.srs.Rating
 import app.wanki.graph
 import app.wanki.texts.Chain
 import app.wanki.texts.ChainStep
@@ -62,7 +66,7 @@ import app.wanki.ui.common.ui
 import kotlinx.coroutines.launch
 
 /** One study session over a request's pieces. Session state lives here; leaving mid-session saves nothing. */
-class StudyState(private val graph: AppGraph, val request: StudyRequest) {
+class StudyState(private val graph: AppGraph, val request: StudyRequest, initialMode: StudyMode? = null) {
     var loaded by mutableStateOf(false)
         private set
     var finished by mutableStateOf(false)
@@ -75,7 +79,7 @@ class StudyState(private val graph: AppGraph, val request: StudyRequest) {
     private val wordCache = HashMap<String, List<Word>>()
     private val startedAt = System.currentTimeMillis()
 
-    var mode by mutableStateOf(if (request.kind == StudyKind.LEARN) StudyMode.READ else StudyMode.RECITE)
+    var mode by mutableStateOf(initialMode ?: if (request.kind == StudyKind.LEARN) StudyMode.READ else StudyMode.RECITE)
         private set
 
     // reveals and mistakes (persist across mode switches; "used hint ⇒ not clean")
@@ -233,6 +237,10 @@ class StudyState(private val graph: AppGraph, val request: StudyRequest) {
         val piece = pieces.getOrNull(reviewIndex) ?: return@run
         val rating = TextRating.rating(outcome, usedHints = hints > 0)
         graph.texts.reviewPiece(piece.id, rating, hints, duration())
+        nextReview()
+    }
+
+    private fun nextReview() {
         reviewIndex++
         hints = 0
         hintedPieces = emptySet()
@@ -245,6 +253,36 @@ class StudyState(private val graph: AppGraph, val request: StudyRequest) {
     /** The preceding piece of the text, shown as the chain cue in a review. */
     fun reviewCue(piece: TextPieceEntity): TextPieceEntity? =
         allPieces.firstOrNull { it.textId == piece.textId && it.pieceIndex == piece.pieceIndex - 1 }
+
+    // --- typed runs (the counts come from TypingSession.finish) ---
+
+    /** «Выучено» after a clean typed run from memory. */
+    suspend fun learnTyped(durationMs: Long) = saving.run {
+        if (finished) return@run
+        graph.texts.completePortion(request.textId!!, request.pieceIds, durationMs, check = TextRepository.MODE_TYPED)
+        finished = true
+    }
+
+    /** The typed review of the current piece, rated by [TypingScore], then the next piece. */
+    suspend fun rateTyped(rating: Rating, hints: Int, durationMs: Long) = saving.run {
+        if (finished) return@run
+        val piece = pieces.getOrNull(reviewIndex) ?: return@run
+        graph.texts.reviewPiece(piece.id, rating, hints, durationMs, check = TextRepository.MODE_TYPED)
+        nextReview()
+    }
+
+    /** «Готово» after typing a sabqi, manzil or practice block; [errors] are the pieces with mistakes or hints. */
+    suspend fun typedDone(errors: Set<String>, hints: Int, durationMs: Long) = saving.run {
+        if (finished) return@run
+        val typed = TextRepository.MODE_TYPED
+        when (request.kind) {
+            StudyKind.SABQI -> graph.texts.completeSabqi(request.textId!!, request.pieceIds, errors, durationMs, check = typed)
+            StudyKind.MANZIL -> graph.texts.completeManzil(request.pieceIds, errors, durationMs, check = typed)
+            StudyKind.PRACTICE -> graph.texts.logPractice(request.textId!!, request.pieceIds, errors, hints, durationMs, check = typed)
+            else -> {}
+        }
+        finished = true
+    }
 
     /** "Готово": write the sabqi/manzil/practice result. */
     suspend fun reciteDone() = saving.run {
@@ -265,7 +303,10 @@ class StudyState(private val graph: AppGraph, val request: StudyRequest) {
 @Composable
 fun StudyScreen(request: StudyRequest, onClose: () -> Unit) {
     val graph = LocalContext.current.graph
-    val state = remember(request) { StudyState(graph, request) }
+    // the mode outlives a recreation, so a typed run in progress comes back where it was
+    var savedMode by rememberSaveable(request) { mutableStateOf<String?>(null) }
+    val state = remember(request) { StudyState(graph, request, savedMode?.let { m -> StudyMode.entries.firstOrNull { it.name == m } }) }
+    LaunchedEffect(state) { snapshotFlow { state.mode }.collect { savedMode = it.name } }
     val scope = rememberUiScope()
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(request) { ui { state.load() } }
@@ -284,13 +325,16 @@ fun StudyScreen(request: StudyRequest, onClose: () -> Unit) {
                 Text("Нет кусков для занятия", Modifier.padding(16.dp))
                 return@Column
             }
-            if (request.kind == StudyKind.LEARN) ModeBar(state, StudyMode.entries)
-            else if (request.kind != StudyKind.REVIEW) ModeBar(state, listOf(StudyMode.RECITE, StudyMode.CUES))
-            // your own voice: the current piece in a review, otherwise the whole portion/block
+            ModeBar(state, studyModes(request.kind))
+            // your own voice: the current piece in a review, otherwise the whole portion/block (not while typing)
             val voiceIds = if (request.kind == StudyKind.REVIEW) listOfNotNull(state.pieces.getOrNull(state.reviewIndex)?.id)
             else state.pieces.map { it.id }
-            if (voiceIds.isNotEmpty()) key(voiceIds) { VoiceBar(voiceIds, snackbar, scope) }
+            if (voiceIds.isNotEmpty() && state.mode != StudyMode.TYPE) key(voiceIds) { VoiceBar(voiceIds, snackbar, scope) }
 
+            if (state.mode == StudyMode.TYPE) {
+                TypingBody(state, snackbar)
+                return@Column
+            }
             when (request.kind) {
                 StudyKind.REVIEW -> ReviewBody(state, scope, speak)
                 StudyKind.LEARN -> when (state.mode) {
@@ -298,7 +342,7 @@ fun StudyScreen(request: StudyRequest, onClose: () -> Unit) {
                     StudyMode.CUES -> CuesBody(state, speak)
                     StudyMode.FIRST_LETTERS -> FirstLettersBody(state, speak)
                     StudyMode.CHAIN -> ChainBody(state, speak)
-                    StudyMode.RECITE -> ReciteBody(state, scope, speak, learn = true)
+                    StudyMode.RECITE, StudyMode.TYPE -> ReciteBody(state, scope, speak, learn = true)
                 }
                 else -> when (state.mode) {
                     StudyMode.CUES -> CuesBody(state, speak)
@@ -555,6 +599,14 @@ private fun modeLabel(m: StudyMode) = when (m) {
     StudyMode.FIRST_LETTERS -> "Первые буквы"
     StudyMode.CHAIN -> "Цепочка"
     StudyMode.RECITE -> "Рассказ"
+    StudyMode.TYPE -> "Печать"
+}
+
+/** LEARN offers every mode; reviews and recitals offer the recital, cues (not a single-piece review) and typing. */
+internal fun studyModes(kind: StudyKind): List<StudyMode> = when (kind) {
+    StudyKind.LEARN -> StudyMode.entries
+    StudyKind.REVIEW -> listOf(StudyMode.RECITE, StudyMode.TYPE)
+    else -> listOf(StudyMode.RECITE, StudyMode.CUES, StudyMode.TYPE)
 }
 
 private fun studyTitle(state: StudyState): String = when (state.request.kind) {

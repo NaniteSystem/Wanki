@@ -125,6 +125,42 @@ class TypingSessionTest {
         assertTrue(run.pieces.getValue("p2").withSample)
     }
 
+    @Test fun typingToTheEndEndsTheRun() {
+        var now = 1_000L
+        val s = TypingSession(listOf(p1), mapOf("p1" to words(p1)), emptyMap(), SampleLevel.MEMORY) { now }
+        s.type("Мороз и")
+        now += 5_000
+        s.type("Мороз и солнце")
+        assertTrue(s.ended)
+        now += 60_000
+        assertEquals(5_000, s.elapsedMs)
+        // input after the end changes nothing
+        s.type("Мороз и солнце xx")
+        assertEquals("Мороз и солнце", s.committed)
+    }
+
+    @Test fun snapshotResumesTheSameRun() {
+        val s = session(SampleLevel.MEMORY, mapOf(WordKey("p1", 1) to WordStat(cue = 2)))
+        s.type("Мороз и солн")
+        s.showSample()
+        val snap = s.snapshot()
+        val again = session(SampleLevel.SAMPLE, mapOf(WordKey("p1", 1) to WordStat(cue = 2)))
+        again.resume(snap)
+        assertEquals("Мороз и солн", again.committed)
+        assertEquals(SampleLevel.MEMORY, again.level)
+        assertTrue(again.sampleShown)
+        assertEquals(s.finish(), again.finish())
+    }
+
+    @Test fun endJudgesTheComposition() {
+        val s = session(SampleLevel.MEMORY)
+        s.onValue(TextFieldValue("Мороз и солнце", TextRange(14), composition = TextRange(8, 14)))
+        assertEquals("Мороз и солнце", s.snapshot().typed)
+        s.end()
+        assertEquals("Мороз и солнце", s.committed)
+        assertEquals(WordOutcome.CORRECT, s.finish().words[WordKey("p1", 2)])
+    }
+
     @Test fun defaultLevels() {
         assertEquals(SampleLevel.SAMPLE, defaultLevel(StudyKind.LEARN))
         StudyKind.entries.filter { it != StudyKind.LEARN }.forEach { assertEquals(SampleLevel.MEMORY, defaultLevel(it)) }

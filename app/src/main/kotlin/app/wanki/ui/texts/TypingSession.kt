@@ -1,6 +1,7 @@
 package app.wanki.ui.texts
 
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.text.TextRange
@@ -27,6 +28,12 @@ data class TypedRun(
     val hintedPieces: Set<String>,
 )
 
+/** A run in progress, as kept across activity recreation. */
+data class TypingSnapshot(
+    val typed: String, val level: SampleLevel, val elapsedMs: Long, val hinted: Set<WordKey>,
+    val samplePieces: Set<String>, val sampleShown: Boolean, val ended: Boolean,
+)
+
 /** One unfinished attempt is kept per request; a review keeps one per piece. */
 fun draftKey(request: StudyRequest, currentPieceId: String?): String =
     "${request.kind}:${currentPieceId ?: request.pieceIds.joinToString(",")}"
@@ -42,7 +49,7 @@ fun defaultLevel(kind: StudyKind): SampleLevel = if (kind == StudyKind.LEARN) Sa
 class TypingSession(
     val pieces: List<TextPieceEntity>,
     words: Map<String, List<PieceWord>>,
-    private val stats: Map<WordKey, WordStat>,
+    val stats: Map<WordKey, WordStat>,
     level: SampleLevel,
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
@@ -51,14 +58,26 @@ class TypingSession(
 
     /** Unit index → word; units run over all pieces in request order. */
     val keys: List<WordKey> = pieces.flatMap { p -> pieceWords.getValue(p.id).indices.map { WordKey(p.id, it) } }
-    private val unitOf: Map<WordKey, Int> = keys.withIndex().associate { it.value to it.index }
+    private val unitIndex: Map<WordKey, Int> = keys.withIndex().associate { it.value to it.index }
 
     /** A word whose reading has nothing checkable cannot be typed; it never counts against the run. */
     private val empty = BooleanArray(keys.size) { TypingText.fold(word(keys[it]).reading).chars.isEmpty() }
     private val matcher = TypingMatcher(keys.map { word(it).unit() })
 
+    /** Where each unit's reading starts among the checked characters (the matcher's columns). */
+    private val columnStart = IntArray(keys.size + 1).also { c ->
+        for (k in keys.indices) c[k + 1] = c[k] + TypingText.fold(word(keys[k]).reading).chars.size
+    }
+
     var result: TypingResult by mutableStateOf(matcher.update(""))
         private set
+    /** The first unit not judged yet (where the caret is), or [keys].size when everything is judged. */
+    var caretUnit by mutableIntStateOf(caretOf(result))
+        private set
+    /** Set by [end] or once the whole text is typed; input is ignored afterwards and the clock stops. */
+    var ended by mutableStateOf(false)
+        private set
+    private var endedAt = 0L
     var committed by mutableStateOf("")
         private set
     var composing by mutableStateOf("")
@@ -84,25 +103,48 @@ class TypingSession(
         noteCaret()
     }
 
-    val elapsedMs: Long get() = (clock() - startedAt).coerceAtLeast(0)
+    val elapsedMs: Long get() = ((if (ended) endedAt else clock()) - startedAt).coerceAtLeast(0)
 
-    /** The first unit not judged yet (where the caret is), or [keys].size when everything is judged. */
-    val caretUnit: Int
-        get() {
-            val units = result.units
-            for (k in units.indices) if (units[k].state == UnitState.PENDING || units[k].state == UnitState.UNTYPED) return k
-            return units.size
+    /** Words judged so far and how many of them are right, for the live accuracy. */
+    val judged: Int get() = caretUnit
+    val judgedCorrect: Int get() = (0 until caretUnit).count { result.units[it].state == UnitState.OK }
+
+    /** How many checked characters of unit [k] are typed (for a half-typed word). */
+    fun typedColumns(k: Int): Int = (result.end - columnStart[k]).coerceIn(0, columnStart[k + 1] - columnStart[k])
+
+    fun unitOf(key: WordKey): Int? = unitIndex[key]
+
+    private fun caretOf(r: TypingResult): Int {
+        for (k in r.units.indices) if (r.units[k].state == UnitState.PENDING || r.units[k].state == UnitState.UNTYPED) return k
+        return r.units.size
+    }
+
+    /** «Закончить», or the text is typed to the end. A word still in the IME composition is judged as typed. */
+    fun end() {
+        if (ended) return
+        if (composing.isNotEmpty()) {
+            committed += composing
+            composing = ""
+            result = matcher.update(committed)
+            caretUnit = caretOf(result)
+            noteCaret()
         }
+        endedAt = clock()
+        ended = true
+    }
 
     /** Input only goes to the end: the caret is forced there, the IME composition is kept. */
     fun onValue(v: TextFieldValue): TextFieldValue {
         val comp = v.composition
         val c = if (comp != null && !comp.collapsed) v.text.removeRange(comp.min, comp.max) else v.text
+        if (ended) return TextFieldValue(committed, TextRange(committed.length))
         composing = if (comp != null && !comp.collapsed) v.text.substring(comp.min, comp.max) else ""
         if (c != committed) {
             committed = c
             result = matcher.update(c)
+            caretUnit = caretOf(result)
             noteCaret()
+            if (result.finished) end()
         }
         return TextFieldValue(v.text, TextRange(v.text.length), comp)
     }
@@ -112,9 +154,28 @@ class TypingSession(
         onValue(TextFieldValue(typed, TextRange(typed.length)))
     }
 
+    /** The committed text and the composition after it: what is kept when the run is saved. */
+    val typedAll: String get() = committed + composing
+
+    /** Everything a recreated screen needs to go on with the same run. */
+    fun snapshot() = TypingSnapshot(typedAll, level, elapsedMs, hinted.toSet(), samplePieces.toSet(), sampleShown, ended)
+
+    fun resume(s: TypingSnapshot) {
+        level = s.level
+        startedAt = clock() - s.elapsedMs
+        restore(s.typed)
+        // the saved marks replace whatever the fresh session noted on its own
+        hinted.clear()
+        hinted += s.hinted.filter { it in unitIndex }
+        samplePieces.clear()
+        samplePieces += s.samplePieces
+        sampleShown = s.sampleShown
+        if (s.ended) end()
+    }
+
     fun look(pieceId: String, index: Int): WordLook {
         val key = WordKey(pieceId, index)
-        val k = unitOf[key] ?: return WordLook.NONE
+        val k = unitIndex[key] ?: return WordLook.NONE
         val caret = caretUnit
         if (sampleShown && k >= caret) return WordLook.SHOWN
         return WordHistory.look(level, stats[key], atCaret = k == caret, passed = k < caret)
