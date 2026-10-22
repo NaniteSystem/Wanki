@@ -9,3 +9,7 @@
 # ML Kit finds its component registrars by class name (manifest metadata) and creates them by
 # reflection; R8 full mode would drop the no-arg constructors.
 -keep class * implements com.google.firebase.components.ComponentRegistrar { <init>(); }
+
+# Kuromoji (Japanese readings) finds its dictionary files by class package
+-keep class com.atilika.kuromoji.** { *; }
+-dontwarn com.atilika.kuromoji.**

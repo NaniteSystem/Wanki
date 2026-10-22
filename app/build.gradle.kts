@@ -55,6 +55,10 @@ android {
     buildFeatures {
         compose = true
     }
+    packaging {
+        // both Kuromoji jars carry the same licence notes
+        resources.pickFirsts += listOf("META-INF/CONTRIBUTORS.md", "META-INF/LICENSE.md", "META-INF/NOTICE.md")
+    }
     // exported Room schemas, for migration tests
     sourceSets.getByName("androidTest").assets.directories.add("$projectDir/schemas")
 }
@@ -105,6 +109,8 @@ dependencies {
     implementation(libs.mlkit.digital.ink)
     implementation(libs.mlkit.language.id)
     implementation(libs.mlkit.translate)
+    // Japanese readings (ipadic dictionary is inside the jar)
+    implementation(libs.kuromoji.ipadic)
     // Anki .apkg (new format) is a zstd-compressed SQLite database; the AAR carries the Android JNI libs
     implementation("com.github.luben:zstd-jni:${libs.versions.zstd.get()}@aar")
     implementation(libs.kotlinx.coroutines.play.services)

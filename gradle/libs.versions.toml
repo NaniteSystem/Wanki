@@ -9,6 +9,7 @@ ink = "1.1.0-alpha07"
 mlkitDigitalInk = "19.0.0"
 mlkitLanguageId = "17.0.6"
 mlkitTranslate = "17.0.3"
+kuromoji = "0.9.0"
 zstd = "1.5.7-11"
 coroutines = "1.10.2"
 room = "2.8.4"
@@ -36,6 +37,7 @@ androidx-ink-strokes = { module = "androidx.ink:ink-strokes", version.ref = "ink
 mlkit-digital-ink = { module = "com.google.mlkit:digital-ink-recognition", version.ref = "mlkitDigitalInk" }
 mlkit-language-id = { module = "com.google.mlkit:language-id", version.ref = "mlkitLanguageId" }
 mlkit-translate = { module = "com.google.mlkit:translate", version.ref = "mlkitTranslate" }
+kuromoji-ipadic = { module = "com.atilika.kuromoji:kuromoji-ipadic", version.ref = "kuromoji" }
 kotlinx-coroutines-play-services = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-play-services", version.ref = "coroutines" }
 kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutines" }
 

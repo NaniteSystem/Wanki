@@ -18,6 +18,8 @@ import app.wanki.recognition.TranslationService
 import app.wanki.refs.ReferenceRepository
 import app.wanki.reminders.Reminders
 import app.wanki.review.AnswerGrader
+import app.wanki.texts.KuromojiMorphology
+import app.wanki.texts.Morphology
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -40,6 +42,7 @@ class AppGraph(context: Context) {
     val backup = Backup(context, db, settings)
     val media = MediaStore(context)
     val recorder = VoiceRecorder(media)
+    val morphology: Morphology by lazy { KuromojiMorphology() }
     val catalog = Catalog(context.assets)
     val catalogInstaller = CatalogInstaller(catalog, repository, appScope)
 }
