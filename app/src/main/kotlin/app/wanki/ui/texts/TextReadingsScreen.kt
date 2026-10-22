@@ -2,6 +2,9 @@ package app.wanki.ui.texts
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -115,17 +118,23 @@ fun TextReadingsScreen(id: String, onBack: () -> Unit, texts: TextRepository = L
         var forms by remember(r) { mutableStateOf(r.forms.joinToString(", ")) }
         AlertDialog(
             onDismissRequest = { editing = null },
-            title = { Text(r.surface) },
+            title = { Text(r.surface, maxLines = 2, overflow = TextOverflow.Ellipsis) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(
                         reading, { reading = it }, label = { Text("Чтение") }, singleLine = true,
                         modifier = Modifier.fillMaxWidth().testTag("reading-field"),
                     )
                     OutlinedTextField(
                         forms, { forms = it }, label = { Text("Другие написания (через запятую)") },
+                        maxLines = 4,
                         modifier = Modifier.fillMaxWidth().testTag("forms-field"),
                     )
+                    if (r.custom) {
+                        TextButton(onClick = { editing = null; store { it - r.surface } }, modifier = Modifier.testTag("reading-reset")) {
+                            Text("Сбросить")
+                        }
+                    }
                 }
             },
             confirmButton = {
@@ -139,16 +148,7 @@ fun TextReadingsScreen(id: String, onBack: () -> Unit, texts: TextRepository = L
                     modifier = Modifier.testTag("reading-save"),
                 ) { Text("Сохранить") }
             },
-            dismissButton = {
-                Column(horizontalAlignment = Alignment.End) {
-                    if (r.custom) {
-                        TextButton(onClick = { editing = null; store { it - r.surface } }, modifier = Modifier.testTag("reading-reset")) {
-                            Text("Сбросить")
-                        }
-                    }
-                    TextButton(onClick = { editing = null }) { Text("Отмена") }
-                }
-            },
+            dismissButton = { TextButton(onClick = { editing = null }) { Text("Отмена") } },
         )
     }
 }

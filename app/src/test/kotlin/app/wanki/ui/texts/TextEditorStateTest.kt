@@ -169,4 +169,12 @@ class TextEditorStateTest {
         )
         assertEquals(r, s.readings)
     }
+
+    @Test
+    fun markupPastedIntoAPieceBecomesPlainTextWithReadings() {
+        val s = loaded("春" to "", language = "ja")
+        s.editPiece(0, TextFieldValue("{春|はる}の{夢|ゆめ}"))
+        assertEquals(listOf("春の夢"), s.pieces().map { it.content })
+        assertEquals(setOf("春", "夢"), s.readings.keys)
+    }
 }

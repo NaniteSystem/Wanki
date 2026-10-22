@@ -113,6 +113,12 @@ internal class TextEditorState {
     /** A newline typed or pasted into a piece cuts it there. */
     fun editPiece(i: Int, v: TextFieldValue) {
         val d = drafts[i]
+        if (ReadingMarkup.has(v.text)) {
+            val m = ReadingMarkup.parse(v.text)
+            readings = readings + m.readings
+            editPiece(i, TextFieldValue(m.plain, TextRange(m.plain.length)))
+            return
+        }
         if ('\n' in v.text) {
             val parts = v.text.split('\n').map { it.trim() }.filter(PieceDrafts::hasContent)
             if (parts.isEmpty()) {
