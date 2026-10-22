@@ -23,5 +23,5 @@ object Words {
     fun isRtl(language: String): Boolean = base(language) in rtlLanguages
 
     /** The language of a tag: "he-IL", "ar_EG", "AR" → "he", "ar", "ar". */
-    private fun base(tag: String): String = tag.substringBefore('-').substringBefore('_').lowercase()
+    internal fun base(tag: String): String = tag.substringBefore('-').substringBefore('_').lowercase()
 }
