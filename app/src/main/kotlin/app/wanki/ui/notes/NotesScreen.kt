@@ -1,6 +1,5 @@
 package app.wanki.ui.notes
 
-import android.util.Log
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -70,6 +69,8 @@ import app.wanki.ui.common.HeaderAction
 import app.wanki.ui.common.ListState
 import app.wanki.ui.common.ScreenHeader
 import app.wanki.ui.common.drawTemplate
+import app.wanki.ui.common.finalSave
+import app.wanki.ui.common.rememberGuardedBack
 import app.wanki.ui.common.ui
 import app.wanki.writing.WritingPaper
 import kotlinx.coroutines.delay
@@ -140,41 +141,57 @@ class BlockState(
     )
 }
 
-/** Note editor: text and handwriting blocks mixed freely; saves and recognizes automatically. */
+/**
+ * Note editor: text and handwriting blocks mixed freely; saves and recognizes automatically.
+ * A new note ([id] null) reports its id through [onCreated] once it is first saved, so the route
+ * can carry it (a restored screen then reopens the note instead of a blank one).
+ */
 @Composable
-fun NoteEditorScreen(id: String?, onBack: () -> Unit) {
-    val graph = LocalContext.current.graph
+fun NoteEditorScreen(id: String?, onBack: () -> Unit, onCreated: (String) -> Unit = {}) {
+    val context = LocalContext.current
+    val graph = context.graph
     var note by remember { mutableStateOf<TextNoteEntity?>(null) }
+    // the note is in the database: from then on an emptied note is saved empty, not skipped
+    var stored by remember { mutableStateOf(false) }
     var title by remember { mutableStateOf("") }
     val blocks = remember { mutableStateListOf<BlockState>() }
     val changes = remember { NoteChanges() }
     var tool by remember { mutableStateOf(graph.settings.tool(InkSection.NOTE)) }
     var activeBlockId by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(id) { ui {
-        val n = id?.let { graph.repository.textNote(it) } ?: TextNoteEntity(title = "", body = "")
-        val stored = graph.repository.noteBlocks(n.id)
-        blocks.clear()
-        if (stored.isEmpty()) {
-            // notes from before blocks existed: their body becomes the first text block
-            blocks += BlockState(newId(), NoteBlockType.TEXT, n.body)
-        } else stored.forEach { b ->
-            val strokes = b.strokes?.let { runCatching { InkCodec.decode(it).strokes }.getOrNull() }.orEmpty()
-            blocks += BlockState(b.id, runCatching { NoteBlockType.valueOf(b.type) }.getOrDefault(NoteBlockType.TEXT), b.text, strokes, b.heightDp, b.recognizedText)
+    LaunchedEffect(id) {
+        // the route of a new note was just given its id: the note on screen is that note already
+        if (id != null && note?.id == id) return@LaunchedEffect
+        ui {
+            val found = id?.let { graph.repository.textNote(it) }
+            val n = found ?: TextNoteEntity(title = "", body = "")
+            stored = found != null
+            val rows = graph.repository.noteBlocks(n.id)
+            blocks.clear()
+            if (rows.isEmpty()) {
+                // notes from before blocks existed: their body becomes the first text block
+                blocks += BlockState(newId(), NoteBlockType.TEXT, n.body)
+            } else rows.forEach { b ->
+                val strokes = b.strokes?.let { runCatching { InkCodec.decode(it).strokes }.getOrNull() }.orEmpty()
+                blocks += BlockState(b.id, runCatching { NoteBlockType.valueOf(b.type) }.getOrDefault(NoteBlockType.TEXT), b.text, strokes, b.heightDp, b.recognizedText)
+            }
+            title = n.title
+            note = n
+            changes.loaded(blocks)
         }
-        title = n.title
-        note = n
-        changes.loaded(blocks)
-    } }
+    }
     val inkVersions = blocks.sumOf { it.layer?.version ?: 0 }
     suspend fun save() {
         val n = note ?: return
         // the snapshot is taken first: changes made while this save runs stay unsaved
         val v = changes.unsaved(blocks) ?: return
-        if (title.isBlank() && blocks.all { it.text.isBlank() && (it.layer?.isEmpty != false) }) return
+        // a blank new note is not created; a stored one the user emptied is saved empty
+        if (!stored && title.isBlank() && blocks.all { it.text.isBlank() && (it.layer?.isEmpty != false) }) return
         graph.repository.saveNoteWithBlocks(n.copy(title = title), blocks.map { it.toEntity(n.id) })
         changes.markSaved(v)
+        stored = true
     }
+    LaunchedEffect(stored) { if (stored && id == null) note?.let { onCreated(it.id) } }
     val latestSave by rememberUpdatedState<suspend () -> Unit> { save() }
     val saver = remember { SerialSaver(graph.appScope) { latestSave() } }
     // every text change and every finished ink gesture is saved; recognition waits for a pause
@@ -194,20 +211,18 @@ fun NoteEditorScreen(id: String?, onBack: () -> Unit) {
             saver.request()
         }
     }
+    // leaving while saves fail asks first; leaving any other way still saves once more and reports a failure
+    val back = rememberGuardedBack(saver, onBack)
     DisposableEffect(Unit) {
         onDispose {
-            graph.appScope.launch {
-                saver.request()
-                saver.flush()
-                saver.error.value?.let { Log.e("Wanki", "note ${note?.id ?: id}: last save failed", it) }
-            }
+            graph.appScope.launch { saver.finalSave(context.applicationContext, "note ${note?.id ?: id}") }
         }
     }
 
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
             ScreenHeader(
-                title.ifBlank { "Заметка" }, onBack = onBack,
+                title.ifBlank { "Заметка" }, onBack = back,
                 menu = if (id == null) emptyList() else listOf(
                     HeaderAction(R.drawable.ic_delete, "Удалить", "menu-delete") {
                         note = null

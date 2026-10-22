@@ -1,14 +1,24 @@
 package app.wanki.ui.common
 
+import android.content.Context
+import android.util.Log
+import android.widget.Toast
+import androidx.activity.compose.BackHandler
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -108,4 +118,50 @@ fun ErrorSnackbar(
         if (result == SnackbarResult.ActionPerformed) onRetry() else onDismiss?.invoke()
     }
     SnackbarHost(host, modifier)
+}
+
+/**
+ * Back for a screen saved by [saver]. While its last save has failed, leaving (system back or the
+ * returned action) first asks: «Повторить» saves again and leaves once that works (the error stays
+ * on screen otherwise); «Выйти без сохранения» leaves and drops the unsaved changes knowingly.
+ */
+@Composable
+fun rememberGuardedBack(saver: SerialSaver, onBack: () -> Unit): () -> Unit {
+    val error by saver.error.collectAsState()
+    val latestBack by rememberUpdatedState(onBack)
+    var asking by remember { mutableStateOf(false) }
+    val scope = rememberUiScope()
+    BackHandler(enabled = error != null) { asking = true }
+    if (asking) {
+        AlertDialog(
+            onDismissRequest = { asking = false },
+            title = { Text("Изменения не сохранены") },
+            text = { Text("Последние изменения не удалось сохранить. Если выйти сейчас, они пропадут.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    asking = false
+                    scope.launch {
+                        saver.request()
+                        saver.flush()
+                        if (saver.error.value == null) latestBack()
+                    }
+                }) { Text("Повторить") }
+            },
+            dismissButton = { TextButton(onClick = { asking = false; latestBack() }) { Text("Выйти без сохранения") } },
+        )
+    }
+    return remember(saver) { { if (saver.error.value != null) asking = true else latestBack() } }
+}
+
+/**
+ * The last save of a screen that is gone: saves once more (a retry when the previous one failed)
+ * and, if that fails too, says so in a toast instead of only logging it.
+ */
+suspend fun SerialSaver.finalSave(context: Context, what: String) {
+    request()
+    flush()
+    error.value?.let {
+        Log.e("Wanki", "$what: last save failed", it)
+        Toast.makeText(context, "Не удалось сохранить изменения", Toast.LENGTH_LONG).show()
+    }
 }

@@ -54,6 +54,8 @@ import app.wanki.ui.common.SaveErrorSnackbar
 import app.wanki.ui.common.SerialSaver
 import app.wanki.ui.common.SelectionBar
 import app.wanki.ui.common.TextActionsDialog
+import app.wanki.ui.common.finalSave
+import app.wanki.ui.common.rememberGuardedBack
 import app.wanki.ui.common.copyToClipboard
 import app.wanki.ui.common.PageGeometry
 import app.wanki.ui.common.drawBoard
@@ -231,14 +233,14 @@ fun PageEditor(
         delay(2500)
         ui { state.recognizeIfDirty() }
     }
+    // leaving while saves fail asks first; leaving any other way still saves once more and reports a failure
+    val back = rememberGuardedBack(state.saver, onBack)
     DisposableEffect(state) {
         onDispose {
             graph.appScope.launch {
                 // a change from the last frame may not have reached the effect above yet
-                state.saver.request()
-                state.saver.flush()
                 val id = state.page.id
-                state.saver.error.value?.let { Log.e("Wanki", "page $id: last ink save failed", it) }
+                state.saver.finalSave(context.applicationContext, "page $id")
                 runCatching { state.saveView() }.onFailure { Log.e("Wanki", "page $id: view not saved", it) }
                 runCatching { state.recognizeIfDirty() }.onFailure { Log.e("Wanki", "page $id: recognition failed", it) }
             }
@@ -249,7 +251,7 @@ fun PageEditor(
         val wide = maxWidth >= 600.dp
         val sheetMax = maxHeight / 2
         Column(Modifier.fillMaxSize()) {
-            ScreenHeader(title, onBack = onBack, subtitle = subtitle, subtitleMaxLines = 1, primary = primary, menu = menu)
+            ScreenHeader(title, onBack = back, subtitle = subtitle, subtitleMaxLines = 1, primary = primary, menu = menu)
             InkToolbar(state.tool, state::selectTool, state.layer, Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
             if (state.layer.hasSelection) {
                 SelectionBar(state.layer, state.notebook.language, Modifier.padding(horizontal = 8.dp, vertical = 2.dp))

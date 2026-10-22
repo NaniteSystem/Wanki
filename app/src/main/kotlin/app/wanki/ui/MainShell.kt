@@ -227,7 +227,7 @@ private fun Content(nav: Navigator) {
         Route.Notebooks -> NotebooksScreen(onOpen = { id, page -> nav.open(Route.Notebook(id, page)) })
         is Route.Notebook -> NotebookScreen(r.id, r.pageId, onBack = { nav.back() })
         Route.Notes -> NotesScreen(onOpen = { nav.open(Route.Note(it)) })
-        is Route.Note -> NoteEditorScreen(r.id, onBack = { nav.back() })
+        is Route.Note -> NoteEditorScreen(r.id, onBack = { nav.back() }, onCreated = { nav.replaceTop(Route.Note(it)) })
         Route.Diary -> DiaryScreen(onOpenDay = { nav.open(Route.DiaryDay(it)) })
         is Route.DiaryDay -> DiaryDayScreen(r.epochDay, onBack = { nav.back() })
         Route.Boards -> BoardsScreen(onOpen = { nav.open(Route.Board(it)) })
