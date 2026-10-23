@@ -11,8 +11,9 @@ Plan and decisions: `docs/PLAN.md` (Russian). The user writes in Russian.
 - `core/texts` (JVM) — texts learned by heart: `PieceSplitter` (verse lines / prose sentences), `Words`,
   `VanishingCues`, `FirstLetters`, `Chain`, `TextRating` (recital → FSRS rating), `Portions`, `FsrsTextPlan`,
   `HifzPlan` (sabaq/sabqi/manzil), `ScheduleSwitch`, `WeakPieces`, `TextLoad`; typing practice: `TypingText`
-  (folding for comparison), `TypingMatcher` (incremental alignment of typed text to word units), `PieceWords`
-  (stored per-piece word lists, ja readings), `ReadingMarkup` (`{表記|よみ}`), `JapaneseNumbers`, `WordHistory`, `TypingScore`.
+  (folding for comparison), `TypingMatcher` (incremental alignment of typed text to word units, rows banded to ±512
+  reading chars), `PieceWords` (stored per-piece word lists, ja readings; number + counter tokens merged into one word),
+  `ReadingMarkup` (`{表記|よみ}`), `JapaneseNumbers`, `JapaneseReadings` (frequent words with two readings), `WordHistory`, `TypingScore`.
 - `app` (Android, Compose, Room, androidx.ink, ML Kit Digital Ink / Language ID / Translate).
   Packages: `input` (canvas + touch handling), `data` (Room, `DeckTree` limits, `CardQuery` search,
   `Backup`), `recognition` (ML Kit, TTS `Speaker`), `review`, `practice` (weak-character queue and
