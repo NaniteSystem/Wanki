@@ -72,6 +72,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun NotebooksScreen(
     onOpen: (notebookId: String, pageId: String?) -> Unit,
+    onOpenHit: (PageSearchHit) -> Unit,
 ) {
     val graph = LocalContext.current.graph
     val notebooks by remember { graph.repository.observeNotebooks(NotebookKind.NOTEBOOK) }.collectAsState(null)
@@ -88,7 +89,7 @@ fun NotebooksScreen(
     var hits by remember { mutableStateOf<List<PageSearchHit>>(emptyList()) }
     LaunchedEffect(query) {
         delay(250)
-        hits = ui { graph.repository.searchPages(query) }
+        hits = ui { graph.repository.searchPages(query, NotebookKind.NOTEBOOK) }
     }
 
     Box(Modifier.fillMaxSize()) {
@@ -106,7 +107,7 @@ fun NotebooksScreen(
                 LazyColumn(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (hits.isEmpty()) item { Text("Ничего не найдено", color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     items(hits, key = { it.pageId }) { h ->
-                        Card(Modifier.fillMaxWidth().clickable { onOpen(h.notebookId, h.pageId) }) {
+                        Card(Modifier.fillMaxWidth().clickable { onOpenHit(h) }) {
                             Column(Modifier.padding(12.dp)) {
                                 Text("${h.notebookTitle} · стр. ${h.pageIndex + 1}", style = MaterialTheme.typography.labelLarge)
                                 Text(snippet(h.recognizedText, query), maxLines = 3)

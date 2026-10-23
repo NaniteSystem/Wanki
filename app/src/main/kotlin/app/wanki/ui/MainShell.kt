@@ -1,6 +1,8 @@
 package app.wanki.ui
 
 import androidx.activity.compose.BackHandler
+import app.wanki.data.NotebookKind
+import app.wanki.data.PageSearchHit
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -121,6 +123,18 @@ class Navigator(initial: List<Route> = listOf(Route.Decks)) {
     fun switchTab(route: Route) { stack.clear(); stack.add(route) }
     /** Swaps the screen on top for [route], e.g. a new note once it has an id. */
     fun replaceTop(route: Route) { stack[stack.lastIndex] = route }
+
+    /** Opens the screen a search hit lives on: a diary day, a board or a notebook page. */
+    fun openSearchHit(hit: PageSearchHit) {
+        val day = hit.date
+        open(
+            when {
+                hit.kind == NotebookKind.DIARY.name && day != null -> Route.DiaryDay(day)
+                hit.kind == NotebookKind.BOARD.name -> Route.Board(hit.notebookId)
+                else -> Route.Notebook(hit.notebookId, hit.pageId)
+            },
+        )
+    }
 
     companion object {
         /**
@@ -260,7 +274,7 @@ private fun Content(nav: Navigator) {
         Route.Browser -> BrowserScreen(onBack = { nav.back() }, onOpenCard = { nav.open(Route.CardEditor(it)) })
         is Route.CardEditor -> CardEditorScreen(r.id, onBack = { nav.back() }, onPractice = { g, lang -> nav.open(Route.Practice(g, lang)) })
         is Route.Practice -> PracticeScreen(r.glyph, r.language, onBack = { nav.back() })
-        Route.Notebooks -> NotebooksScreen(onOpen = { id, page -> nav.open(Route.Notebook(id, page)) })
+        Route.Notebooks -> NotebooksScreen(onOpen = { id, page -> nav.open(Route.Notebook(id, page)) }, onOpenHit = nav::openSearchHit)
         is Route.Notebook -> NotebookScreen(
             r.id, r.pageId, onBack = { nav.back() },
             // the notebook screen is left while the grid is open: remember the page it shows

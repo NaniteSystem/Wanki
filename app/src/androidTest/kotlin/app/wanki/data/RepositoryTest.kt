@@ -457,6 +457,21 @@ class RepositoryTest {
     }
 
     @Test
+    fun searchFiltersKind() = runBlocking {
+        val nb = inkedNotebook("Т", 1)
+        repo.setRecognizedText(repo.pages(nb.id).single().id, "общее слово")
+        val day = repo.diaryPage(java.time.LocalDate.of(2026, 10, 20))
+        repo.saveInk(day, listOf(stroke()))
+        repo.setRecognizedText(day.id, "общее слово")
+        assertEquals(setOf("NOTEBOOK", "DIARY"), repo.searchPages("общее").map { it.kind }.toSet())
+        val only = repo.searchPages("общее", NotebookKind.NOTEBOOK)
+        assertEquals(listOf(repo.pages(nb.id).single().id), only.map { it.pageId })
+        // trashed notebooks stay out of the search
+        repo.delete(TrashKind.NOTEBOOK, nb.id)
+        assertTrue(repo.searchPages("общее", NotebookKind.NOTEBOOK).isEmpty())
+    }
+
+    @Test
     fun restoreSummaryCountsByKind() = runBlocking {
         inkedNotebook("Т", 2)
         val board = repo.createBoard("Д")

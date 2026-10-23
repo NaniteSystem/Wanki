@@ -472,10 +472,11 @@ interface NotebookDao {
                p.date AS date, i.recognizedText AS recognizedText, n.kind AS kind
         FROM page_ink i JOIN pages p ON p.id = i.pageId JOIN notebooks n ON n.id = p.notebookId
         WHERE p.deleted = 0 AND n.deleted = 0 AND i.recognizedText LIKE '%' || :query || '%'
+          AND (:kind IS NULL OR n.kind = :kind)
         ORDER BY p.updatedAt DESC LIMIT 100
         """,
     )
-    suspend fun search(query: String): List<PageSearchHit>
+    suspend fun search(query: String, kind: String? = null): List<PageSearchHit>
 }
 
 @Dao

@@ -736,7 +736,8 @@ class Repository(private val db: WankiDatabase) {
     suspend fun setRecognizedText(pageId: String, text: String) =
         notebooks.setRecognizedText(pageId, text, System.currentTimeMillis())
 
-    suspend fun searchPages(query: String) = if (query.isBlank()) emptyList() else notebooks.search(query.trim())
+    suspend fun searchPages(query: String, kind: NotebookKind? = null) =
+        if (query.isBlank()) emptyList() else notebooks.search(query.trim(), kind?.name)
 
     // --- text notes --------------------------------------------------------------------------
 
