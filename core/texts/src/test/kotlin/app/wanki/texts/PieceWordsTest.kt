@@ -69,4 +69,44 @@ class PieceWordsTest {
         val w = listOf(PieceWord(0, 1, "a\\e", listOf("\\f", "\\g")))
         assertEquals(w, PieceWords.decode(PieceWords.encode(w)))
     }
+
+    /** Readings as Kuromoji (ipadic) gives them: one per token, numbers split into digits and counters. */
+    private val kuromojiLike = Morphology { t ->
+        val known = listOf("日本" to "ニッポン", "二" to "ニ", "十" to "ジュウ", "三" to "サン", "月" to "ツキ", "に" to "ニ", "へ" to "ヘ", "3" to null)
+        val out = ArrayList<MorphToken>()
+        var i = 0
+        while (i < t.length) {
+            val (s, r) = known.firstOrNull { t.startsWith(it.first, i) } ?: (t[i].toString() to null)
+            out += MorphToken(i, i + s.length, r)
+            i += s.length
+        }
+        out
+    }
+
+    private fun accepts(text: String, vararg typed: String) {
+        val units = build(text, "ja", kuromojiLike).map { it.unit() }
+        for (t in typed) {
+            val r = TypingMatcher(units).update(t)
+            assertTrue(r.finished && r.units.all { it.state == UnitState.OK }, "$t for $text: $r")
+        }
+    }
+
+    @Test fun nihonReadEitherWay() = accepts("日本", "にほん", "にっぽん", "ニホン", "日本")
+
+    @Test fun kanjiNumberIsOneWord() {
+        val w = build("二十三", "ja", kuromojiLike)
+        assertEquals(listOf(PieceWord(0, 3, "にじゅうさん", w[0].forms)), w)
+        accepts("二十三", "23", "二十三", "にじゅうさん")
+    }
+
+    @Test fun numberWithCounterIsOneWord() {
+        assertEquals(1, build("3月", "ja", kuromojiLike).size)
+        accepts("3月", "3月", "三月", "さんがつ")
+        accepts("三月へ", "3月へ", "さんがつへ")
+    }
+
+    @Test fun overrideStillWinsOverNumberMerge() {
+        val w = build("二十三", "ja", kuromojiLike, mapOf("二十三" to ReadingOverride("にじゅうさ")))
+        assertEquals("にじゅうさ", w.single().reading)
+    }
 }

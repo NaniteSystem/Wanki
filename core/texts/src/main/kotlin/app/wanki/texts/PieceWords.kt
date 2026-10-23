@@ -53,21 +53,59 @@ object PieceWords {
     ) {
         if (from >= to) return
         val text = content.substring(from, to)
-        val tokens = morphology?.tokens(text) ?: breaker.words(text).map { MorphToken(it.start, it.end, null) }
-        for (t in tokens) {
-            if (t.start < 0 || t.end > text.length || t.start >= t.end) continue
+        val tokens = (morphology?.tokens(text) ?: breaker.words(text).map { MorphToken(it.start, it.end, null) })
+            .filter { it.start >= 0 && it.end <= text.length && it.start < it.end }
+        var k = 0
+        while (k < tokens.size) {
+            val run = numberRun(text, tokens, k)
+            if (run != null) {
+                val (next, word) = run
+                val start = tokens[k].start
+                val end = tokens[next - 1].end
+                val surface = text.substring(start, end)
+                make(from + start, from + end, surface, word.reading, overrides[surface], true, word.forms)?.let { out += it }
+                k = next
+                continue
+            }
+            val t = tokens[k]
             val surface = text.substring(t.start, t.end)
             make(from + t.start, from + t.end, surface, t.reading, overrides[surface], true)?.let { out += it }
+            k++
         }
     }
 
-    private fun make(start: Int, end: Int, surface: String, tokenReading: String?, override: ReadingOverride?, japanese: Boolean): PieceWord? {
+    /**
+     * Adjacent number tokens from [k] (the analyser splits 二十三 into 二|十|三) and a counter right after them
+     * (3|月) as one word: the index after the run and the word; null when [k] does not start a number.
+     */
+    private fun numberRun(text: String, tokens: List<MorphToken>, k: Int): Pair<Int, NumberWord>? {
+        fun surface(i: Int) = text.substring(tokens[i].start, tokens[i].end)
+        fun adjacent(i: Int) = i < tokens.size && tokens[i].start == tokens[i - 1].end
+        if (!JapaneseNumbers.isNumber(surface(k))) return null
+        var e = k + 1
+        while (adjacent(e) && JapaneseNumbers.isNumber(surface(e))) e++
+        val number = text.substring(tokens[k].start, tokens[e - 1].end)
+        val counter = if (adjacent(e) && JapaneseNumbers.isCounter(surface(e))) surface(e) else ""
+        val word = JapaneseNumbers.word(number, counter) ?: return null
+        return (if (counter.isEmpty()) e else e + 1) to word
+    }
+
+    private fun make(
+        start: Int, end: Int, surface: String, tokenReading: String?, override: ReadingOverride?, japanese: Boolean,
+        extra: List<String> = emptyList(),
+    ): PieceWord? {
         if (surface.codePoints().noneMatch { Character.isLetterOrDigit(it) }) return null
         val reading = override?.reading ?: tokenReading?.takeIf { it.isNotEmpty() }?.let(::hiragana) ?: surface
         val forms = LinkedHashSet<String>()
         if (!sameFold(surface, reading)) forms += surface
         override?.forms?.let { forms += it }
-        if (japanese) forms += JapaneseNumbers.forms(surface)
+        if (japanese) {
+            forms += JapaneseNumbers.forms(surface)
+            if (override == null) {
+                forms += extra
+                forms += JapaneseReadings.alternatives(surface)
+            }
+        }
         return PieceWord(start, end, reading, forms.toList())
     }
 
