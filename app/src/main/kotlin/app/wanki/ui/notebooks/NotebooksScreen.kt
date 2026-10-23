@@ -212,7 +212,8 @@ fun NotebookScreen(notebookId: String, initialPageId: String?, onBack: () -> Uni
     val i = index ?: return
     val page = pages.getOrNull(i) ?: return
     val pageUi = rememberPageUi()
-    val state = remember(page.id, nb.language) { PageEditorState(graph, nb, page, infinite = false, ui = pageUi) }
+    val state = remember(page.id) { PageEditorState(graph, nb, page, infinite = false, ui = pageUi) }
+    androidx.compose.runtime.SideEffect { state.notebook = nb }
     fun addPage() = adder.add(pages.size) { graph.repository.addPage(nb) }
 
     Box(Modifier.fillMaxSize()) {

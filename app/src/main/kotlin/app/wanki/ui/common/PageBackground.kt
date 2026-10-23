@@ -16,7 +16,7 @@ object PageGeometry {
     const val HEIGHT = 1414f
     val BOUNDS = InkRect(0f, 0f, WIDTH, HEIGHT)
 
-    /** Portrait 1000 × 1414, landscape 1414 × 1000. */
+    /** Portrait 1000 × 1414, landscape 1414 × 1000 (A4 and A5 have the same proportions, so page size does not change it). */
     fun size(landscape: Boolean): Size = if (landscape) Size(HEIGHT, WIDTH) else Size(WIDTH, HEIGHT)
 
     fun bounds(landscape: Boolean): InkRect = if (landscape) InkRect(0f, 0f, HEIGHT, WIDTH) else BOUNDS

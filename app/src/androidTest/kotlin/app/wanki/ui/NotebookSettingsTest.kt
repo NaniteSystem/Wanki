@@ -1,12 +1,16 @@
 package app.wanki.ui
 
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipe
+import androidx.compose.ui.geometry.Offset
 import app.wanki.MainActivity
 import app.wanki.data.PageSize
 import app.wanki.data.PageTemplate
@@ -98,5 +102,27 @@ class NotebookSettingsTest {
         rule.onNodeWithTag("paper-landscape").performClick()
         rule.waitUntil(5_000) { runBlocking { repo.pages(nb.id).first().landscape } }
         assertEquals(1, runBlocking { repo.loadInk(first.id) }.size)
+    }
+
+    @Test
+    fun languageChangeKeepsFreshInk() {
+        val title = "Ink $stamp"
+        val nb = runBlocking { repo.createNotebook(title, PageTemplate.BLANK, "auto") }
+        openNotebook(title)
+        rule.onNodeWithTag("page-canvas").performTouchInput { swipe(Offset(width * 0.2f, height * 0.3f), Offset(width * 0.8f, height * 0.6f), 300) }
+        openSettings()
+        pick("settings-lang-ja")
+        rule.onNodeWithTag("settings-save").performClick()
+        rule.waitUntil(5_000) { runBlocking { repo.notebook(nb.id)!!.language == "ja" } }
+        rule.waitForIdle()
+        Thread.sleep(1500)
+        // the same editor state stays (undo history survives): it is not reloaded from the database
+        rule.onNodeWithTag("undo").assertIsEnabled()
+        val page = runBlocking { repo.pages(nb.id).first() }
+        assertEquals(1, runBlocking { repo.loadInk(page.id) }.size)
+        // the editor still shows the stroke after the language change: leaving and reopening keeps it
+        rule.onNodeWithTag("back").performClick()
+        openNotebook(title)
+        assertEquals(1, runBlocking { repo.loadInk(page.id) }.size)
     }
 }

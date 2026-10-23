@@ -90,11 +90,13 @@ fun rememberPageUi(): PageUiState = androidx.compose.runtime.saveable.rememberSa
  */
 class PageEditorState(
     private val graph: AppGraph,
-    val notebook: NotebookEntity,
+    notebook: NotebookEntity,
     page: PageEntity,
     val infinite: Boolean,
     val ui: PageUiState = PageUiState(),
 ) {
+    /** Current notebook settings; replaced when they change, so the state (and unsaved ink) stays. */
+    var notebook by mutableStateOf(notebook)
     var page by mutableStateOf(page)
         private set
     val layer = InkLayer()
