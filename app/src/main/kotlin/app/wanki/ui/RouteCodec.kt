@@ -23,6 +23,7 @@ object RouteCodec {
         is Route.Practice -> name("Practice", opt(route.glyph), str(route.language))
         Route.Notebooks -> name("Notebooks")
         is Route.Notebook -> name("Notebook", str(route.id), opt(route.pageId))
+        is Route.PageGrid -> name("PageGrid", str(route.notebookId))
         Route.Notes -> name("Notes")
         is Route.Note -> name("Note", opt(route.id))
         Route.Diary -> name("Diary")
@@ -56,6 +57,7 @@ object RouteCodec {
             "Practice" -> Route.Practice(unOpt(f[0]), unStr(f[1]))
             "Notebooks" -> Route.Notebooks
             "Notebook" -> Route.Notebook(unStr(f[0]), unOpt(f[1]))
+            "PageGrid" -> Route.PageGrid(unStr(f[0]))
             "Notes" -> Route.Notes
             "Note" -> Route.Note(unOpt(f[0]))
             "Diary" -> Route.Diary

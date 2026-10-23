@@ -53,6 +53,7 @@ import app.wanki.ui.diary.DiaryDayScreen
 import app.wanki.ui.diary.DiaryScreen
 import app.wanki.ui.notebooks.NotebookScreen
 import app.wanki.ui.notebooks.NotebooksScreen
+import app.wanki.ui.notebooks.PageGridScreen
 import app.wanki.ui.notes.NoteEditorScreen
 import app.wanki.ui.notes.NotesScreen
 import app.wanki.ui.review.ReviewScreen
@@ -78,6 +79,7 @@ sealed interface Route {
     data class Practice(val glyph: String? = null, val language: String = "ja") : Route
     data object Notebooks : Route
     data class Notebook(val id: String, val pageId: String? = null) : Route
+    data class PageGrid(val notebookId: String) : Route
     data object Notes : Route
     data class Note(val id: String?) : Route
     data object Diary : Route
@@ -159,7 +161,7 @@ fun MainShell() {
         val wide = maxWidth >= 600.dp
         // Screens pushed on top of a tab (review, a page) take the whole screen; tab roots keep the bar.
         val immersive = nav.stack.size > 1 &&
-            (nav.current is Route.Review || nav.current is Route.Practice || nav.current is Route.Notebook ||
+            (nav.current is Route.Review || nav.current is Route.Practice || nav.current is Route.Notebook || nav.current is Route.PageGrid ||
                 nav.current is Route.DiaryDay || nav.current is Route.Board || nav.current is Route.Note || nav.current is Route.TextEditor ||
                 nav.current is Route.TextStudy)
         if (wide) {
@@ -257,7 +259,15 @@ private fun Content(nav: Navigator) {
         is Route.CardEditor -> CardEditorScreen(r.id, onBack = { nav.back() }, onPractice = { g, lang -> nav.open(Route.Practice(g, lang)) })
         is Route.Practice -> PracticeScreen(r.glyph, r.language, onBack = { nav.back() })
         Route.Notebooks -> NotebooksScreen(onOpen = { id, page -> nav.open(Route.Notebook(id, page)) })
-        is Route.Notebook -> NotebookScreen(r.id, r.pageId, onBack = { nav.back() })
+        is Route.Notebook -> NotebookScreen(
+            r.id, r.pageId, onBack = { nav.back() },
+            // the notebook screen is left while the grid is open: remember the page it shows
+            onGrid = { page -> nav.replaceTop(Route.Notebook(r.id, page)); nav.open(Route.PageGrid(r.id)) },
+        )
+        is Route.PageGrid -> PageGridScreen(
+            r.notebookId, onBack = { nav.back() },
+            onOpen = { page -> nav.back(); nav.replaceTop(Route.Notebook(r.notebookId, page)) },
+        )
         Route.Notes -> NotesScreen(onOpen = { nav.open(Route.Note(it)) })
         is Route.Note -> NoteEditorScreen(r.id, onBack = { nav.back() }, onCreated = { nav.replaceTop(Route.Note(it)) })
         Route.Diary -> DiaryScreen(onOpenDay = { nav.open(Route.DiaryDay(it)) })

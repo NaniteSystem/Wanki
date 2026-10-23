@@ -188,7 +188,7 @@ private fun snippet(text: String, query: String): String {
 
 /** A notebook: one page at a time with page navigation. */
 @Composable
-fun NotebookScreen(notebookId: String, initialPageId: String?, onBack: () -> Unit) {
+fun NotebookScreen(notebookId: String, initialPageId: String?, onBack: () -> Unit, onGrid: (currentPageId: String) -> Unit) {
     val graph = LocalContext.current.graph
     var settingsRev by remember { mutableStateOf(0) }
     var showSettings by remember { mutableStateOf(false) }
@@ -221,6 +221,7 @@ fun NotebookScreen(notebookId: String, initialPageId: String?, onBack: () -> Uni
             state, nb.title, onBack, Modifier.fillMaxSize(),
             subtitle = "стр. ${i + 1} из ${pages.size}",
             primary = listOf(
+                HeaderAction(R.drawable.ic_grid_view, "Все страницы", "pages-grid") { onGrid(page.id) },
                 HeaderAction(R.drawable.ic_add, "Добавить страницу", "add-page", enabled = adder.pendingIndex == null) { addPage() },
                 state.textAction(),
             ),
