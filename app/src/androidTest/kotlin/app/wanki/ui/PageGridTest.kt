@@ -43,14 +43,15 @@ class PageGridTest {
         return nb.id
     }
 
-    private fun openGrid(name: String) {
+    private fun openGrid(name: String, pages: Int) {
         rule.waitUntilAtLeastOneExists(hasTestTag("tab-Тетради"), 15_000)
         rule.onNodeWithTag("tab-Тетради").performClick()
         rule.waitUntilAtLeastOneExists(hasText("$name $stamp"), 10_000)
         rule.onNode(hasText("$name $stamp")).performClick()
         rule.waitUntilAtLeastOneExists(hasTestTag("pages-grid"), 10_000)
         rule.onNodeWithTag("pages-grid").performClick()
-        rule.waitUntilAtLeastOneExists(hasTestTag("page-thumb-0"), 10_000)
+        // the grid is filled from the pages flow: wait for the last cell, not just the first
+        rule.waitUntilAtLeastOneExists(hasTestTag("page-thumb-${pages - 1}"), 10_000)
     }
 
     private fun menuOn(index: Int, item: String) {
@@ -63,7 +64,7 @@ class PageGridTest {
     @Test
     fun openPageFromGrid() {
         notebook("Open", 3)
-        openGrid("Open")
+        openGrid("Open", 3)
         rule.onNodeWithTag("page-thumb-2").performClick()
         rule.waitUntilAtLeastOneExists(hasText("стр. 3 из 3"), 10_000)
     }
@@ -72,7 +73,7 @@ class PageGridTest {
     fun insertBeforeAndAfter() {
         val nb = notebook("Ins", 2)
         val (a, b) = ids(nb)
-        openGrid("Ins")
+        openGrid("Ins", 2)
         menuOn(0, "insert-before")
         rule.onNodeWithTag("item-insert-before").performClick()
         rule.waitUntil(10_000) { ids(nb).size == 3 }
@@ -92,7 +93,7 @@ class PageGridTest {
     fun duplicatePage() {
         val nb = notebook("Dup", 2)
         val (a, _) = ids(nb)
-        openGrid("Dup")
+        openGrid("Dup", 2)
         menuOn(0, "duplicate")
         rule.onNodeWithTag("item-duplicate").performClick()
         rule.waitUntil(10_000) { ids(nb).size == 3 }
@@ -105,7 +106,7 @@ class PageGridTest {
     fun deletePageWithUndo() {
         val nb = notebook("Del", 2)
         val (a, b) = ids(nb)
-        openGrid("Del")
+        openGrid("Del", 2)
         menuOn(0, "delete")
         rule.onNodeWithTag("item-delete").performClick()
         rule.waitUntilAtLeastOneExists(hasText("Удалено"), 10_000)
@@ -118,7 +119,7 @@ class PageGridTest {
     @Test
     fun lastPageCannotBeDeleted() {
         val nb = notebook("Last", 1)
-        openGrid("Last")
+        openGrid("Last", 1)
         menuOn(0, "delete")
         rule.onNodeWithTag("item-delete").assertIsNotEnabled()
         assertEquals(1, ids(nb).size)
@@ -128,7 +129,7 @@ class PageGridTest {
     fun dragReorderPersists() {
         val nb = notebook("Drag", 3)
         val (a, b, c) = ids(nb)
-        openGrid("Drag")
+        openGrid("Drag", 3)
         val target = rule.onNodeWithTag("page-thumb-2").fetchSemanticsNode().boundsInRoot.center
         // the item moves with the finger: carry its centre onto the centre of the target cell
         val start = rule.onNodeWithTag("page-thumb-0").fetchSemanticsNode().boundsInRoot.center

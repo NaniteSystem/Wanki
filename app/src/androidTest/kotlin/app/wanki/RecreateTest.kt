@@ -71,6 +71,8 @@ class RecreateTest {
         rule.waitUntilAtLeastOneExists(hasText(title), 10_000)
         rule.onNode(hasText(title)).performClick()
         rule.waitUntilAtLeastOneExists(hasText("стр. 1 из 2"), 10_000)
+        // «Текст» lives in the notebook header's overflow menu
+        rule.onNode(hasTestTag("menu")).performClick()
         rule.onNode(hasTestTag("show-text")).performClick()
         rule.waitUntilAtLeastOneExists(hasText("Распознанный текст"), 10_000)
         rule.onNode(hasTestTag("page-next")).performClick()

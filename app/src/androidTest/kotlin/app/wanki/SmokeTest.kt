@@ -245,6 +245,8 @@ class SmokeTest {
         rule.waitForIdle()
         shot("07b-text-dialog")
         rule.onNode(hasText("Закрыть")).performClick()
+        // «Текст» lives in the notebook header's overflow menu
+        rule.onNode(hasTestTag("menu")).performClick()
         rule.onNode(hasTestTag("show-text")).performClick()
         shot("07c-notebook-text")
         // a second page, back to the first, and the pen popup
