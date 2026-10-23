@@ -1,6 +1,8 @@
 package app.wanki.ui.notebooks
 
 import android.util.Log
+import app.wanki.ui.common.LocalUndo
+import app.wanki.ui.common.listAction
 import app.wanki.ui.common.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -236,6 +238,7 @@ fun PageEditor(
     val context = LocalContext.current
     val graph = context.graph
     var translateAll by remember { mutableStateOf(false) }
+    val undo = LocalUndo.current
 
     LaunchedEffect(state) { ui { state.load() } }
     // version only changes when a gesture ends: save each one; recognize after a pause
@@ -308,7 +311,7 @@ fun PageEditor(
                 Column(Modifier.verticalScroll(rememberScrollState())) {
                     FilterChip(
                         state.page.landscape,
-                        { graph.appScope.launch { state.setLandscape(!state.page.landscape) } },
+                        { graph.appScope.listAction(undo, "Не удалось повернуть страницу") { state.setLandscape(!state.page.landscape) } },
                         { Text("Альбомная страница") },
                         modifier = Modifier.heightIn(min = 48.dp).testTag("paper-landscape"),
                     )
@@ -316,7 +319,7 @@ fun PageEditor(
                         TextButton(
                             onClick = {
                                 state.showPaper = false
-                                graph.appScope.launch { state.setTemplate(t) }
+                                graph.appScope.listAction(undo, "Не удалось сменить бумагу") { state.setTemplate(t) }
                             },
                             modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
                         ) {

@@ -414,6 +414,9 @@ interface NotebookDao {
     @Query("SELECT * FROM pages WHERE notebookId = :notebookId AND date = :epochDay AND deleted = 0 LIMIT 1")
     suspend fun pageForDate(notebookId: String, epochDay: Long): PageEntity?
 
+    @Query("SELECT * FROM pages WHERE notebookId = :notebookId AND date = :epochDay AND deleted = 0 LIMIT 1")
+    fun observePageForDate(notebookId: String, epochDay: Long): Flow<PageEntity?>
+
     /** Days whose page holds ink (saveInk drops the ink row of an emptied page). */
     @Query(
         """

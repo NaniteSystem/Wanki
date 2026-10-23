@@ -179,6 +179,7 @@ class BlockState(
 fun NoteEditorScreen(id: String?, onBack: () -> Unit, onCreated: (String) -> Unit = {}) {
     val context = LocalContext.current
     val graph = context.graph
+    val undo = LocalUndo.current
     var note by remember { mutableStateOf<TextNoteEntity?>(null) }
     // the note is in the database: from then on an emptied note is saved empty, not skipped
     var stored by remember { mutableStateOf(false) }
@@ -256,7 +257,7 @@ fun NoteEditorScreen(id: String?, onBack: () -> Unit, onCreated: (String) -> Uni
                     HeaderAction(R.drawable.ic_delete, "Удалить", "menu-delete") {
                         note = null
                         // a save still running must not bring the note back after it is deleted
-                        graph.appScope.launch { saver.flush(); graph.repository.delete(TrashKind.NOTE, id) }
+                        graph.appScope.launch { saver.flush(); undo.deleted(TrashKind.NOTE, id) }
                         onBack()
                     },
                 ),

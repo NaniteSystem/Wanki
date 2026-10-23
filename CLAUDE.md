@@ -59,7 +59,7 @@ classpath (see build.gradle.kts) so AGP and KGP share a classloader.
 - Navigation state is saveable (`RouteCodec`); MainActivity handles configuration changes itself.
 - Ink saves after every finished gesture through `SerialSaver`; errors are shown, never swallowed.
 - Trash: deleting a notebook, board, note, page or diary day only sets `deleted` + `deletedAt`; items stay 30 days
-  (`Repository.trash/restore`), `purgeExpired` removes the rest for good once a day (`trashPurgedDay`). Lists sort by
+  (`Repository.delete(kind, id)` trashes, `trash()` lists the trash, `restore` brings an item back, `purge` removes it), `purgeExpired` removes the rest for good once a day (`trashPurgedDay`). Lists sort by
   modified/title/created with pinned first (choice remembered per list); page order is rewritten in one transaction
   (`movePage`). Every delete shows the shell snackbar through `LocalUndo`.
 - Icons are Material Symbols vector drawables in res/drawable.

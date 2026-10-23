@@ -21,10 +21,10 @@ import kotlinx.coroutines.flow.combine
 import java.time.LocalDate
 import java.time.ZoneId
 
-/** All persistence used by the screens. */
 /** Restoring a diary day is refused: that date has been written to since. */
 class DayTakenException : IllegalStateException("day taken")
 
+/** All persistence used by the screens. */
 class Repository(private val db: WankiDatabase) {
     private val decks = db.decks()
     private val cards = db.cards()
@@ -429,14 +429,25 @@ class Repository(private val db: WankiDatabase) {
 
     // pages are updated column by column: the editor's copy of a page may be stale
     suspend fun setPageTemplate(page: PageEntity, template: PageTemplate) = db.withTransaction {
-        notebooks.insertPageIfMissing(page)
+        insertPageIfMissing(page)
         notebooks.setPageTemplate(page.id, template.name, System.currentTimeMillis())
     }
 
     /** Turns one page; its strokes stay where they are (world coordinates). */
     suspend fun setPageLandscape(page: PageEntity, landscape: Boolean) = db.withTransaction {
-        notebooks.insertPageIfMissing(page)
+        insertPageIfMissing(page)
         notebooks.setPageLandscape(page.id, landscape, System.currentTimeMillis())
+    }
+
+    /**
+     * Stores the editor's page if its row is missing. A diary page removed by a restore of its day is not
+     * brought back as a second page for that date: [DayTakenException].
+     */
+    private suspend fun insertPageIfMissing(page: PageEntity) {
+        if (page.date != null && notebooks.page(page.id) == null && notebooks.pageForDate(page.notebookId, page.date) != null) {
+            throw DayTakenException()
+        }
+        notebooks.insertPageIfMissing(page)
     }
 
     /** Remembers a page's zoom and pan (does not count as an edit). */
@@ -671,6 +682,9 @@ class Repository(private val db: WankiDatabase) {
 
     suspend fun diary(): NotebookEntity = singlePageNotebook(NotebookKind.DIARY, "Дневник", PageTemplate.LINED).first
 
+    /** The live page of a diary day, following deletes and restores. */
+    fun observeDiaryPage(diaryId: String, day: LocalDate): Flow<PageEntity?> = notebooks.observePageForDate(diaryId, day.toEpochDay())
+
     suspend fun diaryPage(day: LocalDate): PageEntity {
         val diary = diary()
         val epochDay = day.toEpochDay()
@@ -713,6 +727,7 @@ class Repository(private val db: WankiDatabase) {
         val old = notebooks.ink(page.id)
         val now = System.currentTimeMillis()
         db.withTransaction {
+            insertPageIfMissing(page)
             if (strokes.isEmpty()) {
                 // an emptied page keeps no ink row, so the diary stops marking its day
                 notebooks.deleteInk(page.id)
@@ -727,7 +742,6 @@ class Repository(private val db: WankiDatabase) {
                     ),
                 )
             }
-            notebooks.insertPageIfMissing(page)
             notebooks.touchPage(page.id, now)
             notebooks.touch(page.notebookId, now)
         }

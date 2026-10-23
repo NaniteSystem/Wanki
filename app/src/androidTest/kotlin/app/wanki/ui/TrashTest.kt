@@ -162,4 +162,49 @@ class TrashTest {
         rule.onNodeWithText("Отменить").performClick()
         rule.waitUntil(10_000) { marked() }
     }
+
+    private fun openDay(day: LocalDate) {
+        rule.waitUntilAtLeastOneExists(hasTestTag("diary-day-${day.toEpochDay()}"), 10_000)
+        rule.onNodeWithTag("diary-day-${day.toEpochDay()}").performClick()
+        rule.waitUntilAtLeastOneExists(hasTestTag("menu"), 10_000)
+    }
+
+    private fun deleteDayFromMenu(day: LocalDate) {
+        rule.waitUntilAtLeastOneExists(hasTestTag("tab-Дневник"), 15_000)
+        rule.onNodeWithTag("tab-Дневник").performClick()
+        openDay(day)
+        rule.onNodeWithTag("menu").performClick()
+        rule.onNodeWithTag("menu-delete-day").performClick()
+        rule.waitUntilAtLeastOneExists(hasText("Удалено"), 10_000)
+    }
+
+    /** Undo pressed while the same day is open again: the editor moves to the restored page, no second page for the date. */
+    @Test
+    fun diaryUndoOverReopenedDayShowsRestoredPage() {
+        val day = LocalDate.now()
+        val diary = runBlocking { repo.diary() }
+        val page = runBlocking {
+            repo.diaryPage(day).also { repo.saveInk(it, listOf(stroke())); repo.setRecognizedText(it.id, "запись $stamp") }
+        }
+        deleteDayFromMenu(day)
+        openDay(day)
+        rule.onNodeWithText("Отменить").performClick()
+        rule.waitUntil(10_000) { runBlocking { graph.db.notebooks().pageForDate(diary.id, day.toEpochDay())?.id == page.id } }
+        rule.onNodeWithTag("menu").performClick()
+        rule.onNodeWithTag("show-text").performClick()
+        rule.waitUntilAtLeastOneExists(hasText("запись $stamp"), 10_000)
+        assertFalse(inTrash(page.id))
+    }
+
+    /** Undo after the day was written again is refused with a message, the old entry stays in the trash. */
+    @Test
+    fun diaryUndoOnTakenDayShowsMessage() {
+        val day = LocalDate.now()
+        val page = runBlocking { repo.diaryPage(day).also { repo.saveInk(it, listOf(stroke())) } }
+        deleteDayFromMenu(day)
+        runBlocking { repo.diaryPage(day).also { assertTrue(it.id != page.id); repo.saveInk(it, listOf(stroke(), stroke())) } }
+        rule.onNodeWithText("Отменить").performClick()
+        rule.waitUntilAtLeastOneExists(hasText("Этот день уже записан"), 10_000)
+        assertTrue(inTrash(page.id))
+    }
 }

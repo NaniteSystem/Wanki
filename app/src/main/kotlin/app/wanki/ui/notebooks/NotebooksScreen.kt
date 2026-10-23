@@ -54,6 +54,7 @@ import app.wanki.ui.common.FirstPageThumbnail
 import app.wanki.ui.common.ListActions
 import app.wanki.ui.common.ListCard
 import app.wanki.ui.common.LocalUndo
+import app.wanki.ui.common.listAction
 import app.wanki.ui.common.RenameDialog
 import app.wanki.ui.common.itemMenu
 import app.wanki.ui.common.sortMenu
@@ -166,7 +167,7 @@ fun NotebooksScreen(
     if (creating) {
         NotebookSettingsDialog(null, onDismiss = { creating = false }) { title, lang, template, size, landscape ->
             creating = false
-            graph.appScope.launch {
+            graph.appScope.listAction(undo, "Не удалось создать тетрадь") {
                 val n = graph.repository.createNotebook(title, template, lang, size, landscape)
                 onOpen(n.id, null)
             }
@@ -175,7 +176,9 @@ fun NotebooksScreen(
     settingsFor?.let { nb ->
         NotebookSettingsDialog(nb, onDismiss = { settingsFor = null }) { title, lang, template, size, landscape ->
             settingsFor = null
-            graph.appScope.launch { graph.repository.setNotebookSettings(nb.id, title, lang, template, size, landscape) }
+            graph.appScope.listAction(undo, "Не удалось сохранить настройки") {
+                graph.repository.setNotebookSettings(nb.id, title, lang, template, size, landscape)
+            }
         }
     }
 }
@@ -191,6 +194,7 @@ private fun snippet(text: String, query: String): String {
 @Composable
 fun NotebookScreen(notebookId: String, initialPageId: String?, onBack: () -> Unit, onGrid: (currentPageId: String) -> Unit) {
     val graph = LocalContext.current.graph
+    val undo = LocalUndo.current
     var settingsRev by remember { mutableStateOf(0) }
     var showSettings by remember { mutableStateOf(false) }
     val notebook by produceState<NotebookEntity?>(null, notebookId, settingsRev) { value = ui { graph.repository.notebook(notebookId) } }
@@ -234,7 +238,7 @@ fun NotebookScreen(notebookId: String, initialPageId: String?, onBack: () -> Uni
         )
         if (showSettings) NotebookSettingsDialog(nb, onDismiss = { showSettings = false }) { title, lang, template, size, landscape ->
             showSettings = false
-            graph.appScope.launch {
+            graph.appScope.listAction(undo, "Не удалось сохранить настройки") {
                 graph.repository.setNotebookSettings(nb.id, title, lang, template, size, landscape)
                 ui { settingsRev++ }
             }

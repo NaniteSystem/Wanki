@@ -13,6 +13,7 @@ import app.wanki.data.NoteBlockType
 import app.wanki.data.TextNoteEntity
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 
@@ -72,5 +73,27 @@ class NoteEditorTest {
 
         rule.waitUntilAtLeastOneExists(hasText("первая строка") and hasSetTextAction(), 10_000)
         rule.onNode(hasText(title) and hasSetTextAction()).assertExists()
+    }
+
+    /** Deleting from the editor's menu offers «Отменить» on the notes list, and undo brings the note back. */
+    @Test
+    fun deleteFromEditorOffersUndo() {
+        val title = "Del ${System.currentTimeMillis()}"
+        val note = TextNoteEntity(title = title, body = "")
+        runBlocking {
+            repo.saveNoteWithBlocks(note, listOf(NoteBlockEntity(noteId = note.id, blockIndex = 0, type = NoteBlockType.TEXT.name, text = "текст")))
+        }
+        rule.waitUntilAtLeastOneExists(hasTestTag("tab-Заметки"), 15_000)
+        rule.onNode(hasTestTag("tab-Заметки")).performClick()
+        rule.waitUntilAtLeastOneExists(hasText(title), 10_000)
+        rule.onNode(hasText(title)).performClick()
+        rule.waitUntilAtLeastOneExists(hasText("текст") and hasSetTextAction(), 10_000)
+        rule.onNode(hasTestTag("menu")).performClick()
+        rule.onNode(hasTestTag("menu-delete")).performClick()
+        rule.waitUntilAtLeastOneExists(hasText("Отменить"), 10_000)
+        assertTrue(runBlocking { repo.textNote(note.id) }?.deleted == true)
+        rule.onNode(hasText("Отменить")).performClick()
+        rule.waitUntil(10_000) { runBlocking { repo.textNote(note.id) }?.deleted == false }
+        rule.waitUntilAtLeastOneExists(hasText(title), 10_000)
     }
 }

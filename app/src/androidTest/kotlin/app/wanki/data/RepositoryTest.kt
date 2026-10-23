@@ -11,6 +11,7 @@ import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -530,6 +531,22 @@ class RepositoryTest {
         assertTrue(e is DayTakenException)
         assertEquals(fresh.id, repo.diaryPage(day).id)
         assertEquals(listOf(TrashKind.DIARY_DAY), repo.trash().map { it.kind })
+    }
+
+    /** Undo while the day was reopened: the editor's empty page was removed, its late save must not bring it back. */
+    @Test
+    fun saveOnRemovedDayPageDoesNotDuplicateTheDate() = runBlocking {
+        val day = java.time.LocalDate.of(2026, 10, 21)
+        val old = repo.diaryPage(day)
+        repo.saveInk(old, listOf(stroke()))
+        repo.delete(TrashKind.DIARY_DAY, old.id)
+        val fresh = repo.diaryPage(day)   // reopened, nothing written yet
+        repo.restore(TrashKind.DIARY_DAY, old.id)   // removes the empty fresh page
+        assertTrue(runCatching { repo.saveInk(fresh, listOf(stroke(), stroke())) }.exceptionOrNull() is DayTakenException)
+        assertTrue(runCatching { repo.setPageTemplate(fresh, PageTemplate.GRID) }.exceptionOrNull() is DayTakenException)
+        assertNull(db.notebooks().page(fresh.id))
+        assertEquals(old.id, repo.diaryPage(day).id)
+        assertEquals(1, repo.loadInk(old.id).size)
     }
 
     @Test

@@ -21,6 +21,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
@@ -141,10 +142,21 @@ fun DiaryScreen(onOpenDay: (Long) -> Unit) {
 fun DiaryDayScreen(epochDay: Long, onBack: () -> Unit) {
     val graph = LocalContext.current.graph
     val date = LocalDate.ofEpochDay(epochDay)
-    val loaded by produceState<Pair<app.wanki.data.NotebookEntity, app.wanki.data.PageEntity>?>(null, epochDay) {
-        value = ui { graph.repository.diary() to graph.repository.diaryPage(date) }
+    val loadedDiary by produceState<app.wanki.data.NotebookEntity?>(null) { value = ui { graph.repository.diary() } }
+    // the day's page is followed, not loaded once: undoing a delete while the day is open again switches to the restored page
+    var dayPage by remember(epochDay) { mutableStateOf<app.wanki.data.PageEntity?>(null) }
+    LaunchedEffect(loadedDiary?.id, epochDay) {
+        val d = loadedDiary ?: return@LaunchedEffect
+        graph.repository.observeDiaryPage(d.id, date).collect { p ->
+            when {
+                p != null -> if (p.id != dayPage?.id) dayPage = p
+                // the day gets its row when opened; a page that went away later was deleted from this screen
+                dayPage == null -> dayPage = ui { graph.repository.diaryPage(date) }
+            }
+        }
     }
-    val (diary, page) = loaded ?: return
+    val diary = loadedDiary ?: return
+    val page = dayPage ?: return
     val pageUi = rememberPageUi()
     val undo = LocalUndo.current
     val state = remember(page.id) { PageEditorState(graph, diary, page, infinite = false, ui = pageUi) }
