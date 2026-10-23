@@ -217,6 +217,28 @@ class TypingSessionTest {
         assertFalse(s.ended)
     }
 
+    /** While the keyboard composes a word, the matcher only runs when the composition could finish the text. */
+    @Test fun compositionDoesNotRerunTheMatcher() {
+        val s = session(SampleLevel.MEMORY)
+        fun compose(committed: String, word: String) {
+            val text = committed + word
+            s.onValue(TextFieldValue(text, TextRange(text.length), composition = TextRange(committed.length, text.length)))
+        }
+        compose("", "")
+        s.type("Мороз и ")
+        val base = s.matcherUpdates
+        for (i in 1.."солнце".length) compose("Мороз и ", "солнце".take(i))
+        assertEquals(base, s.matcherUpdates, "no matcher run per composed key")
+        s.type("Мороз и солнце день ")
+        val committed = s.matcherUpdates
+        for (i in 1 until "чудесный".length) compose("Мороз и солнце день ", "чудесный".take(i))
+        assertEquals(committed, s.matcherUpdates, "too short to reach the end yet")
+        assertFalse(s.ended)
+        compose("Мороз и солнце день ", "чудесный")
+        assertTrue(s.ended)
+        assertEquals(WordOutcome.CORRECT, s.finish().words[WordKey("p2", 1)])
+    }
+
     @Test fun romajiTailDoesNotFinish() {
         val p = TextPieceEntity(id = "j", textId = "t", pieceIndex = 0, content = "すべてない")
         fun ja() = TypingSession(listOf(p), mapOf("j" to listOf(PieceWord(0, 3, "すべて", emptyList()), PieceWord(3, 5, "ない", emptyList()))), emptyMap(), SampleLevel.MEMORY)

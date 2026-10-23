@@ -69,7 +69,16 @@ class TypingSession(
         for (k in keys.indices) c[k + 1] = c[k] + TypingText.fold(word(keys[k]).reading).chars.size
     }
 
-    var result: TypingResult by mutableStateOf(matcher.update(""))
+    /** Matcher runs so far (each one is a traceback over the whole text); tests count them. */
+    internal var matcherUpdates = 0
+        private set
+
+    private fun match(typed: String): TypingResult {
+        matcherUpdates++
+        return matcher.update(typed)
+    }
+
+    var result: TypingResult by mutableStateOf(match(""))
         private set
     /** The first unit not judged yet (where the caret is), or [keys].size when everything is judged. */
     var caretUnit by mutableIntStateOf(caretOf(result))
@@ -122,13 +131,15 @@ class TypingSession(
 
     /**
      * The keyboard may hold the last word in its composition until a space: when the composition completes the
-     * text and the last word is right, the run ends as if it were committed; otherwise it waits.
+     * text and the last word is right, the run ends as if it were committed; otherwise it waits. The matcher
+     * only runs once the composition is long enough to reach the end, not on every composed key.
      */
     private fun compositionFinishes(): Boolean {
         if (keys.isEmpty()) return false
-        val peek = matcher.update(typedAll)
+        if (TypingText.fold(composing).chars.size < matcher.minToFinish(result.end)) return false
+        val peek = match(typedAll)
         val done = peek.finished && peek.units.last().state == UnitState.OK
-        if (!done) matcher.update(committed) // back to the committed rows
+        if (!done) match(committed) // back to the committed rows
         return done
     }
 
@@ -138,7 +149,7 @@ class TypingSession(
         if (composing.isNotEmpty()) {
             committed += composing
             composing = ""
-            result = matcher.update(committed)
+            result = match(committed)
             caretUnit = caretOf(result)
             noteCaret()
         }
@@ -155,7 +166,7 @@ class TypingSession(
         val before = caretUnit
         if (c != committed) {
             committed = c
-            result = matcher.update(c)
+            result = match(c)
             caretUnit = caretOf(result)
             if (result.finished) end()
         }
