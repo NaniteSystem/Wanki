@@ -78,6 +78,12 @@ fun PageThumbnail(page: PageEntity, modifier: Modifier = Modifier) {
     }
 }
 
+/** A hairline stroke would vanish at thumbnail scale: keep it at least about a pixel wide in the bitmap. */
+private fun InkStroke.atLeastPixels(scale: Float): InkStroke {
+    val min = 1.2f / scale
+    return if (brush.size >= min) this else copy(brush = brush.copy(size = min))
+}
+
 /** Draws the page with [drawPage] and the strokes with the editor's stroke renderer into a bitmap. */
 internal fun renderThumbnail(template: PageTemplate, landscape: Boolean, strokes: List<InkStroke>): ImageBitmap {
     val page = PageGeometry.size(landscape)
@@ -88,9 +94,13 @@ internal fun renderThumbnail(template: PageTemplate, landscape: Boolean, strokes
         withTransform({ scale(scale, scale, pivot = Offset.Zero) }) { drawPage(template, landscape) }
         if (strokes.isNotEmpty()) {
             val renderer = CanvasStrokeRenderer.create()
-            val matrix = android.graphics.Matrix().apply { setScale(scale, scale) }
+            // the renderer ignores its transform on a bitmap canvas: scale the canvas itself
+            val identity = android.graphics.Matrix()
             drawIntoCanvas { c ->
-                for (s in strokes) StrokeConversion.toInk(s)?.let { renderer.draw(c.nativeCanvas, it, matrix) }
+                c.nativeCanvas.save()
+                c.nativeCanvas.scale(scale, scale)
+                for (s in strokes) StrokeConversion.toInk(s.atLeastPixels(scale))?.let { renderer.draw(c.nativeCanvas, it, identity) }
+                c.nativeCanvas.restore()
             }
         }
     }
@@ -152,9 +162,13 @@ internal fun renderBoardThumbnail(strokes: List<InkStroke>): ImageBitmap {
         withTransform({ scale(scale, scale, pivot = Offset.Zero); translate(-visible.left, -visible.top) }) { drawBoard(visible, scale) }
         if (strokes.isNotEmpty()) {
             val renderer = CanvasStrokeRenderer.create()
-            val matrix = android.graphics.Matrix().apply { setScale(scale, scale); preTranslate(-visible.left, -visible.top) }
+            val identity = android.graphics.Matrix()
             drawIntoCanvas { c ->
-                for (s in strokes) StrokeConversion.toInk(s)?.let { renderer.draw(c.nativeCanvas, it, matrix) }
+                c.nativeCanvas.save()
+                c.nativeCanvas.scale(scale, scale)
+                c.nativeCanvas.translate(-visible.left, -visible.top)
+                for (s in strokes) StrokeConversion.toInk(s.atLeastPixels(scale))?.let { renderer.draw(c.nativeCanvas, it, identity) }
+                c.nativeCanvas.restore()
             }
         }
     }

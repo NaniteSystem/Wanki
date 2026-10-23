@@ -11,6 +11,9 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.down
+import androidx.compose.ui.test.longClick
+import androidx.compose.ui.test.moveBy
+import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isRoot
@@ -25,6 +28,12 @@ import androidx.compose.ui.test.swipe
 import androidx.compose.ui.test.up
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import app.wanki.data.NotebookKind
+import app.wanki.data.TrashKind
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -270,7 +279,60 @@ class SmokeTest {
             inst.sendPointerSync(android.view.MotionEvent.obtain(t, t + i * 50L, act, x, y, 0))
         }
         Thread.sleep(800); rule.waitForIdle(); shot("21b-popup-closed")
+
+        // П2 order: page grid (move page 2 first, delete + undo), pin, delete + restore from the trash
+        val repo = rule.activity.graph.repository
+        val nb = runBlocking { repo.observeNotebooks(NotebookKind.NOTEBOOK).first().maxBy { it.notebook.createdAt }.notebook.id }
+        val (p1, p2) = runBlocking { repo.pages(nb).map { it.id } }
+        rule.onNode(hasTestTag("pages-grid")).performClick()
+        rule.waitUntilAtLeastOneExists(hasTestTag("page-thumb-1"), 10_000)
+        shot("23-page-grid")
+        val first = rule.onNode(hasTestTag("page-thumb-0")).fetchSemanticsNode().boundsInRoot.center
+        val second = rule.onNode(hasTestTag("page-thumb-1")).fetchSemanticsNode().boundsInRoot.center
+        rule.onNode(hasTestTag("page-drag-1")).performTouchInput {
+            down(center)
+            moveBy(Offset(1f, 1f))
+            repeat(12) { moveBy((first - second) / 12f) }
+            moveBy(Offset(-2f, -2f))
+            up()
+        }
+        rule.waitUntil(10_000) { runBlocking { repo.pages(nb).map { it.id } } == listOf(p2, p1) }
+        shot("23b-page-moved")
+        rule.onNode(hasTestTag("page-thumb-0")).performTouchInput { longClick() }
+        rule.waitUntilAtLeastOneExists(hasTestTag("item-delete"), 5_000)
+        rule.onNode(hasTestTag("item-delete")).performClick()
+        rule.waitUntilAtLeastOneExists(hasText("Отменить"), 10_000)
+        assertEquals(listOf(p1), runBlocking { repo.pages(nb).map { it.id } })
+        shot("23c-page-deleted")
+        rule.onNode(hasText("Отменить")).performClick()
+        rule.waitUntil(10_000) { runBlocking { repo.pages(nb).map { it.id } } == listOf(p2, p1) }
         back()
+        back()
+        val card = hasTestTag("notebook-$nb")
+        rule.waitUntilAtLeastOneExists(card, 10_000)
+        rule.onNode(card).performTouchInput { longClick() }
+        rule.waitUntilAtLeastOneExists(hasTestTag("item-pin"), 5_000)
+        rule.onNode(hasTestTag("item-pin")).performClick()
+        rule.waitUntil(10_000) { runBlocking { repo.notebook(nb)!!.pinned } }
+        shot("24-notebook-pinned")
+        rule.onNode(card).performTouchInput { longClick() }
+        rule.waitUntilAtLeastOneExists(hasTestTag("item-delete"), 5_000)
+        rule.onNode(hasTestTag("item-delete")).performClick()
+        rule.waitUntilAtLeastOneExists(hasText("Отменить"), 10_000)
+        assertTrue(runBlocking { repo.notebook(nb)!!.deleted })
+        shot("24b-notebook-deleted")
+        tab("Настройки")
+        rule.onNode(hasTestTag("settings-trash")).performScrollTo().performClick()
+        rule.waitUntilAtLeastOneExists(hasTestTag("trash-restore-$nb"), 10_000)
+        shot("25-trash")
+        rule.onNode(hasTestTag("trash-restore-$nb")).performClick()
+        rule.waitUntil(10_000) { runBlocking { !repo.notebook(nb)!!.deleted } }
+        back()
+        // leave the list as it was: unpin
+        runBlocking { repo.setPinned(TrashKind.NOTEBOOK, nb, false) }
+        tab("Тетради")
+        rule.waitUntilAtLeastOneExists(card, 10_000)
+        shot("25b-notebook-restored")
 
         // Boards: create one, draw on it
         tab("Доски")

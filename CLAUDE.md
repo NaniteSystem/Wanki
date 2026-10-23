@@ -58,6 +58,10 @@ classpath (see build.gradle.kts) so AGP and KGP share a classloader.
 - Writing canvases stay paper-colored (`WritingPaper`) in the dark theme.
 - Navigation state is saveable (`RouteCodec`); MainActivity handles configuration changes itself.
 - Ink saves after every finished gesture through `SerialSaver`; errors are shown, never swallowed.
+- Trash: deleting a notebook, board, note, page or diary day only sets `deleted` + `deletedAt`; items stay 30 days
+  (`Repository.trash/restore`), `purgeExpired` removes the rest for good once a day (`trashPurgedDay`). Lists sort by
+  modified/title/created with pinned first (choice remembered per list); page order is rewritten in one transaction
+  (`movePage`). Every delete shows the shell snackbar through `LocalUndo`.
 - Icons are Material Symbols vector drawables in res/drawable.
 - Release builds use R8: anything found by reflection needs a keep rule (`app/proguard-rules.pro`).
 - Instrumented tests: run one emulator at a time locally (two at once make Compose screenshots flaky).

@@ -57,6 +57,27 @@ class PageThumbnailTest {
     }
 
     @Test
+    fun strokeKeepsItsPositionOnThePage() {
+        val repo = graph.repository
+        val page = runBlocking {
+            val nb = repo.createNotebook("Pos ${System.nanoTime()}", PageTemplate.BLANK, "ja")
+            val p = repo.pages(nb.id).first()
+            // a thick stroke in the top-left corner (page units 100..300) and nothing elsewhere
+            val pts = (0..20).map { InkPoint(100f + it * 10f, 100f + it * 10f, it * 10L) }
+            repo.saveInk(p, listOf(InkStroke(pts, brush = InkBrush(size = 30f, color = 0xFF000000.toInt()))))
+            p
+        }
+        show(page)
+        rule.waitUntil(10_000) { darkCount("thumb") > 20 }
+        val px = rule.onNodeWithTag("thumb").captureToImage().toPixelMap()
+        var outside = 0
+        for (y in 0 until px.height) for (x in 0 until px.width) {
+            if (x > px.width / 2 || y > px.height / 2) if (px[x, y].luminance() < 0.3f) outside++
+        }
+        assertEquals(0, outside)
+    }
+
+    @Test
     fun unknownTemplateKeepsPlainPaper() {
         val repo = graph.repository
         val page = runBlocking {
