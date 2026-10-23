@@ -38,6 +38,7 @@ object RouteCodec {
             "TextStudy", route.request.kind.name, opt(route.request.textId), list(route.request.pieceIds),
         )
         Route.Settings -> name("Settings")
+        Route.Trash -> name("Trash")
         Route.Stats -> name("Stats")
         Route.WritingLab -> name("WritingLab")
     }
@@ -70,6 +71,7 @@ object RouteCodec {
             "TextReadings" -> Route.TextReadings(unStr(f[0]))
             "TextStudy" -> Route.TextStudy(StudyRequest(StudyKind.valueOf(f[0]), unOpt(f[1]), unList(f[2])))
             "Settings" -> Route.Settings
+            "Trash" -> Route.Trash
             "Stats" -> Route.Stats
             "WritingLab" -> Route.WritingLab
             else -> null

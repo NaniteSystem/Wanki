@@ -143,6 +143,7 @@ fun BoardScreen(boardId: String, onBack: () -> Unit) {
     val pageUi = rememberPageUi()
     val state = remember(page.id) { PageEditorState(graph, notebook, page, infinite = true, ui = pageUi) }
     var confirmDelete by remember { mutableStateOf(false) }
+    val undo = LocalUndo.current
     PageEditor(
         state, notebook.title, onBack, Modifier.fillMaxSize(),
         menu = listOf(
@@ -157,7 +158,8 @@ fun BoardScreen(boardId: String, onBack: () -> Unit) {
             confirmButton = {
                 TextButton(onClick = {
                     confirmDelete = false
-                    graph.appScope.launch { graph.repository.delete(TrashKind.BOARD, notebook.id) }
+                    // the shell's snackbar host outlives this screen: «Удалено · Отменить» shows on the boards list
+                    undo.deleted(TrashKind.BOARD, notebook.id)
                     onBack()
                 }) { Text("Удалить") }
             },

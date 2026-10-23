@@ -42,6 +42,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import app.wanki.data.Backup
+import app.wanki.data.TRASH_DAYS
 import app.wanki.graph
 import app.wanki.input.StylusTracker
 import app.wanki.reminders.Reminders
@@ -60,7 +61,7 @@ private val backupDate = DateTimeFormatter.ofPattern("d MMM yyyy, HH:mm", Locale
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun SettingsScreen(onOpenLab: () -> Unit) {
+fun SettingsScreen(onOpenLab: () -> Unit, onOpenTrash: () -> Unit) {
     val context = LocalContext.current
     val graph = context.graph
     val s = graph.settings
@@ -148,6 +149,11 @@ fun SettingsScreen(onOpenLab: () -> Unit) {
                 }
             }
             if (s.reminderEnabled) OutlinedButton(onClick = { timePicking = true }) { Text("Изменить время") }
+            HorizontalDivider()
+            Text("Корзина", style = MaterialTheme.typography.titleMedium)
+            OutlinedButton(onClick = onOpenTrash, modifier = Modifier.testTag("settings-trash")) {
+                Text("Корзина · удалённое хранится $TRASH_DAYS дней")
+            }
             HorizontalDivider()
             Text("Резервная копия", style = MaterialTheme.typography.titleMedium)
             Text(

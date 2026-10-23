@@ -39,6 +39,8 @@ class Settings(context: Context) {
 
     /** The one-time deletion of empty ink rows has run. */
     var emptyInkCleaned by pref("emptyInkCleaned", false)
+    /** Epoch day the expired trash was last purged. */
+    var trashPurgedDay by pref("trashPurgedDay", -1L)
 
     /** Hifz: how many study days a newly learned piece stays in sabqi. */
     var sabqiDays by pref("sabqiDays", 7)

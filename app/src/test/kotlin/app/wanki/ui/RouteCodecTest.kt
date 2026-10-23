@@ -15,7 +15,7 @@ class RouteCodecTest {
         Route.Texts, Route.TextEditor("t1"), Route.TextEditor(null), Route.TextDetail("t1"), Route.TextReadings("x"), Route.TextReadings("a|b"),
         Route.TextStudy(StudyRequest(StudyKind.MANZIL, null, listOf("a", "b"))),
         Route.TextStudy(StudyRequest(StudyKind.LEARN, "t1", emptyList())),
-        Route.Settings, Route.Stats, Route.WritingLab,
+        Route.Settings, Route.Trash, Route.Stats, Route.WritingLab,
     )
 
     @Test

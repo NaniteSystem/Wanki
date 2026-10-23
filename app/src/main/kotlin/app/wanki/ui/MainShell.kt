@@ -58,6 +58,7 @@ import app.wanki.ui.notes.NoteEditorScreen
 import app.wanki.ui.notes.NotesScreen
 import app.wanki.ui.review.ReviewScreen
 import app.wanki.ui.settings.SettingsScreen
+import app.wanki.ui.settings.TrashScreen
 import app.wanki.ui.stats.StatsScreen
 import app.wanki.ui.texts.StudyRequest
 import app.wanki.ui.texts.StudyScreen
@@ -80,6 +81,7 @@ sealed interface Route {
     data object Notebooks : Route
     data class Notebook(val id: String, val pageId: String? = null) : Route
     data class PageGrid(val notebookId: String) : Route
+    data object Trash : Route
     data object Notes : Route
     data class Note(val id: String?) : Route
     data object Diary : Route
@@ -274,7 +276,8 @@ private fun Content(nav: Navigator) {
         is Route.DiaryDay -> DiaryDayScreen(r.epochDay, onBack = { nav.back() })
         Route.Boards -> BoardsScreen(onOpen = { nav.open(Route.Board(it)) })
         is Route.Board -> BoardScreen(r.id, onBack = { nav.back() })
-        Route.Settings -> SettingsScreen(onOpenLab = { nav.open(Route.WritingLab) })
+        Route.Settings -> SettingsScreen(onOpenLab = { nav.open(Route.WritingLab) }, onOpenTrash = { nav.open(Route.Trash) })
+        Route.Trash -> TrashScreen(onBack = { nav.back() })
         Route.WritingLab -> WritingTestScreen()
     }
 }

@@ -36,7 +36,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import app.wanki.R
+import app.wanki.data.TrashKind
 import app.wanki.graph
+import app.wanki.ui.common.HeaderAction
+import app.wanki.ui.common.LocalUndo
 import app.wanki.ui.common.ScreenHeader
 import app.wanki.ui.notebooks.PageEditor
 import app.wanki.ui.notebooks.rememberPageUi
@@ -142,6 +146,7 @@ fun DiaryDayScreen(epochDay: Long, onBack: () -> Unit) {
     }
     val (diary, page) = loaded ?: return
     val pageUi = rememberPageUi()
+    val undo = LocalUndo.current
     val state = remember(page.id) { PageEditorState(graph, diary, page, infinite = false, ui = pageUi) }
     PageEditor(
         state,
@@ -149,6 +154,12 @@ fun DiaryDayScreen(epochDay: Long, onBack: () -> Unit) {
         onBack = onBack,
         modifier = Modifier.fillMaxSize(),
         subtitle = date.dayOfWeek.getDisplayName(TextStyle.FULL, ru).replaceFirstChar { it.uppercase() },
-        menu = listOf(state.paperAction(), state.fitAction(), state.textAction()),
+        menu = listOf(
+            state.paperAction(), state.fitAction(), state.textAction(),
+            HeaderAction(R.drawable.ic_delete, "Удалить запись", "menu-delete-day") {
+                undo.deleted(TrashKind.DIARY_DAY, page.id)
+                onBack()
+            },
+        ),
     )
 }

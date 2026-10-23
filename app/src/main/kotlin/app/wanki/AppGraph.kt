@@ -60,6 +60,12 @@ class WankiApp : Application() {
                 runCatching { graph.repository.deleteEmptyInk() }.onSuccess { graph.settings.emptyInkCleaned = true }
             }
         }
+        graph.appScope.launch {
+            val today = java.time.LocalDate.now().toEpochDay()
+            if (graph.settings.trashPurgedDay != today) {
+                runCatching { graph.repository.purgeExpired() }.onSuccess { graph.settings.trashPurgedDay = today }
+            }
+        }
         graph.appScope.launch { runCatching { graph.backup.autoBackupIfDue() } }
     }
 }
