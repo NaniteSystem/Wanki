@@ -45,6 +45,20 @@ import app.wanki.data.PageEntity
 import app.wanki.data.PageSearchHit
 import app.wanki.data.PageTemplate
 import app.wanki.R
+import androidx.compose.ui.text.style.TextOverflow
+import app.wanki.data.ListOrder
+import app.wanki.data.NotebookEntity
+import app.wanki.data.Settings.Companion.SECTION_NOTEBOOKS
+import app.wanki.data.TrashKind
+import app.wanki.ui.common.FirstPageThumbnail
+import app.wanki.ui.common.ListActions
+import app.wanki.ui.common.ListCard
+import app.wanki.ui.common.LocalUndo
+import app.wanki.ui.common.RenameDialog
+import app.wanki.ui.common.itemMenu
+import app.wanki.ui.common.sortMenu
+import java.text.DateFormat
+import java.util.Date
 import app.wanki.graph
 import app.wanki.ui.common.HeaderAction
 import app.wanki.ui.common.ListState
@@ -56,9 +70,20 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @Composable
-fun NotebooksScreen(onOpen: (notebookId: String, pageId: String?) -> Unit) {
+fun NotebooksScreen(
+    onOpen: (notebookId: String, pageId: String?) -> Unit,
+    /** Opens the notebook settings dialog. */
+    onSettings: (notebookId: String) -> Unit = {},
+) {
     val graph = LocalContext.current.graph
     val notebooks by remember { graph.repository.observeNotebooks(NotebookKind.NOTEBOOK) }.collectAsState(null)
+    val sort = graph.settings.listSort(SECTION_NOTEBOOKS)
+    val sorted = remember(notebooks, sort) {
+        ListOrder.sort(notebooks.orEmpty(), sort, { it.notebook.pinned }, { it.notebook.title }, { it.notebook.updatedAt }, { it.notebook.createdAt })
+    }
+    val undo = LocalUndo.current
+    val actions = remember { ListActions(graph.repository, undo, graph.appScope) }
+    var renaming by remember { mutableStateOf<NotebookEntity?>(null) }
     var creating by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
     var hits by remember { mutableStateOf<List<PageSearchHit>>(emptyList()) }
@@ -69,7 +94,10 @@ fun NotebooksScreen(onOpen: (notebookId: String, pageId: String?) -> Unit) {
 
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
-            ScreenHeader("Тетради", subtitle = "Рукописный текст распознаётся автоматически, по нему работает поиск")
+            ScreenHeader(
+                "Тетради", subtitle = "Рукописный текст распознаётся автоматически, по нему работает поиск",
+                menu = sortMenu(graph.settings, SECTION_NOTEBOOKS),
+            )
             OutlinedTextField(
                 value = query, onValueChange = { query = it }, singleLine = true,
                 placeholder = { Text("Поиск по написанному от руки") },
@@ -98,13 +126,26 @@ fun NotebooksScreen(onOpen: (notebookId: String, pageId: String?) -> Unit) {
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    items(notebooks.orEmpty(), key = { it.notebook.id }) { n ->
-                        Card(Modifier.fillMaxWidth().clickable { onOpen(n.notebook.id, null) }) {
-                            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Text(n.notebook.title, style = MaterialTheme.typography.titleMedium)
+                    items(sorted, key = { it.notebook.id }) { n ->
+                        val nb = n.notebook
+                        ListCard(
+                            "notebook-${nb.id}", nb.pinned,
+                            itemMenu(
+                                nb.pinned,
+                                onRename = { renaming = nb },
+                                onDuplicate = { actions.duplicateNotebook(nb.id) },
+                                onPin = { actions.pin(TrashKind.NOTEBOOK, nb.id, !nb.pinned) },
+                                onDelete = { undo.deleted(TrashKind.NOTEBOOK, nb.id) },
+                                onSettings = { onSettings(nb.id) },
+                            ),
+                            onClick = { onOpen(nb.id, null) },
+                        ) {
+                            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                FirstPageThumbnail(nb.id, Modifier.fillMaxWidth())
+                                Text(nb.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                                 Text(
-                                    "${n.pageCount} стр. · ${runCatching { PageTemplate.valueOf(n.notebook.template).label() }.getOrDefault("")} · ${languageName(n.notebook.language)}",
-                                    style = MaterialTheme.typography.bodySmall,
+                                    "${n.pageCount} стр. · ${DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(nb.updatedAt))}",
+                                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
                         }
@@ -112,10 +153,14 @@ fun NotebooksScreen(onOpen: (notebookId: String, pageId: String?) -> Unit) {
                 }
             }
         }
-        ExtendedFloatingActionButton(
+        if (!notebooks.isNullOrEmpty()) ExtendedFloatingActionButton(
             onClick = { creating = true },
             modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
         ) { Text("+ Тетрадь") }
+    }
+
+    renaming?.let { nb ->
+        RenameDialog(nb.title, onDismiss = { renaming = null }) { actions.renameNotebook(nb.id, it); renaming = null }
     }
 
     if (creating) {

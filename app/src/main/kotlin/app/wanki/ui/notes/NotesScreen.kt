@@ -66,6 +66,14 @@ import app.wanki.ui.common.InkToolbar
 import app.wanki.ui.common.SaveErrorSnackbar
 import app.wanki.ui.common.SerialSaver
 import app.wanki.R
+import app.wanki.data.ListOrder
+import app.wanki.data.Settings.Companion.SECTION_NOTES
+import app.wanki.ui.common.ListActions
+import app.wanki.ui.common.ListCard
+import app.wanki.ui.common.LocalUndo
+import app.wanki.ui.common.RenameDialog
+import app.wanki.ui.common.itemMenu
+import app.wanki.ui.common.sortMenu
 import app.wanki.ui.common.HeaderAction
 import app.wanki.ui.common.ListState
 import app.wanki.ui.common.ScreenHeader
@@ -84,12 +92,19 @@ fun NotesScreen(onOpen: (String?) -> Unit) {
     val graph = LocalContext.current.graph
     val notes by remember { graph.repository.observeTextNotes() }.collectAsState(null)
     var query by remember { mutableStateOf("") }
-    val shown = if (query.isBlank()) notes.orEmpty() else notes.orEmpty().filter {
-        it.title.contains(query, ignoreCase = true) || it.body.contains(query, ignoreCase = true)
+    val sort = graph.settings.listSort(SECTION_NOTES)
+    val shown = remember(notes, query, sort) {
+        val found = if (query.isBlank()) notes.orEmpty() else notes.orEmpty().filter {
+            it.title.contains(query, ignoreCase = true) || it.body.contains(query, ignoreCase = true)
+        }
+        ListOrder.sort(found, sort, { it.pinned }, { it.title }, { it.updatedAt }, { it.createdAt })
     }
+    val undo = LocalUndo.current
+    val actions = remember { ListActions(graph.repository, undo, graph.appScope) }
+    var renaming by remember { mutableStateOf<TextNoteEntity?>(null) }
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
-            ScreenHeader("Заметки")
+            ScreenHeader("Заметки", menu = sortMenu(graph.settings, SECTION_NOTES))
             OutlinedTextField(
                 query, { query = it }, singleLine = true, placeholder = { Text("Поиск") },
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
@@ -102,9 +117,19 @@ fun NotesScreen(onOpen: (String?) -> Unit) {
             LazyColumn(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (shown.isEmpty()) item { Text("Ничего не найдено", color = MaterialTheme.colorScheme.onSurfaceVariant) }
                 items(shown, key = { it.id }) { n ->
-                    Card(Modifier.fillMaxWidth().clickable { onOpen(n.id) }) {
+                    ListCard(
+                        "note-${n.id}", n.pinned,
+                        itemMenu(
+                            n.pinned,
+                            onRename = { renaming = n },
+                            onDuplicate = { actions.duplicateNote(n.id) },
+                            onPin = { actions.pin(TrashKind.NOTE, n.id, !n.pinned) },
+                            onDelete = { undo.deleted(TrashKind.NOTE, n.id) },
+                        ),
+                        onClick = { onOpen(n.id) },
+                    ) {
                         Column(Modifier.padding(12.dp)) {
-                            Text(n.title.ifBlank { "Без названия" }, style = MaterialTheme.typography.titleMedium, maxLines = 1)
+                            Text(n.title.ifBlank { "Без названия" }, style = MaterialTheme.typography.titleMedium, maxLines = 1, modifier = Modifier.padding(end = 24.dp))
                             Text(n.body, maxLines = 2, style = MaterialTheme.typography.bodyMedium)
                             Text(
                                 DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(n.updatedAt)),
@@ -117,9 +142,12 @@ fun NotesScreen(onOpen: (String?) -> Unit) {
             }
             }
         }
-        ExtendedFloatingActionButton(onClick = { onOpen(null) }, modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)) {
+        if (!notes.isNullOrEmpty()) ExtendedFloatingActionButton(onClick = { onOpen(null) }, modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)) {
             Text("+ Заметка")
         }
+    }
+    renaming?.let { n ->
+        RenameDialog(n.title, onDismiss = { renaming = null }) { actions.renameNote(n.id, it); renaming = null }
     }
 }
 

@@ -55,8 +55,11 @@ class NoteEditorTest {
         val title = "New ${System.currentTimeMillis()}"
         rule.waitUntilAtLeastOneExists(hasTestTag("tab-Заметки"), 15_000)
         rule.onNode(hasTestTag("tab-Заметки")).performClick()
-        rule.waitUntilAtLeastOneExists(hasText("+ Заметка"), 10_000)
-        rule.onNode(hasText("+ Заметка")).performClick()
+        rule.waitUntil(10_000) {
+            rule.onAllNodes(hasText("+ Заметка")).fetchSemanticsNodes().isNotEmpty() || rule.onAllNodes(hasTestTag("notes-empty-new")).fetchSemanticsNodes().isNotEmpty()
+        }
+        if (rule.onAllNodes(hasText("+ Заметка")).fetchSemanticsNodes().isNotEmpty()) rule.onNode(hasText("+ Заметка")).performClick()
+        else rule.onNode(hasTestTag("notes-empty-new")).performClick()
         rule.waitUntilAtLeastOneExists(hasText("Заголовок"), 10_000)
         rule.onNode(hasText("Заголовок")).performTextInput(title)
         rule.onNode(hasText("Текст")).performTextInput("первая строка")

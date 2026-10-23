@@ -37,6 +37,17 @@ import app.wanki.data.TrashKind
 import app.wanki.graph
 import app.wanki.ui.common.ScreenHeader
 import app.wanki.R
+import androidx.compose.ui.text.style.TextOverflow
+import app.wanki.data.ListOrder
+import app.wanki.data.Settings.Companion.SECTION_BOARDS
+import app.wanki.ui.common.BoardThumbnail
+import app.wanki.ui.common.ListActions
+import app.wanki.ui.common.ListCard
+import app.wanki.ui.common.LocalUndo
+import app.wanki.ui.common.RenameDialog
+import app.wanki.ui.common.itemMenu
+import app.wanki.ui.common.sortMenu
+import kotlinx.coroutines.flow.map
 import app.wanki.ui.common.HeaderAction
 import app.wanki.ui.common.ListState
 import app.wanki.ui.notebooks.PageEditor
@@ -53,10 +64,17 @@ import java.util.Date
 fun BoardsScreen(onOpen: (String) -> Unit) {
     val graph = LocalContext.current.graph
     val boards by remember { graph.repository.observeNotebooks(NotebookKind.BOARD) }.collectAsState(null)
+    val sort = graph.settings.listSort(SECTION_BOARDS)
+    val sorted = remember(boards, sort) {
+        ListOrder.sort(boards.orEmpty(), sort, { it.notebook.pinned }, { it.notebook.title }, { it.notebook.updatedAt }, { it.notebook.createdAt })
+    }
+    val undo = LocalUndo.current
+    val actions = remember { ListActions(graph.repository, undo, graph.appScope) }
+    var renaming by remember { mutableStateOf<NotebookEntity?>(null) }
     var creating by remember { mutableStateOf(false) }
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
-            ScreenHeader("Доски", subtitle = "Бесконечный холст: рисуйте и пишите где угодно")
+            ScreenHeader("Доски", subtitle = "Бесконечный холст: рисуйте и пишите где угодно", menu = sortMenu(graph.settings, SECTION_BOARDS))
             ListState(
                 loading = boards == null, isEmpty = boards.orEmpty().isEmpty(),
                 emptyTitle = "Пока нет досок", emptyHint = "Большой холст для схем и рисунков",
@@ -66,13 +84,25 @@ fun BoardsScreen(onOpen: (String) -> Unit) {
                     GridCells.Adaptive(180.dp), Modifier.fillMaxSize().padding(16.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    items(boards.orEmpty(), key = { it.notebook.id }) { b ->
-                        Card(Modifier.fillMaxWidth().clickable { onOpen(b.notebook.id) }) {
-                            Column(Modifier.padding(16.dp)) {
-                                Text(b.notebook.title, style = MaterialTheme.typography.titleMedium)
+                    items(sorted, key = { it.notebook.id }) { b ->
+                        val nb = b.notebook
+                        ListCard(
+                            "board-${nb.id}", nb.pinned,
+                            itemMenu(
+                                nb.pinned,
+                                onRename = { renaming = nb },
+                                onDuplicate = { actions.duplicateNotebook(nb.id) },
+                                onPin = { actions.pin(TrashKind.BOARD, nb.id, !nb.pinned) },
+                                onDelete = { undo.deleted(TrashKind.BOARD, nb.id) },
+                            ),
+                            onClick = { onOpen(nb.id) },
+                        ) {
+                            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                BoardCardThumbnail(nb.id, Modifier.fillMaxWidth())
+                                Text(nb.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                                 Text(
-                                    DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(b.notebook.updatedAt)),
-                                    style = MaterialTheme.typography.bodySmall,
+                                    DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(nb.updatedAt)),
+                                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
                         }
@@ -80,9 +110,12 @@ fun BoardsScreen(onOpen: (String) -> Unit) {
                 }
             }
         }
-        ExtendedFloatingActionButton(onClick = { creating = true }, modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)) {
+        if (!boards.isNullOrEmpty()) ExtendedFloatingActionButton(onClick = { creating = true }, modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)) {
             Text("+ Доска")
         }
+    }
+    renaming?.let { nb ->
+        RenameDialog(nb.title, onDismiss = { renaming = null }) { actions.renameNotebook(nb.id, it); renaming = null }
     }
     if (creating) {
         var title by remember { mutableStateOf("") }
@@ -99,6 +132,13 @@ fun BoardsScreen(onOpen: (String) -> Unit) {
             dismissButton = { TextButton(onClick = { creating = false }) { Text("Отмена") } },
         )
     }
+}
+
+@Composable
+private fun BoardCardThumbnail(boardId: String, modifier: Modifier) {
+    val repository = LocalContext.current.graph.repository
+    val page by remember(boardId) { repository.observePages(boardId).map { it.firstOrNull() } }.collectAsState(null)
+    page?.let { BoardThumbnail(it, modifier) }
 }
 
 /** One board: pinch to zoom, two fingers (or one, with a pen nearby) to move. */

@@ -32,7 +32,9 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
+import androidx.compose.runtime.collectAsState
 import kotlin.math.roundToInt
 
 private const val THUMB_LONG_SIDE = 340
@@ -81,6 +83,68 @@ internal fun renderThumbnail(template: PageTemplate, landscape: Boolean, strokes
         if (strokes.isNotEmpty()) {
             val renderer = CanvasStrokeRenderer.create()
             val matrix = android.graphics.Matrix().apply { setScale(scale, scale) }
+            drawIntoCanvas { c ->
+                for (s in strokes) StrokeConversion.toInk(s)?.let { renderer.draw(c.nativeCanvas, it, matrix) }
+            }
+        }
+    }
+    return image
+}
+
+/** The first page of a notebook as a thumbnail; nothing while the pages load. */
+@Composable
+fun FirstPageThumbnail(notebookId: String, modifier: Modifier = Modifier) {
+    val repository = LocalContext.current.graph.repository
+    val first by remember(notebookId) { repository.observePages(notebookId).map { it.firstOrNull() } }.collectAsState(null)
+    first?.let { PageThumbnail(it, modifier) }
+}
+
+private const val BOARD_THUMB_WIDTH = 340
+private const val BOARD_ASPECT = 4f / 3f
+private val boardCache = ThumbnailCache<ImageBitmap>(maxEntries = 32)
+
+/** A board as a 4:3 picture cropped to the bounds of its ink (the whole dotted sheet when it is empty). */
+@Composable
+fun BoardThumbnail(page: PageEntity, modifier: Modifier = Modifier) {
+    val repository = LocalContext.current.graph.repository
+    var bitmap by remember(page.id, page.updatedAt) { mutableStateOf(boardCache.get(page.id, page.updatedAt)) }
+    LaunchedEffect(page.id, page.updatedAt) {
+        if (bitmap != null) return@LaunchedEffect
+        try {
+            val rendered = withContext(Dispatchers.Default) { renderBoardThumbnail(repository.loadInk(page.id)) }
+            boardCache.put(page.id, page.updatedAt, rendered)
+            bitmap = rendered
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e("Wanki", "board ${page.id}: thumbnail not rendered", e)
+        }
+    }
+    Canvas(modifier.aspectRatio(BOARD_ASPECT).semantics { contentDescription = "Доска" }) {
+        val b = bitmap
+        if (b == null) drawRect(PaperColor)
+        else drawImage(b, dstSize = IntSize(size.width.roundToInt(), size.height.roundToInt()), filterQuality = FilterQuality.Medium)
+    }
+}
+
+internal fun renderBoardThumbnail(strokes: List<InkStroke>): ImageBitmap {
+    val bounds = strokes.mapNotNull { it.bounds() }.reduceOrNull { a, b -> a.union(b) }
+    // pad the ink, then widen the shorter side to the 4:3 frame around the same centre
+    var w = maxOf(bounds?.width ?: 0f, 1f) * 1.1f + 40f
+    var h = maxOf(bounds?.height ?: 0f, 1f) * 1.1f + 40f
+    if (bounds == null) { w = 1200f; h = 900f }
+    if (w / h < BOARD_ASPECT) w = h * BOARD_ASPECT else h = w / BOARD_ASPECT
+    val cx = bounds?.let { (it.left + it.right) / 2 } ?: 600f
+    val cy = bounds?.let { (it.top + it.bottom) / 2 } ?: 450f
+    val scale = BOARD_THUMB_WIDTH / w
+    val image = ImageBitmap(BOARD_THUMB_WIDTH, (h * scale).roundToInt())
+    val canvas = ComposeCanvas(image)
+    CanvasDrawScope().draw(Density(1f), LayoutDirection.Ltr, canvas, androidx.compose.ui.geometry.Size(image.width.toFloat(), image.height.toFloat())) {
+        val visible = app.wanki.ink.InkRect(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2)
+        withTransform({ scale(scale, scale, pivot = Offset.Zero); translate(-visible.left, -visible.top) }) { drawBoard(visible, scale) }
+        if (strokes.isNotEmpty()) {
+            val renderer = CanvasStrokeRenderer.create()
+            val matrix = android.graphics.Matrix().apply { setScale(scale, scale); preTranslate(-visible.left, -visible.top) }
             drawIntoCanvas { c ->
                 for (s in strokes) StrokeConversion.toInk(s)?.let { renderer.draw(c.nativeCanvas, it, matrix) }
             }

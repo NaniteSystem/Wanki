@@ -60,6 +60,15 @@ class SmokeTest {
         }
     }
 
+    /** The «new» FAB, or the empty-state button while the list is empty. */
+    private fun clickNew(fab: String, emptyTag: String) {
+        rule.waitUntil(10_000) {
+            rule.onAllNodes(hasText(fab)).fetchSemanticsNodes().isNotEmpty() || rule.onAllNodes(hasTestTag(emptyTag)).fetchSemanticsNodes().isNotEmpty()
+        }
+        if (rule.onAllNodes(hasText(fab)).fetchSemanticsNodes().isNotEmpty()) rule.onNode(hasText(fab)).performClick()
+        else rule.onNode(hasTestTag(emptyTag)).performClick()
+    }
+
     private fun tab(label: String) = rule.onNode(hasTestTag("tab-$label")).performClick()
 
     private fun back() {
@@ -215,7 +224,7 @@ class SmokeTest {
 
         // Notebook: create, write on the page
         tab("Тетради")
-        rule.onNode(hasText("+ Тетрадь")).performClick()
+        clickNew("+ Тетрадь", "notebooks-empty-new")
         rule.onNode(hasText("Создать")).performClick()
         rule.waitUntilAtLeastOneExists(hasTestTag("page-canvas"), 10_000)
         write("page-canvas", 4)
@@ -263,7 +272,7 @@ class SmokeTest {
 
         // Boards: create one, draw on it
         tab("Доски")
-        rule.onNode(hasText("+ Доска")).performClick()
+        clickNew("+ Доска", "boards-empty-new")
         rule.onNode(hasText("Создать")).performClick()
         rule.waitUntilAtLeastOneExists(hasTestTag("page-canvas"), 10_000)
         write("page-canvas", 2)
@@ -294,7 +303,7 @@ class SmokeTest {
 
         // Notes
         tab("Заметки")
-        rule.onNode(hasText("+ Заметка")).performClick()
+        clickNew("+ Заметка", "notes-empty-new")
         rule.onNode(hasText("Заголовок")).performTextInput("Проверка")
         rule.onNode(hasText("+ От руки")).performClick()
         rule.waitForIdle()

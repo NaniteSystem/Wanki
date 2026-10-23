@@ -45,7 +45,7 @@ class Undo(
         }
     }
 
-    private suspend fun say(message: String) {
+    suspend fun say(message: String) {
         host.currentSnackbarData?.dismiss()
         host.showSnackbar(message)
     }
