@@ -72,8 +72,6 @@ import kotlinx.coroutines.launch
 @Composable
 fun NotebooksScreen(
     onOpen: (notebookId: String, pageId: String?) -> Unit,
-    /** Opens the notebook settings dialog. */
-    onSettings: (notebookId: String) -> Unit = {},
 ) {
     val graph = LocalContext.current.graph
     val notebooks by remember { graph.repository.observeNotebooks(NotebookKind.NOTEBOOK) }.collectAsState(null)
@@ -85,6 +83,7 @@ fun NotebooksScreen(
     val actions = remember { ListActions(graph.repository, undo, graph.appScope) }
     var renaming by remember { mutableStateOf<NotebookEntity?>(null) }
     var creating by remember { mutableStateOf(false) }
+    var settingsFor by remember { mutableStateOf<NotebookEntity?>(null) }
     var query by remember { mutableStateOf("") }
     var hits by remember { mutableStateOf<List<PageSearchHit>>(emptyList()) }
     LaunchedEffect(query) {
@@ -136,7 +135,7 @@ fun NotebooksScreen(
                                 onDuplicate = { actions.duplicateNotebook(nb.id) },
                                 onPin = { actions.pin(TrashKind.NOTEBOOK, nb.id, !nb.pinned) },
                                 onDelete = { undo.deleted(TrashKind.NOTEBOOK, nb.id) },
-                                onSettings = { onSettings(nb.id) },
+                                onSettings = { settingsFor = nb },
                             ),
                             onClick = { onOpen(nb.id, null) },
                         ) {
@@ -164,12 +163,18 @@ fun NotebooksScreen(
     }
 
     if (creating) {
-        CreateNotebookDialog(onDismiss = { creating = false }) { title, template, lang ->
+        NotebookSettingsDialog(null, onDismiss = { creating = false }) { title, lang, template, size, landscape ->
             creating = false
             graph.appScope.launch {
-                val n = graph.repository.createNotebook(title, template, lang)
+                val n = graph.repository.createNotebook(title, template, lang, size, landscape)
                 onOpen(n.id, null)
             }
+        }
+    }
+    settingsFor?.let { nb ->
+        NotebookSettingsDialog(nb, onDismiss = { settingsFor = null }) { title, lang, template, size, landscape ->
+            settingsFor = null
+            graph.appScope.launch { graph.repository.setNotebookSettings(nb.id, title, lang, template, size, landscape) }
         }
     }
 }
@@ -181,38 +186,13 @@ private fun snippet(text: String, query: String): String {
     return (if (start > 0) "…" else "") + text.substring(start, (i + query.length + 60).coerceAtMost(text.length))
 }
 
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun CreateNotebookDialog(onDismiss: () -> Unit, onCreate: (String, PageTemplate, String) -> Unit) {
-    var title by remember { mutableStateOf("") }
-    var template by remember { mutableStateOf(PageTemplate.LINED) }
-    var lang by remember { mutableStateOf("auto") }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Новая тетрадь") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedTextField(title, { title = it }, label = { Text("Название") }, singleLine = true)
-                Text("Шаблон страниц", style = MaterialTheme.typography.labelLarge)
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    PageTemplate.entries.forEach { t -> FilterChip(template == t, { template = t }, { Text(t.label()) }) }
-                }
-                Text("Язык записей (для распознавания)", style = MaterialTheme.typography.labelLarge)
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    NotebookLanguages.forEach { (code, name) -> FilterChip(lang == code, { lang = code }, { Text(name) }) }
-                }
-            }
-        },
-        confirmButton = { TextButton(onClick = { onCreate(title.ifBlank { "Тетрадь" }, template, lang) }) { Text("Создать") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } },
-    )
-}
-
 /** A notebook: one page at a time with page navigation. */
 @Composable
 fun NotebookScreen(notebookId: String, initialPageId: String?, onBack: () -> Unit) {
     val graph = LocalContext.current.graph
-    val notebook by produceState<app.wanki.data.NotebookEntity?>(null, notebookId) { value = ui { graph.repository.notebook(notebookId) } }
+    var settingsRev by remember { mutableStateOf(0) }
+    var showSettings by remember { mutableStateOf(false) }
+    val notebook by produceState<NotebookEntity?>(null, notebookId, settingsRev) { value = ui { graph.repository.notebook(notebookId) } }
     val pages by remember(notebookId) { graph.repository.observePages(notebookId) }.collectAsState(emptyList<PageEntity>())
     var index by rememberSaveable(notebookId) { mutableStateOf<Int?>(null) }
     // a page that was just added: the current page stays on screen until it arrives through the flow
@@ -232,8 +212,8 @@ fun NotebookScreen(notebookId: String, initialPageId: String?, onBack: () -> Uni
     val i = index ?: return
     val page = pages.getOrNull(i) ?: return
     val pageUi = rememberPageUi()
-    val state = remember(page.id) { PageEditorState(graph, nb, page, infinite = false, ui = pageUi) }
-    fun addPage() = adder.add(pages.size) { graph.repository.addPage(nb, state.template) }
+    val state = remember(page.id, nb.language) { PageEditorState(graph, nb, page, infinite = false, ui = pageUi) }
+    fun addPage() = adder.add(pages.size) { graph.repository.addPage(nb) }
 
     Box(Modifier.fillMaxSize()) {
         PageEditor(
@@ -243,9 +223,19 @@ fun NotebookScreen(notebookId: String, initialPageId: String?, onBack: () -> Uni
                 HeaderAction(R.drawable.ic_add, "Добавить страницу", "add-page", enabled = adder.pendingIndex == null) { addPage() },
                 state.textAction(),
             ),
-            menu = listOf(state.paperAction(), state.fitAction()),
+            menu = listOf(
+                HeaderAction(R.drawable.ic_settings, "Настройки тетради", "menu-notebook-settings") { showSettings = true },
+                state.paperAction(), state.fitAction(),
+            ),
             pageBar = { PageNavBar(i, pages.size, { index = it.coerceIn(0, pages.lastIndex) }) },
         )
+        if (showSettings) NotebookSettingsDialog(nb, onDismiss = { showSettings = false }) { title, lang, template, size, landscape ->
+            showSettings = false
+            graph.appScope.launch {
+                graph.repository.setNotebookSettings(nb.id, title, lang, template, size, landscape)
+                ui { settingsRev++ }
+            }
+        }
         ErrorSnackbar(addError, "Не удалось добавить страницу", ::addPage, Modifier.align(Alignment.BottomCenter), adder::dismissError)
     }
 }

@@ -256,7 +256,7 @@ private fun Content(nav: Navigator) {
         Route.Browser -> BrowserScreen(onBack = { nav.back() }, onOpenCard = { nav.open(Route.CardEditor(it)) })
         is Route.CardEditor -> CardEditorScreen(r.id, onBack = { nav.back() }, onPractice = { g, lang -> nav.open(Route.Practice(g, lang)) })
         is Route.Practice -> PracticeScreen(r.glyph, r.language, onBack = { nav.back() })
-        Route.Notebooks -> NotebooksScreen(onOpen = { id, page -> nav.open(Route.Notebook(id, page)) }) // onSettings: connected by the notebook settings dialog
+        Route.Notebooks -> NotebooksScreen(onOpen = { id, page -> nav.open(Route.Notebook(id, page)) })
         is Route.Notebook -> NotebookScreen(r.id, r.pageId, onBack = { nav.back() })
         Route.Notes -> NotesScreen(onOpen = { nav.open(Route.Note(it)) })
         is Route.Note -> NoteEditorScreen(r.id, onBack = { nav.back() }, onCreated = { nav.replaceTop(Route.Note(it)) })

@@ -451,6 +451,9 @@ interface NotebookDao {
     @Query("UPDATE pages SET template = :template, updatedAt = :now WHERE id = :id")
     suspend fun setPageTemplate(id: String, template: String, now: Long)
 
+    @Query("UPDATE pages SET landscape = :landscape, updatedAt = :now WHERE id = :id")
+    suspend fun setPageLandscape(id: String, landscape: Boolean, now: Long)
+
     @Query("UPDATE pages SET viewScale = :scale, viewX = :x, viewY = :y WHERE id = :id")
     suspend fun setPageView(id: String, scale: Float, x: Float, y: Float)
 

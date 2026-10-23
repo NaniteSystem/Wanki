@@ -405,11 +405,14 @@ class Repository(private val db: WankiDatabase) {
 
     suspend fun notebook(id: String) = notebooks.get(id)
 
-    suspend fun createNotebook(title: String, template: PageTemplate, language: String): NotebookEntity {
-        val n = NotebookEntity(title = title.trim(), template = template.name, language = language)
+    suspend fun createNotebook(
+        title: String, template: PageTemplate, language: String,
+        pageSize: PageSize = PageSize.A4, landscape: Boolean = false,
+    ): NotebookEntity {
+        val n = NotebookEntity(title = title.trim(), template = template.name, language = language, pageSize = pageSize.name, landscape = landscape)
         db.withTransaction {
             notebooks.upsert(n)
-            notebooks.upsertPage(PageEntity(notebookId = n.id, pageIndex = 0, template = n.template))
+            notebooks.upsertPage(PageEntity(notebookId = n.id, pageIndex = 0, template = n.template, landscape = n.landscape))
         }
         return n
     }
@@ -428,6 +431,12 @@ class Repository(private val db: WankiDatabase) {
     suspend fun setPageTemplate(page: PageEntity, template: PageTemplate) = db.withTransaction {
         notebooks.insertPageIfMissing(page)
         notebooks.setPageTemplate(page.id, template.name, System.currentTimeMillis())
+    }
+
+    /** Turns one page; its strokes stay where they are (world coordinates). */
+    suspend fun setPageLandscape(page: PageEntity, landscape: Boolean) = db.withTransaction {
+        notebooks.insertPageIfMissing(page)
+        notebooks.setPageLandscape(page.id, landscape, System.currentTimeMillis())
     }
 
     /** Remembers a page's zoom and pan (does not count as an edit). */

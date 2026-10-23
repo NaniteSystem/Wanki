@@ -16,6 +16,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.MaterialTheme
@@ -97,7 +98,7 @@ class PageEditorState(
     var page by mutableStateOf(page)
         private set
     val layer = InkLayer()
-    val viewport = Viewport(minScale = if (infinite) 0.1f else 0.3f, bounds = if (infinite) null else PageGeometry.BOUNDS)
+    val viewport = Viewport(minScale = if (infinite) 0.1f else 0.3f, bounds = if (infinite) null else PageGeometry.bounds(page.landscape))
     private val section = InkSection.ofNotebookKind(notebook.kind)
 
     /** Saves the ink one save at a time; a failure is kept in [SerialSaver.error] until a save succeeds. */
@@ -197,6 +198,15 @@ class PageEditorState(
         graph.repository.setPageTemplate(page, t)
         page = page.copy(template = t.name)
     }
+
+    /** Turns the page; the page re-fits so the whole sheet is in view. */
+    suspend fun setLandscape(landscape: Boolean) {
+        if (landscape == page.landscape) return
+        graph.repository.setPageLandscape(page, landscape)
+        page = page.copy(landscape = landscape)
+        viewport.bounds = PageGeometry.bounds(landscape)
+        viewport.fitWidth()
+    }
 }
 
 /** Header actions shared by every page screen. «Бумага…» only makes sense for sheets, not for boards. */
@@ -266,7 +276,7 @@ fun PageEditor(
                     modifier = Modifier.weight(1f).fillMaxSize().testTag("page-canvas"),
                     background = {
                         if (state.infinite) drawBoard(state.viewport.visibleWorld(), state.viewport.scale)
-                        else drawPage(state.template)
+                        else drawPage(state.template, state.page.landscape)
                     },
                 )
                 if (state.showText && wide) {
@@ -293,7 +303,13 @@ fun PageEditor(
             onDismissRequest = { state.showPaper = false },
             title = { Text("Бумага") },
             text = {
-                Column {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    FilterChip(
+                        state.page.landscape,
+                        { graph.appScope.launch { state.setLandscape(!state.page.landscape) } },
+                        { Text("Альбомная страница") },
+                        modifier = Modifier.heightIn(min = 48.dp).testTag("paper-landscape"),
+                    )
                     PageTemplate.entries.forEach { t ->
                         TextButton(
                             onClick = {
