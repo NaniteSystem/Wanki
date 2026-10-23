@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.dp
 import app.wanki.data.NotebookEntity
 import app.wanki.data.NotebookKind
 import app.wanki.data.PageEntity
+import app.wanki.data.TrashKind
 import app.wanki.graph
 import app.wanki.ui.common.ScreenHeader
 import app.wanki.R
@@ -123,7 +124,7 @@ fun BoardScreen(boardId: String, onBack: () -> Unit) {
             confirmButton = {
                 TextButton(onClick = {
                     confirmDelete = false
-                    graph.appScope.launch { graph.repository.deleteNotebook(notebook.id) }
+                    graph.appScope.launch { graph.repository.delete(TrashKind.BOARD, notebook.id) }
                     onBack()
                 }) { Text("Удалить") }
             },

@@ -225,7 +225,7 @@ fun SettingsScreen(onOpenLab: () -> Unit) {
             text = {
                 Text(
                     "Копия от " + Instant.ofEpochMilli(r.createdAt).atZone(ZoneId.systemDefault()).format(backupDate) +
-                        ". В ней карточек: ${r.cards}, текстов: ${r.texts}, тетрадей: ${r.notebooks}, страниц: ${r.pages}, заметок: ${r.notes}. Все текущие данные будут заменены, приложение перезапустится.",
+                        ". В ней карточек: ${r.cards}, текстов: ${r.texts}, тетрадей: ${r.notebooks}, досок: ${r.boards}, дней дневника: ${r.diaryDays}, страниц: ${r.pages}, заметок: ${r.notes}. Все текущие данные будут заменены, приложение перезапустится.",
                 )
             },
             confirmButton = {

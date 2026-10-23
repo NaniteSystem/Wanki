@@ -138,7 +138,48 @@ class MigrationTest {
         }
     }
 
+    @Test
+    fun migrate8To9AddsTrashPinAndPageSettings() {
+        helper.createDatabase(DB9, 8).apply {
+            // id, title, kind, language, template, updatedAt, deleted
+            execSQL("INSERT INTO notebooks (id, title, kind, language, template, updatedAt, deleted) VALUES ('nb', 'N', 'NOTEBOOK', 'ru', 'LINED', 500, 0)")
+            execSQL("INSERT INTO pages (id, notebookId, pageIndex, template, date, updatedAt, deleted) VALUES ('p1', 'nb', 0, 'LINED', NULL, 5, 0)")
+            execSQL("INSERT INTO pages (id, notebookId, pageIndex, template, date, updatedAt, deleted) VALUES ('p2', 'nb', 1, 'LINED', NULL, 6, 1)")
+            execSQL("INSERT INTO text_notes (id, title, body, updatedAt, deleted) VALUES ('t1', 'live', 'x', 700, 0)")
+            execSQL("INSERT INTO text_notes (id, title, body, updatedAt, deleted) VALUES ('t2', 'gone', 'y', 800, 1)")
+            close()
+        }
+        val before = System.currentTimeMillis()
+        val db = helper.runMigrationsAndValidate(DB9, 9, true, WankiDatabase.MIGRATION_8_9)
+        val after = System.currentTimeMillis()
+        db.query("SELECT pinned, createdAt, deletedAt, pageSize, landscape FROM notebooks").use { c ->
+            c.moveToFirst()
+            assertEquals(0, c.getInt(0))
+            assertEquals(500L, c.getLong(1))
+            assertEquals(true, c.isNull(2))
+            assertEquals("A4", c.getString(3))
+            assertEquals(0, c.getInt(4))
+        }
+        db.query("SELECT id, deletedAt, landscape FROM pages ORDER BY id").use { c ->
+            c.moveToFirst()
+            assertEquals(true, c.isNull(1))
+            assertEquals(0, c.getInt(2))
+            c.moveToNext()
+            assertEquals(true, c.getLong(1) in before..after)
+        }
+        db.query("SELECT id, pinned, createdAt, updatedAt, deletedAt FROM text_notes ORDER BY id").use { c ->
+            c.moveToFirst()
+            assertEquals(0, c.getInt(1))
+            assertEquals(c.getLong(3), c.getLong(2))
+            assertEquals(true, c.isNull(4))
+            c.moveToNext()
+            assertEquals(800L, c.getLong(2))
+            assertEquals(true, c.getLong(4) in before..after)
+        }
+    }
+
     private companion object {
+        const val DB9 = "migration-test-9"
         const val DB8 = "migration-test-8"
         const val DB7 = "migration-test-7"
         const val DB6 = "migration-test-6"

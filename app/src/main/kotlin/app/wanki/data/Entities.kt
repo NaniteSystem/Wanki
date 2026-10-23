@@ -14,6 +14,16 @@ enum class AnswerMode { CLASSIC, HANDWRITING }
 
 enum class NotebookKind { NOTEBOOK, DIARY, BOARD }
 
+enum class PageSize { A4, A5 }
+
+/** What the trash holds: a whole notebook, board or note, or one page of a notebook / one diary day. */
+enum class TrashKind { NOTEBOOK, BOARD, NOTE, PAGE, DIARY_DAY }
+
+/** Deleted items stay this many days, then are removed for good. */
+const val TRASH_DAYS = 30
+
+data class TrashItem(val kind: TrashKind, val id: String, val title: String, val parentTitle: String?, val deletedAt: Long)
+
 enum class PageTemplate { BLANK, LINED, GRID, DOTS, GENKOU, TIANZIGE, WONGOJI, LINED_RTL }
 
 @Entity(tableName = "decks")
@@ -155,6 +165,14 @@ data class NotebookEntity(
     val template: String = PageTemplate.LINED.name,
     val updatedAt: Long = System.currentTimeMillis(),
     val deleted: Boolean = false,
+    val pinned: Boolean = false,
+    val createdAt: Long = System.currentTimeMillis(),
+    /** When the notebook went to the trash (null while [deleted] is false). */
+    val deletedAt: Long? = null,
+    /** A [PageSize] name; applies to new pages. */
+    val pageSize: String = PageSize.A4.name,
+    /** Orientation of new pages. */
+    val landscape: Boolean = false,
 )
 
 @Entity(tableName = "pages", indices = [Index("notebookId")])
@@ -171,6 +189,8 @@ data class PageEntity(
     val viewScale: Float? = null,
     val viewX: Float? = null,
     val viewY: Float? = null,
+    val deletedAt: Long? = null,
+    val landscape: Boolean = false,
 )
 
 @Entity(tableName = "page_ink")
@@ -189,6 +209,9 @@ data class TextNoteEntity(
     val body: String,
     val updatedAt: Long = System.currentTimeMillis(),
     val deleted: Boolean = false,
+    val pinned: Boolean = false,
+    val createdAt: Long = System.currentTimeMillis(),
+    val deletedAt: Long? = null,
 )
 
 enum class NoteBlockType { TEXT, INK }
@@ -225,6 +248,8 @@ data class PageSearchHit(
     val pageIndex: Int,
     val date: Long?,
     val recognizedText: String,
+    /** Kind of the notebook the page belongs to ([NotebookKind] name). */
+    val kind: String,
 )
 
 data class DayCount(val day: Long, val n: Int, val ok: Int)

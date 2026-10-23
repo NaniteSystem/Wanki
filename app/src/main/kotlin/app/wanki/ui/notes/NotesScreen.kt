@@ -50,6 +50,7 @@ import app.wanki.data.NoteBlockEntity
 import app.wanki.data.NoteBlockType
 import app.wanki.data.PageTemplate
 import app.wanki.data.TextNoteEntity
+import app.wanki.data.TrashKind
 import app.wanki.data.newId
 import app.wanki.graph
 import app.wanki.ink.InkCodec
@@ -227,7 +228,7 @@ fun NoteEditorScreen(id: String?, onBack: () -> Unit, onCreated: (String) -> Uni
                     HeaderAction(R.drawable.ic_delete, "Удалить", "menu-delete") {
                         note = null
                         // a save still running must not bring the note back after it is deleted
-                        graph.appScope.launch { saver.flush(); graph.repository.deleteTextNote(id) }
+                        graph.appScope.launch { saver.flush(); graph.repository.delete(TrashKind.NOTE, id) }
                         onBack()
                     },
                 ),

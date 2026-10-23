@@ -415,7 +415,7 @@ class Repository(private val db: WankiDatabase) {
 
     suspend fun addPage(notebook: NotebookEntity, template: PageTemplate? = null): PageEntity {
         val index = (notebooks.pages(notebook.id).maxOfOrNull { it.pageIndex } ?: -1) + 1
-        val p = PageEntity(notebookId = notebook.id, pageIndex = index, template = (template?.name ?: notebook.template))
+        val p = PageEntity(notebookId = notebook.id, pageIndex = index, template = (template?.name ?: notebook.template), landscape = notebook.landscape)
         notebooks.upsertPage(p)
         notebooks.touch(notebook.id)
         return p
@@ -448,12 +448,195 @@ class Repository(private val db: WankiDatabase) {
         return n to page
     }
 
-    suspend fun renameNotebook(id: String, title: String) {
-        notebooks.get(id)?.let { notebooks.upsert(it.copy(title = title.trim(), updatedAt = System.currentTimeMillis())) }
+    suspend fun renameNotebook(id: String, title: String) = notebooks.rename(id, title.trim(), System.currentTimeMillis())
+
+    suspend fun renameNote(id: String, title: String) = textNotes.rename(id, title.trim(), System.currentTimeMillis())
+
+    suspend fun setNotebookSettings(id: String, title: String, language: String, template: PageTemplate, pageSize: PageSize, landscape: Boolean) =
+        notebooks.setSettings(id, title.trim(), language, template.name, pageSize.name, landscape, System.currentTimeMillis())
+
+    suspend fun setPinned(kind: TrashKind, id: String, pinned: Boolean) = when (kind) {
+        TrashKind.NOTEBOOK, TrashKind.BOARD -> notebooks.setPinned(id, pinned)
+        TrashKind.NOTE -> textNotes.setPinned(id, pinned)
+        else -> throw IllegalArgumentException("$kind cannot be pinned")
     }
 
-    suspend fun deleteNotebook(id: String) {
-        notebooks.get(id)?.let { notebooks.upsert(it.copy(deleted = true, updatedAt = System.currentTimeMillis())) }
+    // --- duplicates --------------------------------------------------------------------------
+
+    /** A deep copy of a notebook or board: its live pages and their ink get new ids. */
+    suspend fun duplicateNotebook(id: String): NotebookEntity = db.withTransaction {
+        val src = notebooks.get(id) ?: error("no notebook")
+        require(src.kind != NotebookKind.DIARY.name) { "the diary cannot be duplicated" }
+        val now = System.currentTimeMillis()
+        val copy = src.copy(
+            id = newId(), title = src.title + COPY_SUFFIX, updatedAt = now, createdAt = now,
+            deleted = false, deletedAt = null, pinned = false,
+        )
+        notebooks.upsert(copy)
+        val pages = notebooks.pages(id).map { it.copy(id = newId(), notebookId = copy.id, updatedAt = now) }
+        val oldIds = notebooks.pages(id).map { it.id }
+        notebooks.insertPages(pages)
+        notebooks.upsertInks(oldIds.indices.mapNotNull { i -> notebooks.ink(oldIds[i])?.copy(pageId = pages[i].id, updatedAt = now) })
+        copy
+    }
+
+    suspend fun duplicateNote(id: String): TextNoteEntity = db.withTransaction {
+        val src = textNotes.get(id) ?: error("no note")
+        val now = System.currentTimeMillis()
+        val copy = src.copy(id = newId(), title = src.title + COPY_SUFFIX, updatedAt = now, createdAt = now, deleted = false, deletedAt = null, pinned = false)
+        textNotes.upsert(copy)
+        textNotes.insertBlocks(textNotes.blocks(id).map { it.copy(id = newId(), noteId = copy.id, updatedAt = now) })
+        copy
+    }
+
+    /** Copies a notebook page with its ink right after the original. */
+    suspend fun duplicatePage(pageId: String): PageEntity = db.withTransaction {
+        val src = notebooks.page(pageId) ?: error("no page")
+        val now = System.currentTimeMillis()
+        val copy = src.copy(id = newId(), updatedAt = now, deleted = false, deletedAt = null)
+        val live = notebooks.pages(src.notebookId).toMutableList()
+        live.add((live.indexOfFirst { it.id == pageId } + 1).coerceAtLeast(0), copy)
+        notebooks.insertPages(listOf(copy))
+        notebooks.ink(pageId)?.let { notebooks.upsertInk(it.copy(pageId = copy.id, updatedAt = now)) }
+        renumber(live)
+        notebooks.touch(src.notebookId, now)
+        copy.copy(pageIndex = live.indexOfFirst { it.id == copy.id })
+    }
+
+    // --- pages: insert and move --------------------------------------------------------------
+
+    /** A new page at position [at] (clamped), with the notebook's paper and orientation. */
+    suspend fun insertPage(notebookId: String, at: Int): PageEntity = db.withTransaction {
+        val nb = notebooks.get(notebookId) ?: error("no notebook")
+        val live = notebooks.pages(notebookId).toMutableList()
+        val pos = at.coerceIn(0, live.size)
+        val p = PageEntity(notebookId = notebookId, pageIndex = pos, template = nb.template, landscape = nb.landscape)
+        notebooks.insertPages(listOf(p))
+        live.add(pos, p)
+        renumber(live)
+        notebooks.touch(notebookId)
+        p
+    }
+
+    /** Moves a page from position [from] to [to]; indices stay 0..n-1. */
+    suspend fun movePage(notebookId: String, from: Int, to: Int) = db.withTransaction {
+        val live = notebooks.pages(notebookId).toMutableList()
+        require(from in live.indices && to in live.indices) { "page position out of range" }
+        live.add(to, live.removeAt(from))
+        renumber(live)
+        notebooks.touch(notebookId)
+    }
+
+    /** Rewrites pageIndex to the list order. */
+    private suspend fun renumber(pages: List<PageEntity>) =
+        pages.forEachIndexed { i, p -> notebooks.setPageIndex(p.id, i) }
+
+    // --- trash -------------------------------------------------------------------------------
+
+    /**
+     * Moves an item to the trash. A notebook, board or note is only flagged (its pages stay as they are);
+     * a page or diary day is flagged on its own row. The last page of a notebook cannot be deleted.
+     */
+    suspend fun delete(kind: TrashKind, id: String) = db.withTransaction {
+        val now = System.currentTimeMillis()
+        when (kind) {
+            TrashKind.NOTEBOOK, TrashKind.BOARD -> notebooks.trash(id, now)
+            TrashKind.NOTE -> textNotes.trash(id, now)
+            TrashKind.PAGE, TrashKind.DIARY_DAY -> {
+                val page = notebooks.page(id) ?: return@withTransaction
+                if (page.deleted) return@withTransaction
+                val nb = notebooks.get(page.notebookId)
+                val numbered = kind == TrashKind.PAGE && nb?.kind == NotebookKind.NOTEBOOK.name
+                if (numbered && notebooks.pages(page.notebookId).size <= 1) throw IllegalStateException("last page")
+                notebooks.trashPage(id, now)
+                if (numbered) renumber(notebooks.pages(page.notebookId))
+                notebooks.touch(page.notebookId, now)
+            }
+        }
+    }
+
+    /** Brings an item back. Restoring a page or day also restores its notebook; restoring twice changes nothing. */
+    suspend fun restore(kind: TrashKind, id: String) = db.withTransaction {
+        when (kind) {
+            TrashKind.NOTEBOOK, TrashKind.BOARD -> notebooks.untrash(id)
+            TrashKind.NOTE -> textNotes.untrash(id)
+            TrashKind.PAGE, TrashKind.DIARY_DAY -> {
+                val page = notebooks.page(id) ?: return@withTransaction
+                if (!page.deleted) return@withTransaction
+                val nb = notebooks.get(page.notebookId) ?: return@withTransaction
+                if (page.date != null) {
+                    val taken = notebooks.pageForDate(nb.id, page.date)
+                    if (taken != null) {
+                        if (notebooks.ink(taken.id) != null) throw IllegalStateException("day taken")
+                        notebooks.deleteInk(taken.id)
+                        notebooks.deletePageRow(taken.id)
+                    }
+                }
+                notebooks.untrashPage(id)
+                if (nb.deleted) notebooks.untrash(nb.id)
+                if (nb.kind == NotebookKind.NOTEBOOK.name) {
+                    // back to its old position, indices dense again
+                    val live = notebooks.pages(nb.id).filter { it.id != id }.toMutableList()
+                    live.add(page.pageIndex.coerceIn(0, live.size), page)
+                    renumber(live)
+                }
+            }
+        }
+    }
+
+    /** Removes an item for good together with its pages, ink and blocks. */
+    suspend fun purge(kind: TrashKind, id: String) = db.withTransaction {
+        when (kind) {
+            TrashKind.NOTEBOOK, TrashKind.BOARD -> {
+                notebooks.deleteInkOfNotebook(id)
+                notebooks.deletePagesOf(id)
+                notebooks.deleteNotebookRow(id)
+            }
+            TrashKind.NOTE -> {
+                textNotes.deleteBlocksOf(id)
+                textNotes.deleteRow(id)
+            }
+            TrashKind.PAGE, TrashKind.DIARY_DAY -> {
+                notebooks.deleteInk(id)
+                notebooks.deletePageRow(id)
+            }
+        }
+    }
+
+    /** Everything in the trash, newest deletion first. */
+    suspend fun trash(): List<TrashItem> {
+        val items = mutableListOf<TrashItem>()
+        for (n in notebooks.trashedNotebooks()) {
+            val kind = when (n.kind) {
+                NotebookKind.NOTEBOOK.name -> TrashKind.NOTEBOOK
+                NotebookKind.BOARD.name -> TrashKind.BOARD
+                else -> continue
+            }
+            items += TrashItem(kind, n.id, n.title, null, n.deletedAt ?: continue)
+        }
+        for (n in textNotes.trashed()) items += TrashItem(TrashKind.NOTE, n.id, n.title, null, n.deletedAt ?: continue)
+        for (p in notebooks.trashedPages()) {
+            val nb = notebooks.get(p.notebookId) ?: continue
+            val at = p.deletedAt ?: continue
+            items += if (p.date != null) {
+                TrashItem(TrashKind.DIARY_DAY, p.id, LocalDate.ofEpochDay(p.date).toString(), nb.title, at)
+            } else {
+                TrashItem(TrashKind.PAGE, p.id, "Страница ${p.pageIndex + 1}", nb.title, at)
+            }
+        }
+        return items.sortedByDescending { it.deletedAt }
+    }
+
+    /** Removes what has been in the trash longer than [TRASH_DAYS]; returns how many items went. */
+    suspend fun purgeExpired(now: Long = System.currentTimeMillis()): Int = db.withTransaction {
+        val cutoff = now - TRASH_DAYS * 86_400_000L
+        val nbs = notebooks.expiredNotebooks(cutoff)
+        val notes = textNotes.expired(cutoff)
+        val pages = notebooks.expiredPages(cutoff)
+        nbs.forEach { purge(TrashKind.NOTEBOOK, it.id) }
+        notes.forEach { purge(TrashKind.NOTE, it.id) }
+        pages.forEach { purge(TrashKind.PAGE, it.id) }
+        nbs.size + notes.size + pages.size
     }
 
     suspend fun diary(): NotebookEntity = singlePageNotebook(NotebookKind.DIARY, "Дневник", PageTemplate.LINED).first
@@ -530,7 +713,6 @@ class Repository(private val db: WankiDatabase) {
     fun observeTextNotes() = textNotes.observeAll()
     suspend fun textNote(id: String) = textNotes.get(id)
     suspend fun saveTextNote(note: TextNoteEntity) = textNotes.upsert(note.copy(updatedAt = System.currentTimeMillis()))
-    suspend fun deleteTextNote(id: String) = textNotes.delete(id)
     suspend fun noteBlocks(noteId: String) = textNotes.blocks(noteId)
 
     /** Saves a note with its blocks; [TextNoteEntity.body] keeps the plain text (typed + recognized) for search. */
@@ -543,6 +725,8 @@ class Repository(private val db: WankiDatabase) {
 
     companion object {
         /** Learning cards due within this window are shown now, like Anki's learn-ahead. */
+        private const val COPY_SUFFIX = " (копия)"
+
         const val LEARN_AHEAD_MS = 20 * 60_000L
 
         fun startOfToday(): Long = LocalDate.now().atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()

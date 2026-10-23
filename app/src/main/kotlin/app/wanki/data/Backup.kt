@@ -93,7 +93,7 @@ class Backup(private val context: Context, private val db: WankiDatabase, privat
 
     data class Checked(
         val dbFile: File, val dbVersion: Int, val createdAt: Long, val cards: Int, val settings: JSONObject?,
-        val texts: Int, val notebooks: Int, val pages: Int, val notes: Int,
+        val texts: Int, val notebooks: Int, val boards: Int, val diaryDays: Int, val pages: Int, val notes: Int,
         /** Media files of the backup (null for backups made before media were included). */
         val media: File?,
     )
@@ -130,12 +130,16 @@ class Backup(private val context: Context, private val db: WankiDatabase, privat
             val cards = sdb.rawQuery("SELECT COUNT(*) FROM cards WHERE deleted = 0", null).use { c -> c.moveToFirst(); c.getInt(0) }
             // older backups may lack a table: count it as none
             fun count(sql: String) = runCatching { sdb.rawQuery(sql, null).use { c -> c.moveToFirst(); c.getInt(0) } }.getOrDefault(0)
-            val inkPages = "FROM page_ink i JOIN pages p ON p.id = i.pageId JOIN notebooks n ON n.id = p.notebookId WHERE p.deleted = 0 AND n.deleted = 0"
+            fun inkPages(kind: NotebookKind) =
+                "FROM page_ink i JOIN pages p ON p.id = i.pageId JOIN notebooks n ON n.id = p.notebookId " +
+                    "WHERE p.deleted = 0 AND n.deleted = 0 AND n.kind = '${kind.name}'"
             Checked(
                 dbFile, version, m.optLong("createdAt"), cards, prefs,
                 texts = count("SELECT COUNT(*) FROM texts WHERE deleted = 0"),
-                notebooks = count("SELECT COUNT(DISTINCT n.id) $inkPages"),
-                pages = count("SELECT COUNT(*) $inkPages"),
+                notebooks = count("SELECT COUNT(DISTINCT n.id) ${inkPages(NotebookKind.NOTEBOOK)}"),
+                boards = count("SELECT COUNT(DISTINCT n.id) ${inkPages(NotebookKind.BOARD)}"),
+                diaryDays = count("SELECT COUNT(*) ${inkPages(NotebookKind.DIARY)}"),
+                pages = count("SELECT COUNT(*) ${inkPages(NotebookKind.NOTEBOOK)}"),
                 notes = count("SELECT COUNT(*) FROM text_notes WHERE deleted = 0"),
                 media = media.takeIf { hasMedia },
             )

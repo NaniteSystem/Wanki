@@ -2,6 +2,7 @@ package app.wanki.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import app.wanki.input.InkSection
 import app.wanki.input.ToolSelection
@@ -58,6 +59,18 @@ class Settings(context: Context) {
     fun tool(section: InkSection): ToolSelection = ToolSelection.decode(prefs.getString("tool.${section.name}", null))
     fun setTool(section: InkSection, t: ToolSelection) { prefs.edit().putString("tool.${section.name}", t.encode()).apply() }
 
+    private val listSorts = mutableStateMapOf<String, ListSort>()
+
+    /** Sort order of a list: [SECTION_NOTEBOOKS], [SECTION_BOARDS] or [SECTION_NOTES]. */
+    fun listSort(section: String): ListSort = listSorts.getOrPut(section) {
+        runCatching { ListSort.valueOf(prefs.getString("listSort.$section", null) ?: "") }.getOrDefault(ListSort.EDITED)
+    }
+
+    fun setListSort(section: String, sort: ListSort) {
+        listSorts[section] = sort
+        prefs.edit().putString("listSort.$section", sort.name).apply()
+    }
+
     val autoLanguageList: List<String> get() = autoLanguages.split(',').map { it.trim() }.filter { it.isNotEmpty() }
 
     fun scoringConfig() = ScoringConfig(
@@ -80,6 +93,9 @@ class Settings(context: Context) {
 
     companion object {
         const val NAME = "settings"
+        const val SECTION_NOTEBOOKS = "notebooks"
+        const val SECTION_BOARDS = "boards"
+        const val SECTION_NOTES = "notes"
         const val TYPING_FONT_MIN = 16
         const val TYPING_FONT_MAX = 32
 

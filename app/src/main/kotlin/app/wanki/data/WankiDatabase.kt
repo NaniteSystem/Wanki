@@ -30,7 +30,7 @@ abstract class WankiDatabase : RoomDatabase() {
 
     companion object {
         const val NAME = "wanki.db"
-        const val VERSION = 8
+        const val VERSION = 9
 
         fun create(context: Context): WankiDatabase =
             Room.databaseBuilder(context, WankiDatabase::class.java, NAME)
@@ -156,8 +156,32 @@ abstract class WankiDatabase : RoomDatabase() {
             }
         }
 
+        /** v9: pinning, creation and deletion times (the trash), notebook page size and orientation. */
+        val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                val now = System.currentTimeMillis()
+                db.execSQL("ALTER TABLE `notebooks` ADD COLUMN `pinned` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE `notebooks` ADD COLUMN `createdAt` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE `notebooks` ADD COLUMN `deletedAt` INTEGER")
+                db.execSQL("ALTER TABLE `notebooks` ADD COLUMN `pageSize` TEXT NOT NULL DEFAULT 'A4'")
+                db.execSQL("ALTER TABLE `notebooks` ADD COLUMN `landscape` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE `pages` ADD COLUMN `deletedAt` INTEGER")
+                db.execSQL("ALTER TABLE `pages` ADD COLUMN `landscape` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE `text_notes` ADD COLUMN `pinned` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE `text_notes` ADD COLUMN `createdAt` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE `text_notes` ADD COLUMN `deletedAt` INTEGER")
+                for (t in listOf("notebooks", "text_notes")) {
+                    db.execSQL("UPDATE `$t` SET `createdAt` = `updatedAt`")
+                    // rows deleted before the trash existed start their 30 days now
+                    db.execSQL("UPDATE `$t` SET `deletedAt` = $now WHERE `deleted` = 1")
+                }
+                db.execSQL("UPDATE `pages` SET `deletedAt` = $now WHERE `deleted` = 1")
+            }
+        }
+
         val MIGRATIONS = arrayOf(
             MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8,
+            MIGRATION_8_9,
         )
     }
 }

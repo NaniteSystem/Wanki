@@ -334,6 +334,74 @@ interface NotebookDao {
     @Upsert
     suspend fun upsert(notebook: NotebookEntity)
 
+    @Query("UPDATE notebooks SET title = :title, updatedAt = :now WHERE id = :id")
+    suspend fun rename(id: String, title: String, now: Long)
+
+    @Query(
+        """
+        UPDATE notebooks SET title = :title, language = :language, template = :template, pageSize = :pageSize,
+        landscape = :landscape, updatedAt = :now WHERE id = :id
+        """,
+    )
+    suspend fun setSettings(id: String, title: String, language: String, template: String, pageSize: String, landscape: Boolean, now: Long)
+
+    @Query("UPDATE notebooks SET pinned = :pinned WHERE id = :id")
+    suspend fun setPinned(id: String, pinned: Boolean)
+
+    @Query("UPDATE notebooks SET deleted = 1, deletedAt = :now WHERE id = :id AND deleted = 0")
+    suspend fun trash(id: String, now: Long)
+
+    @Query("UPDATE notebooks SET deleted = 0, deletedAt = NULL WHERE id = :id")
+    suspend fun untrash(id: String)
+
+    @Query("DELETE FROM notebooks WHERE id = :id")
+    suspend fun deleteNotebookRow(id: String)
+
+    @Query("DELETE FROM page_ink WHERE pageId IN (SELECT id FROM pages WHERE notebookId = :notebookId)")
+    suspend fun deleteInkOfNotebook(notebookId: String)
+
+    @Query("DELETE FROM pages WHERE notebookId = :notebookId")
+    suspend fun deletePagesOf(notebookId: String)
+
+    @Query("DELETE FROM pages WHERE id = :id")
+    suspend fun deletePageRow(id: String)
+
+    @Query("SELECT * FROM notebooks WHERE deleted = 1 AND deletedAt IS NOT NULL")
+    suspend fun trashedNotebooks(): List<NotebookEntity>
+
+    @Query("SELECT * FROM notebooks WHERE deleted = 1 AND deletedAt IS NOT NULL AND deletedAt < :cutoff")
+    suspend fun expiredNotebooks(cutoff: Long): List<NotebookEntity>
+
+    /** Individually deleted pages of notebooks that are not in the trash themselves. */
+    @Query(
+        """
+        SELECT p.* FROM pages p JOIN notebooks n ON n.id = p.notebookId
+        WHERE p.deleted = 1 AND p.deletedAt IS NOT NULL AND n.deleted = 0 AND n.kind != 'BOARD'
+        """,
+    )
+    suspend fun trashedPages(): List<PageEntity>
+
+    @Query("SELECT * FROM pages WHERE deleted = 1 AND deletedAt IS NOT NULL AND deletedAt < :cutoff")
+    suspend fun expiredPages(cutoff: Long): List<PageEntity>
+
+    @Query("SELECT * FROM pages WHERE id = :id")
+    suspend fun page(id: String): PageEntity?
+
+    @Query("UPDATE pages SET deleted = 1, deletedAt = :now WHERE id = :id AND deleted = 0")
+    suspend fun trashPage(id: String, now: Long)
+
+    @Query("UPDATE pages SET deleted = 0, deletedAt = NULL WHERE id = :id")
+    suspend fun untrashPage(id: String)
+
+    @Query("UPDATE pages SET pageIndex = :index WHERE id = :id")
+    suspend fun setPageIndex(id: String, index: Int)
+
+    @Insert
+    suspend fun insertPages(pages: List<PageEntity>)
+
+    @Upsert
+    suspend fun upsertInks(inks: List<PageInkEntity>)
+
     @Query("UPDATE notebooks SET updatedAt = :now WHERE id = :id")
     suspend fun touch(id: String, now: Long = System.currentTimeMillis())
 
@@ -398,7 +466,7 @@ interface NotebookDao {
     @Query(
         """
         SELECT p.id AS pageId, p.notebookId AS notebookId, n.title AS notebookTitle, p.pageIndex AS pageIndex,
-               p.date AS date, i.recognizedText AS recognizedText
+               p.date AS date, i.recognizedText AS recognizedText, n.kind AS kind
         FROM page_ink i JOIN pages p ON p.id = i.pageId JOIN notebooks n ON n.id = p.notebookId
         WHERE p.deleted = 0 AND n.deleted = 0 AND i.recognizedText LIKE '%' || :query || '%'
         ORDER BY p.updatedAt DESC LIMIT 100
@@ -421,8 +489,32 @@ interface TextNoteDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(note: TextNoteEntity)
 
-    @Query("UPDATE text_notes SET deleted = 1, updatedAt = :now WHERE id = :id")
-    suspend fun delete(id: String, now: Long = System.currentTimeMillis())
+    @Query("UPDATE text_notes SET deleted = 1, deletedAt = :now WHERE id = :id AND deleted = 0")
+    suspend fun trash(id: String, now: Long)
+
+    @Query("UPDATE text_notes SET deleted = 0, deletedAt = NULL WHERE id = :id")
+    suspend fun untrash(id: String)
+
+    @Query("UPDATE text_notes SET title = :title, updatedAt = :now WHERE id = :id")
+    suspend fun rename(id: String, title: String, now: Long)
+
+    @Query("UPDATE text_notes SET pinned = :pinned WHERE id = :id")
+    suspend fun setPinned(id: String, pinned: Boolean)
+
+    @Query("SELECT * FROM text_notes WHERE deleted = 1 AND deletedAt IS NOT NULL")
+    suspend fun trashed(): List<TextNoteEntity>
+
+    @Query("SELECT * FROM text_notes WHERE deleted = 1 AND deletedAt IS NOT NULL AND deletedAt < :cutoff")
+    suspend fun expired(cutoff: Long): List<TextNoteEntity>
+
+    @Query("DELETE FROM note_blocks WHERE noteId = :id")
+    suspend fun deleteBlocksOf(id: String)
+
+    @Query("DELETE FROM text_notes WHERE id = :id")
+    suspend fun deleteRow(id: String)
+
+    @Insert
+    suspend fun insertBlocks(blocks: List<NoteBlockEntity>)
 
     @Query("SELECT * FROM note_blocks WHERE noteId = :noteId ORDER BY blockIndex")
     suspend fun blocks(noteId: String): List<NoteBlockEntity>

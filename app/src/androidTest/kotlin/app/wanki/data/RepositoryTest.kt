@@ -264,4 +264,213 @@ class RepositoryTest {
         assertTrue(dao.ink(broken.id) != null)
         assertEquals(0, repo.deleteEmptyInk())
     }
+
+    // --- П2: trash, duplicates, page order -----------------------------------------------------
+
+    private suspend fun inkedNotebook(title: String, pages: Int): NotebookEntity {
+        val nb = repo.createNotebook(title, PageTemplate.LINED, "ru")
+        repeat(pages - 1) { repo.addPage(nb) }
+        repo.pages(nb.id).forEach { repo.saveInk(it, listOf(stroke())) }
+        return nb
+    }
+
+    private suspend fun ids(nb: NotebookEntity) = repo.pages(nb.id).map { it.id }
+
+    @Test
+    fun deleteOpenNotebookThenRestore() = runBlocking {
+        val nb = inkedNotebook("Т", 2)
+        repo.delete(TrashKind.NOTEBOOK, nb.id)
+        assertTrue(repo.observeNotebooks(NotebookKind.NOTEBOOK).first().isEmpty())
+        assertEquals(listOf(TrashKind.NOTEBOOK to nb.id), repo.trash().map { it.kind to it.id })
+        repo.restore(TrashKind.NOTEBOOK, nb.id)
+        val back = repo.observeNotebooks(NotebookKind.NOTEBOOK).first().single()
+        assertEquals(2, back.pageCount)
+        assertEquals(2, repo.pages(nb.id).count { repo.loadInk(it.id).size == 1 })
+        assertTrue(repo.trash().isEmpty())
+    }
+
+    @Test
+    fun restoreIsIdempotent() = runBlocking {
+        val nb = inkedNotebook("Т", 1)
+        repo.delete(TrashKind.NOTEBOOK, nb.id)
+        repo.restore(TrashKind.NOTEBOOK, nb.id)
+        repo.restore(TrashKind.NOTEBOOK, nb.id)
+        assertEquals(1, repo.observeNotebooks(NotebookKind.NOTEBOOK).first().size)
+        repo.delete(TrashKind.NOTEBOOK, nb.id)
+        repo.purge(TrashKind.NOTEBOOK, nb.id)
+        repo.restore(TrashKind.NOTEBOOK, nb.id)
+        repo.purge(TrashKind.NOTEBOOK, nb.id)
+        assertTrue(repo.observeNotebooks(NotebookKind.NOTEBOOK).first().isEmpty())
+        assertTrue(repo.trash().isEmpty())
+    }
+
+    @Test
+    fun purgeExpiredRemovesOnlyOld() = runBlocking {
+        val day = 86_400_000L
+        val old = inkedNotebook("old", 2)
+        val fresh = inkedNotebook("fresh", 1)
+        val oldNote = TextNoteEntity(title = "old", body = "")
+        val freshNote = TextNoteEntity(title = "fresh", body = "")
+        repo.saveNoteWithBlocks(oldNote, listOf(NoteBlockEntity(noteId = oldNote.id, blockIndex = 0, type = NoteBlockType.TEXT.name, text = "a")))
+        repo.saveNoteWithBlocks(freshNote, listOf(NoteBlockEntity(noteId = freshNote.id, blockIndex = 0, type = NoteBlockType.TEXT.name, text = "b")))
+        val oldPages = ids(old)
+        val now = System.currentTimeMillis()
+        listOf(TrashKind.NOTEBOOK to old.id, TrashKind.NOTEBOOK to fresh.id, TrashKind.NOTE to oldNote.id, TrashKind.NOTE to freshNote.id)
+            .forEach { repo.delete(it.first, it.second) }
+        db.openHelper.writableDatabase.apply {
+            execSQL("UPDATE notebooks SET deletedAt = ${now - 31 * day} WHERE id = '${old.id}'")
+            execSQL("UPDATE notebooks SET deletedAt = ${now - 29 * day} WHERE id = '${fresh.id}'")
+            execSQL("UPDATE text_notes SET deletedAt = ${now - 31 * day} WHERE id = '${oldNote.id}'")
+            execSQL("UPDATE text_notes SET deletedAt = ${now - 29 * day} WHERE id = '${freshNote.id}'")
+        }
+        assertEquals(2, repo.purgeExpired(now))
+        assertEquals(listOf(fresh.id, freshNote.id).toSet(), repo.trash().map { it.id }.toSet())
+        assertEquals(null, repo.notebook(old.id))
+        val sdb = db.openHelper.readableDatabase
+        fun count(sql: String) = sdb.query(sql).use { it.moveToFirst(); it.getInt(0) }
+        assertEquals(0, count("SELECT COUNT(*) FROM pages WHERE notebookId = '${old.id}'"))
+        assertEquals(0, count("SELECT COUNT(*) FROM page_ink WHERE pageId IN (${oldPages.joinToString { "'$it'" }})"))
+        assertEquals(1, count("SELECT COUNT(*) FROM page_ink"))
+        assertEquals(0, count("SELECT COUNT(*) FROM note_blocks WHERE noteId = '${oldNote.id}'"))
+        assertEquals(1, count("SELECT COUNT(*) FROM note_blocks"))
+    }
+
+    @Test
+    fun restorePageRestoresNotebook() = runBlocking {
+        val nb = inkedNotebook("Т", 3)
+        val (a, b, c) = ids(nb)
+        repo.delete(TrashKind.PAGE, b)
+        assertEquals(listOf(a, c), ids(nb))
+        assertEquals(listOf(0, 1), repo.pages(nb.id).map { it.pageIndex })
+        repo.delete(TrashKind.NOTEBOOK, nb.id)
+        // the deleted page belongs to the trashed notebook's item now
+        assertEquals(listOf(TrashKind.NOTEBOOK), repo.trash().map { it.kind })
+        repo.restore(TrashKind.PAGE, b)
+        assertEquals(1, repo.observeNotebooks(NotebookKind.NOTEBOOK).first().size)
+        assertEquals(listOf(a, b, c), ids(nb))
+        assertEquals(listOf(0, 1, 2), repo.pages(nb.id).map { it.pageIndex })
+    }
+
+    @Test
+    fun restoreDiaryDayRestoresItsDay() = runBlocking {
+        val day = java.time.LocalDate.of(2026, 10, 21)
+        val page = repo.diaryPage(day)
+        repo.saveInk(page, listOf(stroke()))
+        repo.delete(TrashKind.DIARY_DAY, page.id)
+        assertTrue(repo.observeDiaryDates(repo.diary().id).first().isEmpty())
+        assertEquals(TrashKind.DIARY_DAY, repo.trash().single().kind)
+        repo.restore(TrashKind.DIARY_DAY, page.id)
+        assertEquals(listOf(day.toEpochDay()), repo.observeDiaryDates(repo.diary().id).first())
+    }
+
+    @Test
+    fun duplicateNotebookIsDeepCopy() = runBlocking {
+        val nb = inkedNotebook("Т", 3)
+        val copy = repo.duplicateNotebook(nb.id)
+        assertEquals("Т (копия)", copy.title)
+        val a = repo.pages(nb.id)
+        val b = repo.pages(copy.id)
+        assertEquals(3, b.size)
+        assertTrue((a.map { it.id } + b.map { it.id }).toSet().size == 6)
+        assertEquals(a.map { it.pageIndex }, b.map { it.pageIndex })
+        b.forEachIndexed { i, p -> assertEquals(repo.loadInk(a[i].id), repo.loadInk(p.id)) }
+        repo.saveInk(b[0], listOf(stroke(), stroke()))
+        assertEquals(1, repo.loadInk(a[0].id).size)
+        assertEquals(2, repo.loadInk(b[0].id).size)
+    }
+
+    @Test
+    fun duplicatePageInsertsAfter() = runBlocking {
+        val nb = inkedNotebook("Т", 3)
+        val (a, b, c) = ids(nb)
+        val copy = repo.duplicatePage(b)
+        assertEquals(listOf(a, b, copy.id, c), ids(nb))
+        assertEquals(listOf(0, 1, 2, 3), repo.pages(nb.id).map { it.pageIndex })
+        assertEquals(1, repo.loadInk(copy.id).size)
+    }
+
+    @Test
+    fun duplicateNoteCopiesBlocks() = runBlocking {
+        val n = TextNoteEntity(title = "З", body = "t")
+        repo.saveNoteWithBlocks(n, listOf(NoteBlockEntity(noteId = n.id, blockIndex = 0, type = NoteBlockType.TEXT.name, text = "t")))
+        val copy = repo.duplicateNote(n.id)
+        assertEquals("З (копия)", copy.title)
+        assertEquals(listOf("t"), repo.noteBlocks(copy.id).map { it.text })
+        assertEquals(1, repo.noteBlocks(n.id).size)
+    }
+
+    @Test
+    fun movePageKeepsDenseIndices() = runBlocking {
+        val nb = inkedNotebook("Т", 4)
+        val (a, b, c, d) = ids(nb)
+        repo.movePage(nb.id, 0, 2)
+        assertEquals(listOf(b, c, a, d), ids(nb))
+        repo.movePage(nb.id, 3, 1)
+        assertEquals(listOf(b, d, c, a), ids(nb))
+        assertEquals(listOf(0, 1, 2, 3), repo.pages(nb.id).map { it.pageIndex })
+    }
+
+    @Test
+    fun insertPageUsesNotebookDefaults() = runBlocking {
+        val nb = repo.createNotebook("Т", PageTemplate.GRID, "ru")
+        repo.setNotebookSettings(nb.id, "Т2", "en", PageTemplate.GRID, PageSize.A5, true)
+        val first = repo.pages(nb.id).single()
+        val p = repo.insertPage(nb.id, 0)
+        assertTrue(p.landscape)
+        assertEquals("GRID", p.template)
+        assertEquals(listOf(p.id, first.id), ids(nb))
+        assertEquals(listOf(0, 1), repo.pages(nb.id).map { it.pageIndex })
+        val saved = repo.notebook(nb.id)!!
+        assertEquals("Т2", saved.title)
+        assertEquals("A5", saved.pageSize)
+    }
+
+    @Test
+    fun deletingLastPageIsRefused() = runBlocking {
+        val nb = repo.createNotebook("Т", PageTemplate.LINED, "ru")
+        val only = repo.pages(nb.id).single()
+        val e = runCatching { repo.delete(TrashKind.PAGE, only.id) }.exceptionOrNull()
+        assertTrue(e is IllegalStateException)
+        assertEquals("last page", e?.message)
+        assertEquals(listOf(only.id), ids(nb))
+        assertTrue(repo.trash().isEmpty())
+    }
+
+    @Test
+    fun pinningAndRenaming() = runBlocking {
+        val nb = repo.createNotebook("Т", PageTemplate.LINED, "ru")
+        repo.setPinned(TrashKind.NOTEBOOK, nb.id, true)
+        assertTrue(repo.notebook(nb.id)!!.pinned)
+        val n = TextNoteEntity(title = "З", body = "")
+        repo.saveTextNote(n)
+        repo.setPinned(TrashKind.NOTE, n.id, true)
+        repo.renameNote(n.id, " Новая ")
+        assertEquals("Новая", repo.textNote(n.id)!!.title)
+        assertTrue(repo.textNote(n.id)!!.pinned)
+    }
+
+    @Test
+    fun searchHitHasKind() = runBlocking {
+        val nb = inkedNotebook("Т", 1)
+        repo.setRecognizedText(repo.pages(nb.id).single().id, "слово")
+        assertEquals(listOf("NOTEBOOK"), repo.searchPages("лов").map { it.kind })
+    }
+
+    @Test
+    fun restoreSummaryCountsByKind() = runBlocking {
+        inkedNotebook("Т", 2)
+        val board = repo.createBoard("Д")
+        repo.saveInk(repo.boardPage(board.id)!!.second, listOf(stroke()))
+        repo.saveInk(repo.diaryPage(java.time.LocalDate.of(2026, 10, 20)), listOf(stroke()))
+        repo.saveInk(repo.diaryPage(java.time.LocalDate.of(2026, 10, 21)), listOf(stroke()))
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val bytes = java.io.ByteArrayOutputStream().also { backup().write(it, includeMedia = false) }.toByteArray()
+        val checked = backup().check(java.io.ByteArrayInputStream(bytes))
+        assertEquals(1, checked.notebooks)
+        assertEquals(1, checked.boards)
+        assertEquals(2, checked.diaryDays)
+        assertEquals(2, checked.pages)
+        context.cacheDir.resolve("restore").deleteRecursively()
+        Unit
+    }
 }
