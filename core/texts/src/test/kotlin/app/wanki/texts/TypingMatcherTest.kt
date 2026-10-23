@@ -163,4 +163,92 @@ class TypingMatcherTest {
         assertEquals(1200, r.correct)
         assertEquals(6000, r.total)
     }
+
+    @Test
+    fun markTypedAfterItsBaseRefoldsTheBase() {
+        val u = listOf(TypingUnit("が"), TypingUnit("く"))
+        val m = TypingMatcher(u)
+        m.update("か")
+        assertEquals(TypingMatcher(u).update("か\u3099"), m.update("か\u3099"))
+    }
+
+    /** Every case above, typed key by key: the band never changes a result. */
+    @Test
+    fun bandedEqualsUnbandedOnTheCases() {
+        val cases = listOf(
+            abc to "abc def ghi", abc to "abc dxf ghi", abc to "abc ghi", abc to "abc xyz def ghi", abc to "abc dxef ghi",
+            words("abc", "def", "ghi", "jkl", "mnopqrstuv") to "abc mnopqrstuv",
+            listOf(TypingUnit("すべて", listOf("全て")), TypingUnit("の")) to "全ての",
+            listOf(TypingUnit("abc"), TypingUnit(""), TypingUnit("def")) to "abcdef",
+            listOf(TypingUnit("a\uD83D\uDE00b"), TypingUnit("c")) to "a, b c",
+        )
+        for ((units, typed) in cases) {
+            for (window in listOf(16, TypingMatcher.WINDOW)) assertSameAsUnbanded(units, typed, window)
+        }
+    }
+
+    /** Normal typing of a long text (typos, a skipped word, an extra word, backspaces) under a small band. */
+    @Test
+    fun bandedEqualsUnbandedOnNormalTyping() {
+        val rnd = Random(5)
+        val kana = "あいうえおかきくけこさしすせそたちつてと"
+        val units = List(400) { TypingUnit(String(CharArray(2 + rnd.nextInt(6)) { kana[rnd.nextInt(kana.length)] })) }
+        val typed = StringBuilder()
+        for (u in units) {
+            when (rnd.nextInt(20)) {
+                0 -> continue                                            // skipped word
+                1 -> typed.append("ぬぬ ")                                // extra word
+                2 -> typed.append(u.reading.dropLast(1)).append('ん')    // typo
+                else -> typed.append(u.reading)
+            }
+            typed.append(' ')
+        }
+        for (window in listOf(16, TypingMatcher.WINDOW)) assertSameAsUnbanded(units, typed.toString(), window, backspaces = true)
+    }
+
+    private fun assertSameAsUnbanded(units: List<TypingUnit>, typed: String, window: Int, backspaces: Boolean = false) {
+        val full = TypingMatcher(units, window = Int.MAX_VALUE)
+        val banded = TypingMatcher(units, window = window)
+        for (i in 1..typed.length) {
+            val t = typed.substring(0, i)
+            assertEquals(full.update(t), banded.update(t), "window $window at $i: $t")
+            if (backspaces && i % 37 == 0) {
+                val back = t.dropLast(3)
+                assertEquals(full.update(back), banded.update(back), "window $window back at $i")
+            }
+        }
+    }
+
+    /** Memory is typed × band, not typed × text: a 20 000-char text typed to the end fits the test heap. */
+    @Test
+    fun longTextTypedFullyFitsTheHeap() {
+        val (units, text) = longText(4000)
+        val m = TypingMatcher(units)
+        var r: TypingResult? = null
+        var i = 0
+        while (i < text.length) {
+            i = minOf(text.length, i + 1 + i % 5)
+            r = m.update(text.substring(0, i))
+        }
+        assertTrue(r!!.finished)
+        assertEquals(4000, r.correct)
+        assertEquals(20_000, r.total)
+    }
+
+    /** A resumed draft of a long text is matched at once, without running out of memory. */
+    @Test
+    fun longDraftRestoredAtOnce() {
+        val (units, text) = longText(4000)
+        val r = TypingMatcher(units).update(text.substring(0, 18_000))
+        // 3000 words of five letters and a space
+        assertEquals(3000, r.correct)
+        assertEquals(15_000, r.end)
+    }
+
+    private fun longText(words: Int): Pair<List<TypingUnit>, String> {
+        val rnd = Random(9)
+        val letters = "абвгдежзиклмнопрстуфхцчшщэюя"
+        val units = List(words) { TypingUnit(String(CharArray(5) { letters[rnd.nextInt(letters.length)] })) }
+        return units to units.joinToString(" ") { it.reading }
+    }
 }

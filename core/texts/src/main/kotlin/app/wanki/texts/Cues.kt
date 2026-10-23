@@ -52,10 +52,11 @@ object FirstLetters {
     }
 }
 
-/** Letter variants that count as the same letter when comparing: Russian ё, Arabic alef/yaa/waw/taa forms. */
+/** Letter variants that count as the same letter when comparing: Russian ё, Greek final sigma, Arabic alef/yaa/waw/taa forms. */
 object LetterFolding {
     fun fold(c: Char): String = when (c) {
         'ё' -> "е"
+        'ς' -> "σ"
         'آ', 'أ', 'إ', 'ٱ' -> "ا"
         'ى', 'ئ' -> "ي"
         'ؤ' -> "و"

@@ -22,9 +22,11 @@ data class TypingResult(
 /**
  * Aligns typed text against the readings of [units] (edit distance: skipped reading char 2, wrong or extra
  * typed char 3; a whole unit can also be typed as one of its other spellings). The DP rows of the previous
- * [update] are kept, so appending a character computes one row.
+ * [update] are kept, so appending a character computes one row. Each row only holds the columns within
+ * [window] of the previous row's best end (a band): memory is typed × band, not typed × text, and a run that
+ * skips less than [window] checked characters at once aligns exactly as with full rows.
  */
-class TypingMatcher(private val units: List<TypingUnit>) {
+class TypingMatcher(private val units: List<TypingUnit>, private val window: Int = WINDOW) {
     private class Jump(val start: Int, val form: IntArray)
 
     private class Op(val kind: Int, val ai: Int, val bj: Int, val len: Int)
@@ -39,8 +41,17 @@ class TypingMatcher(private val units: List<TypingUnit>) {
     private val m: Int
     private val width: Int
 
-    /** DP rows, one 16-bit array each: costs saturate at [MAX_COST], rows are never copied when the text grows. */
+    /** The fewest typed characters that complete units from k on (the shortest spelling of each). */
+    private val restFrom: IntArray
+
+    /**
+     * DP rows, one 16-bit array each holding columns [rowLo]..: costs saturate at [MAX_COST], a column outside
+     * a row's band reads as [MAX_COST]. [rowBest] is each row's best end (the last column with the least cost).
+     */
     private val rows = ArrayList<CharArray>()
+    private var rowLo = IntArray(64)
+    private var rowBest = IntArray(64)
+    private val fold = IncrementalFold()
     private var prevT = IntArray(0)
 
     init {
@@ -56,6 +67,8 @@ class TypingMatcher(private val units: List<TypingUnit>) {
         width = m + 1
         byEnd = arrayOfNulls(width)
         columnUnit = IntArray(m)
+        restFrom = IntArray(units.size + 1)
+        val shortest = IntArray(units.size) { folds[it].size }
         for ((k, u) in units.withIndex()) {
             for (c in unitStart[k] until unitEnd[k]) columnUnit[c] = k
             val own = folds[k].toList()
@@ -63,52 +76,79 @@ class TypingMatcher(private val units: List<TypingUnit>) {
                 val f = TypingText.fold(form).chars
                 if (unitStart[k] == unitEnd[k] || f.isEmpty() || f.toList() == own) continue
                 (byEnd[unitEnd[k]] ?: ArrayList<Jump>().also { byEnd[unitEnd[k]] = it }).add(Jump(unitStart[k], f))
+                if (f.size < shortest[k]) shortest[k] = f.size
             }
         }
+        for (k in units.indices.reversed()) restFrom[k] = restFrom[k + 1] + shortest[k]
+        // row 0 is whole: skipping the first j reading chars
         rows.add(CharArray(width) { cost(2 * it) })
     }
 
+    /** The fewest typed characters that could still finish the text from reading column [end]. */
+    fun minToFinish(end: Int): Int {
+        if (end >= m) return 0
+        val k = columnUnit[end]
+        return if (end == unitStart[k]) restFrom[k] else unitEnd[k] - end + restFrom[k + 1]
+    }
+
     fun update(typed: String): TypingResult {
-        val folded = TypingText.fold(typed)
+        var p = fold.update(typed)
+        val folded = fold.folded()
         val t = folded.chars
         val n = t.size
-        var p = 0
         val limit = minOf(n, prevT.size)
+        if (p > limit) p = limit
         while (p < limit && t[p] == prevT[p]) p++
         while (rows.size > n + 1) rows.removeAt(rows.size - 1)
-        for (i in p + 1..n) {
-            if (rows.size <= i) rows.add(CharArray(width))
-            computeRow(i, t)
-        }
+        for (i in p + 1..n) computeRow(i, t)
         prevT = t
-        val last = rows[n]
-        var end = 0
-        for (j in 0..m) if (last[j] <= last[end]) end = j
+        val end = rowBest[n]
         return judge(typed, folded, end, traceback(t, n, end))
     }
 
     private fun cost(v: Int): Char = (if (v > MAX_COST) MAX_COST else v).toChar()
 
-    private fun computeRow(i: Int, t: IntArray) {
+    /** The cost at row [i], column [j]; [MAX_COST] outside the row's band. */
+    private fun at(i: Int, j: Int): Int {
         val row = rows[i]
-        val prev = rows[i - 1]
-        row[0] = cost(prev[0].code + 3)
-        for (j in 1..m) {
-            var best = row[j - 1].code + 2
-            val diag = prev[j - 1].code + if (t[i - 1] == reading[j - 1]) 0 else 3
-            if (diag < best) best = diag
-            val ins = prev[j].code + 3
-            if (ins < best) best = ins
+        val k = j - rowLo[i]
+        return if (k < 0 || k >= row.size) MAX_COST else row[k].code
+    }
+
+    private fun computeRow(i: Int, t: IntArray) {
+        val center = rowBest[i - 1]
+        val lo = maxOf(0L, center.toLong() - window).toInt()
+        val hi = minOf(m.toLong(), center.toLong() + window).toInt()
+        val row = CharArray(hi - lo + 1)
+        if (rows.size <= i) rows.add(row) else rows[i] = row
+        if (rowLo.size <= i) {
+            rowLo = rowLo.copyOf(maxOf(i + 1, rowLo.size * 2))
+            rowBest = rowBest.copyOf(rowLo.size)
+        }
+        rowLo[i] = lo
+        var best = lo
+        for (j in lo..hi) {
+            var v = at(i - 1, j) + 3
+            if (j > lo) {
+                val del = row[j - 1 - lo].code + 2
+                if (del < v) v = del
+            }
+            if (j > 0) {
+                val diag = at(i - 1, j - 1) + if (t[i - 1] == reading[j - 1]) 0 else 3
+                if (diag < v) v = diag
+            }
             val jumps = byEnd[j]
             if (jumps != null) {
                 for (jump in jumps) {
                     if (!formEndsAt(t, i, jump.form)) continue
-                    val v = rows[i - jump.form.size][jump.start].code
-                    if (v < best) best = v
+                    val w = at(i - jump.form.size, jump.start)
+                    if (w < v) v = w
                 }
             }
-            row[j] = cost(best)
+            row[j - lo] = cost(v)
+            if (row[j - lo] <= row[best - lo]) best = j
         }
+        rowBest[i] = best
     }
 
     private fun formEndsAt(t: IntArray, i: Int, form: IntArray): Boolean {
@@ -124,15 +164,20 @@ class TypingMatcher(private val units: List<TypingUnit>) {
         var i = n
         var j = end
         while (i > 0 || j > 0) {
-            val cur = rows[i][j].code
-            if (j > 0 && cost(rows[i][j - 1].code + 2).code == cur) {
+            val cur = at(i, j)
+            if (j > 0 && cost(at(i, j - 1) + 2).code == cur) {
                 ops.add(Op(DEL, -1, j - 1, 0)); j--
-            } else if (i > 0 && j > 0 && cost(rows[i - 1][j - 1].code + (if (t[i - 1] == reading[j - 1]) 0 else 3)).code == cur) {
+            } else if (i > 0 && j > 0 && cost(at(i - 1, j - 1) + (if (t[i - 1] == reading[j - 1]) 0 else 3)).code == cur) {
                 ops.add(Op(if (t[i - 1] == reading[j - 1]) OK else SUB, i - 1, j - 1, 0)); i--; j--
-            } else if (i > 0 && cost(rows[i - 1][j].code + 3).code == cur) {
+            } else if (i > 0 && cost(at(i - 1, j) + 3).code == cur) {
                 ops.add(Op(INS, i - 1, -1, 0)); i--
             } else {
-                val jump = byEnd[j]!!.first { formEndsAt(t, i, it.form) && rows[i - it.form.size][it.start].code == cur }
+                val jump = byEnd[j]?.firstOrNull { formEndsAt(t, i, it.form) && at(i - it.form.size, it.start) == cur }
+                if (jump == null) {
+                    // only a saturated cost can get here: step back as an extra char or a skipped one
+                    if (i > 0) { ops.add(Op(INS, i - 1, -1, 0)); i-- } else { ops.add(Op(DEL, -1, j - 1, 0)); j-- }
+                    continue
+                }
                 ops.add(Op(JUMP, i, jump.start, jump.form.size))
                 i -= jump.form.size; j = jump.start
             }
@@ -232,12 +277,13 @@ class TypingMatcher(private val units: List<TypingUnit>) {
         return TypingResult(results, trailing, end, m, correct, mistakes)
     }
 
-    private companion object {
-        const val MAX_COST = 65535
-        const val OK = 1
-        const val SUB = 2
-        const val DEL = 3
-        const val INS = 4
-        const val JUMP = 5
+    companion object {
+        const val WINDOW = 512
+        private const val MAX_COST = 65535
+        private const val OK = 1
+        private const val SUB = 2
+        private const val DEL = 3
+        private const val INS = 4
+        private const val JUMP = 5
     }
 }
