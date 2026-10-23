@@ -473,4 +473,57 @@ class RepositoryTest {
         context.cacheDir.resolve("restore").deleteRecursively()
         Unit
     }
+
+    @Test
+    fun purgeOfLiveItemsChangesNothing() = runBlocking {
+        val nb = inkedNotebook("Т", 2)
+        val n = TextNoteEntity(title = "З", body = "")
+        repo.saveNoteWithBlocks(n, listOf(NoteBlockEntity(noteId = n.id, blockIndex = 0, type = NoteBlockType.TEXT.name, text = "a")))
+        val page = ids(nb).first()
+        repo.purge(TrashKind.NOTEBOOK, nb.id)
+        repo.purge(TrashKind.PAGE, page)
+        repo.purge(TrashKind.NOTE, n.id)
+        assertEquals(2, repo.observeNotebooks(NotebookKind.NOTEBOOK).first().single().pageCount)
+        assertEquals(listOf(0, 1), repo.pages(nb.id).map { it.pageIndex })
+        assertEquals(2, repo.pages(nb.id).count { repo.loadInk(it.id).size == 1 })
+        assertEquals(1, repo.noteBlocks(n.id).size)
+        assertTrue(repo.textNote(n.id) != null)
+    }
+
+    @Test
+    fun restoreDiaryDayOverEmptyDay() = runBlocking {
+        val day = java.time.LocalDate.of(2026, 10, 21)
+        val old = repo.diaryPage(day)
+        repo.saveInk(old, listOf(stroke()))
+        repo.delete(TrashKind.DIARY_DAY, old.id)
+        val fresh = repo.diaryPage(day)   // opened again, nothing written
+        repo.saveInk(fresh, emptyList())
+        repo.restore(TrashKind.DIARY_DAY, old.id)
+        assertEquals(old.id, repo.diaryPage(day).id)
+        assertEquals(1, repo.loadInk(old.id).size)
+    }
+
+    @Test
+    fun restoreDiaryDayOverWrittenDayThrows() = runBlocking {
+        val day = java.time.LocalDate.of(2026, 10, 21)
+        val old = repo.diaryPage(day)
+        repo.saveInk(old, listOf(stroke()))
+        repo.delete(TrashKind.DIARY_DAY, old.id)
+        val fresh = repo.diaryPage(day)
+        repo.saveInk(fresh, listOf(stroke(), stroke()))
+        val e = runCatching { repo.restore(TrashKind.DIARY_DAY, old.id) }.exceptionOrNull()
+        assertTrue(e is DayTakenException)
+        assertEquals(fresh.id, repo.diaryPage(day).id)
+        assertEquals(listOf(TrashKind.DIARY_DAY), repo.trash().map { it.kind })
+    }
+
+    @Test
+    fun pageOrderOperationsRefuseTheDiary() = runBlocking {
+        val page = repo.diaryPage(java.time.LocalDate.of(2026, 10, 21))
+        repo.saveInk(page, listOf(stroke()))
+        val diary = repo.diary()
+        assertTrue(runCatching { repo.duplicatePage(page.id) }.exceptionOrNull() is IllegalArgumentException)
+        assertTrue(runCatching { repo.insertPage(diary.id, 0) }.exceptionOrNull() is IllegalArgumentException)
+        assertTrue(runCatching { repo.movePage(diary.id, 0, 0) }.exceptionOrNull() is IllegalArgumentException)
+    }
 }

@@ -21,6 +21,8 @@ object ListOrder {
         edited: (T) -> Long,
         created: (T) -> Long,
     ): List<T> {
+        // a Collator is not safe to share between threads
+        val collator = collator.clone() as Collator
         val byPin = compareByDescending<T> { pinned(it) }
         val order: Comparator<T> = when (sort) {
             ListSort.EDITED -> byPin.thenByDescending { edited(it) }

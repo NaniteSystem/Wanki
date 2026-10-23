@@ -62,9 +62,8 @@ class Settings(context: Context) {
     private val listSorts = mutableStateMapOf<String, ListSort>()
 
     /** Sort order of a list: [SECTION_NOTEBOOKS], [SECTION_BOARDS] or [SECTION_NOTES]. */
-    fun listSort(section: String): ListSort = listSorts.getOrPut(section) {
-        runCatching { ListSort.valueOf(prefs.getString("listSort.$section", null) ?: "") }.getOrDefault(ListSort.EDITED)
-    }
+    fun listSort(section: String): ListSort = listSorts[section]
+        ?: runCatching { ListSort.valueOf(prefs.getString("listSort.$section", null) ?: "") }.getOrDefault(ListSort.EDITED)
 
     fun setListSort(section: String, sort: ListSort) {
         listSorts[section] = sort

@@ -22,6 +22,9 @@ import java.time.LocalDate
 import java.time.ZoneId
 
 /** All persistence used by the screens. */
+/** Restoring a diary day is refused: that date has been written to since. */
+class DayTakenException : IllegalStateException("day taken")
+
 class Repository(private val db: WankiDatabase) {
     private val decks = db.decks()
     private val cards = db.cards()
@@ -473,10 +476,10 @@ class Repository(private val db: WankiDatabase) {
             deleted = false, deletedAt = null, pinned = false,
         )
         notebooks.upsert(copy)
-        val pages = notebooks.pages(id).map { it.copy(id = newId(), notebookId = copy.id, updatedAt = now) }
-        val oldIds = notebooks.pages(id).map { it.id }
+        val old = notebooks.pages(id)
+        val pages = old.map { it.copy(id = newId(), notebookId = copy.id, updatedAt = now) }
         notebooks.insertPages(pages)
-        notebooks.upsertInks(oldIds.indices.mapNotNull { i -> notebooks.ink(oldIds[i])?.copy(pageId = pages[i].id, updatedAt = now) })
+        notebooks.upsertInks(old.indices.mapNotNull { i -> notebooks.ink(old[i].id)?.copy(pageId = pages[i].id, updatedAt = now) })
         copy
     }
 
@@ -492,6 +495,7 @@ class Repository(private val db: WankiDatabase) {
     /** Copies a notebook page with its ink right after the original. */
     suspend fun duplicatePage(pageId: String): PageEntity = db.withTransaction {
         val src = notebooks.page(pageId) ?: error("no page")
+        requireNumbered(src.notebookId)
         val now = System.currentTimeMillis()
         val copy = src.copy(id = newId(), updatedAt = now, deleted = false, deletedAt = null)
         val live = notebooks.pages(src.notebookId).toMutableList()
@@ -507,7 +511,7 @@ class Repository(private val db: WankiDatabase) {
 
     /** A new page at position [at] (clamped), with the notebook's paper and orientation. */
     suspend fun insertPage(notebookId: String, at: Int): PageEntity = db.withTransaction {
-        val nb = notebooks.get(notebookId) ?: error("no notebook")
+        val nb = requireNumbered(notebookId)
         val live = notebooks.pages(notebookId).toMutableList()
         val pos = at.coerceIn(0, live.size)
         val p = PageEntity(notebookId = notebookId, pageIndex = pos, template = nb.template, landscape = nb.landscape)
@@ -520,11 +524,19 @@ class Repository(private val db: WankiDatabase) {
 
     /** Moves a page from position [from] to [to]; indices stay 0..n-1. */
     suspend fun movePage(notebookId: String, from: Int, to: Int) = db.withTransaction {
+        requireNumbered(notebookId)
         val live = notebooks.pages(notebookId).toMutableList()
         require(from in live.indices && to in live.indices) { "page position out of range" }
         live.add(to, live.removeAt(from))
         renumber(live)
         notebooks.touch(notebookId)
+    }
+
+    /** Pages are inserted, copied and moved only in notebooks; diary pages are keyed by date, a board has one page. */
+    private suspend fun requireNumbered(notebookId: String): NotebookEntity {
+        val nb = notebooks.get(notebookId) ?: error("no notebook")
+        require(nb.kind == NotebookKind.NOTEBOOK.name) { "pages of a ${nb.kind} are not ordered" }
+        return nb
     }
 
     /** Rewrites pageIndex to the list order. */
@@ -567,9 +579,8 @@ class Repository(private val db: WankiDatabase) {
                 if (page.date != null) {
                     val taken = notebooks.pageForDate(nb.id, page.date)
                     if (taken != null) {
-                        if (notebooks.ink(taken.id) != null) throw IllegalStateException("day taken")
-                        notebooks.deleteInk(taken.id)
-                        notebooks.deletePageRow(taken.id)
+                        if (notebooks.ink(taken.id) != null) throw DayTakenException()
+                        removePage(taken.id)
                     }
                 }
                 notebooks.untrashPage(id)
@@ -584,23 +595,34 @@ class Repository(private val db: WankiDatabase) {
         }
     }
 
-    /** Removes an item for good together with its pages, ink and blocks. */
-    suspend fun purge(kind: TrashKind, id: String) = db.withTransaction {
+    /**
+     * Removes an item that is in the trash for good together with its pages, ink and blocks.
+     * A live (or missing) item is left alone; returns whether anything was removed.
+     */
+    suspend fun purge(kind: TrashKind, id: String): Boolean = db.withTransaction {
         when (kind) {
             TrashKind.NOTEBOOK, TrashKind.BOARD -> {
+                if (notebooks.get(id)?.deleted != true) return@withTransaction false
                 notebooks.deleteInkOfNotebook(id)
                 notebooks.deletePagesOf(id)
                 notebooks.deleteNotebookRow(id)
             }
             TrashKind.NOTE -> {
+                if (textNotes.get(id)?.deleted != true) return@withTransaction false
                 textNotes.deleteBlocksOf(id)
                 textNotes.deleteRow(id)
             }
             TrashKind.PAGE, TrashKind.DIARY_DAY -> {
-                notebooks.deleteInk(id)
-                notebooks.deletePageRow(id)
+                if (notebooks.page(id)?.deleted != true) return@withTransaction false
+                removePage(id)
             }
         }
+        true
+    }
+
+    private suspend fun removePage(id: String) {
+        notebooks.deleteInk(id)
+        notebooks.deletePageRow(id)
     }
 
     /** Everything in the trash, newest deletion first. */
@@ -633,10 +655,9 @@ class Repository(private val db: WankiDatabase) {
         val nbs = notebooks.expiredNotebooks(cutoff)
         val notes = textNotes.expired(cutoff)
         val pages = notebooks.expiredPages(cutoff)
-        nbs.forEach { purge(TrashKind.NOTEBOOK, it.id) }
-        notes.forEach { purge(TrashKind.NOTE, it.id) }
-        pages.forEach { purge(TrashKind.PAGE, it.id) }
-        nbs.size + notes.size + pages.size
+        // pages of a purged notebook are already gone: only what was really removed counts
+        nbs.count { purge(TrashKind.NOTEBOOK, it.id) } + notes.count { purge(TrashKind.NOTE, it.id) } +
+            pages.count { purge(TrashKind.PAGE, it.id) }
     }
 
     suspend fun diary(): NotebookEntity = singlePageNotebook(NotebookKind.DIARY, "Дневник", PageTemplate.LINED).first
