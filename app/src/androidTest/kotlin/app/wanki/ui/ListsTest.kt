@@ -136,7 +136,7 @@ class ListsTest {
     }
 
     @Test
-    fun notebookCardHasThumbnailAndMenuHasSettings() {
+    fun notebookMenuHasSettings() {
         val nb = runBlocking { repo.createNotebook("N-$stamp", PageTemplate.LINED, "auto") }
         openTab("Тетради")
         longPress("notebook-${nb.id}")

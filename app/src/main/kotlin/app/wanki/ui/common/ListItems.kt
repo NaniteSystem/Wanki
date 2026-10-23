@@ -98,7 +98,7 @@ fun RenameDialog(current: String, onDismiss: () -> Unit, onRename: (String) -> U
         title = { Text("Переименовать") },
         text = { OutlinedTextField(title, { title = it }, singleLine = true, modifier = Modifier.testTag("rename-field")) },
         confirmButton = {
-            TextButton(onClick = { onRename(title) }, modifier = Modifier.testTag("rename-ok")) { Text("Готово") }
+            TextButton(onClick = { onRename(title) }, enabled = title.isNotBlank(), modifier = Modifier.testTag("rename-ok")) { Text("Готово") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } },
     )

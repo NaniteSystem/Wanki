@@ -121,7 +121,7 @@ fun NotebooksScreen(
                 emptyAction = HeaderAction(R.drawable.ic_book_2, "Новая тетрадь", "notebooks-empty-new") { creating = true },
             ) {
                 LazyVerticalGrid(
-                    GridCells.Adaptive(180.dp),
+                    GridCells.Adaptive(150.dp),
                     Modifier.fillMaxSize().padding(16.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -141,7 +141,7 @@ fun NotebooksScreen(
                             onClick = { onOpen(nb.id, null) },
                         ) {
                             Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                FirstPageThumbnail(nb.id, Modifier.fillMaxWidth())
+                                FirstPageThumbnail(nb.id)
                                 Text(nb.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                                 Text(
                                     "${n.pageCount} стр. · ${DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(nb.updatedAt))}",

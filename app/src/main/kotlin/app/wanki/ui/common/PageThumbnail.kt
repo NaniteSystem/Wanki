@@ -1,7 +1,13 @@
 package app.wanki.ui.common
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -91,12 +97,14 @@ internal fun renderThumbnail(template: PageTemplate, landscape: Boolean, strokes
     return image
 }
 
-/** The first page of a notebook as a thumbnail; nothing while the pages load. */
+/** The first page of a notebook (or board) as a thumbnail, centred in the width and at most [maxHeight] tall; nothing while it loads. */
 @Composable
-fun FirstPageThumbnail(notebookId: String, modifier: Modifier = Modifier) {
+fun FirstPageThumbnail(notebookId: String, modifier: Modifier = Modifier, board: Boolean = false, maxHeight: Dp = 170.dp) {
     val repository = LocalContext.current.graph.repository
     val first by remember(notebookId) { repository.observePages(notebookId).map { it.firstOrNull() } }.collectAsState(null)
-    first?.let { PageThumbnail(it, modifier) }
+    Box(modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        first?.let { if (board) BoardThumbnail(it, Modifier.fillMaxWidth()) else PageThumbnail(it, Modifier.heightIn(max = maxHeight)) }
+    }
 }
 
 private const val BOARD_THUMB_WIDTH = 340

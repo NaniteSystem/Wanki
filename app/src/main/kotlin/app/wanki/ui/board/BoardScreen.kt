@@ -40,7 +40,7 @@ import app.wanki.R
 import androidx.compose.ui.text.style.TextOverflow
 import app.wanki.data.ListOrder
 import app.wanki.data.Settings.Companion.SECTION_BOARDS
-import app.wanki.ui.common.BoardThumbnail
+import app.wanki.ui.common.FirstPageThumbnail
 import app.wanki.ui.common.ListActions
 import app.wanki.ui.common.ListCard
 import app.wanki.ui.common.LocalUndo
@@ -81,7 +81,7 @@ fun BoardsScreen(onOpen: (String) -> Unit) {
                 emptyAction = HeaderAction(R.drawable.ic_dashboard, "Новая доска", "boards-empty-new") { creating = true },
             ) {
                 LazyVerticalGrid(
-                    GridCells.Adaptive(180.dp), Modifier.fillMaxSize().padding(16.dp),
+                    GridCells.Adaptive(150.dp), Modifier.fillMaxSize().padding(16.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     items(sorted, key = { it.notebook.id }) { b ->
@@ -98,7 +98,7 @@ fun BoardsScreen(onOpen: (String) -> Unit) {
                             onClick = { onOpen(nb.id) },
                         ) {
                             Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                BoardCardThumbnail(nb.id, Modifier.fillMaxWidth())
+                                FirstPageThumbnail(nb.id, board = true)
                                 Text(nb.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                                 Text(
                                     DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(nb.updatedAt)),
@@ -132,13 +132,6 @@ fun BoardsScreen(onOpen: (String) -> Unit) {
             dismissButton = { TextButton(onClick = { creating = false }) { Text("Отмена") } },
         )
     }
-}
-
-@Composable
-private fun BoardCardThumbnail(boardId: String, modifier: Modifier) {
-    val repository = LocalContext.current.graph.repository
-    val page by remember(boardId) { repository.observePages(boardId).map { it.firstOrNull() } }.collectAsState(null)
-    page?.let { BoardThumbnail(it, modifier) }
 }
 
 /** One board: pinch to zoom, two fingers (or one, with a pen nearby) to move. */
