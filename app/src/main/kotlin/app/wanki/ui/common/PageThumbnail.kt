@@ -26,11 +26,17 @@ import app.wanki.data.PageTemplate
 import app.wanki.graph
 import app.wanki.ink.InkStroke
 import app.wanki.input.StrokeConversion
+import android.util.Log
+import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlin.math.roundToInt
 
 private const val THUMB_LONG_SIDE = 340
-private val cache = ThumbnailCache<ImageBitmap>()
+private val cache = ThumbnailCache<ImageBitmap>(maxEntries = 32)
 
 /**
  * A page as a small picture: paper, template and strokes scaled into the box (aspect 1000:1414, landscape
@@ -43,17 +49,24 @@ fun PageThumbnail(page: PageEntity, modifier: Modifier = Modifier) {
     var bitmap by remember(key, page.updatedAt) { mutableStateOf(cache.get(key, page.updatedAt)) }
     LaunchedEffect(key, page.updatedAt) {
         if (bitmap != null) return@LaunchedEffect
-        val rendered = withContext(Dispatchers.Default) {
-            renderThumbnail(PageTemplate.valueOf(page.template), page.landscape, repository.loadInk(page.id))
+        // a broken page keeps plain paper: one card must not take the list down
+        try {
+            val rendered = withContext(Dispatchers.Default) {
+                renderThumbnail(PageTemplate.valueOf(page.template), page.landscape, repository.loadInk(page.id))
+            }
+            cache.put(key, page.updatedAt, rendered)
+            bitmap = rendered
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e("Wanki", "page ${page.id}: thumbnail not rendered", e)
         }
-        cache.put(key, page.updatedAt, rendered)
-        bitmap = rendered
     }
     val size = PageGeometry.size(page.landscape)
-    Canvas(modifier.aspectRatio(size.width / size.height)) {
+    Canvas(modifier.aspectRatio(size.width / size.height).semantics { contentDescription = "Страница" }) {
         val b = bitmap
         if (b == null) drawRect(PaperColor)
-        else drawImage(b, dstSize = IntSize(this.size.width.toInt(), this.size.height.toInt()))
+        else drawImage(b, dstSize = IntSize(this.size.width.roundToInt(), this.size.height.roundToInt()), filterQuality = FilterQuality.Medium)
     }
 }
 
@@ -61,7 +74,7 @@ fun PageThumbnail(page: PageEntity, modifier: Modifier = Modifier) {
 internal fun renderThumbnail(template: PageTemplate, landscape: Boolean, strokes: List<InkStroke>): ImageBitmap {
     val page = PageGeometry.size(landscape)
     val scale = THUMB_LONG_SIDE / maxOf(page.width, page.height)
-    val image = ImageBitmap((page.width * scale).toInt(), (page.height * scale).toInt())
+    val image = ImageBitmap((page.width * scale).roundToInt(), (page.height * scale).roundToInt())
     val canvas = ComposeCanvas(image)
     CanvasDrawScope().draw(Density(1f), LayoutDirection.Ltr, canvas, androidx.compose.ui.geometry.Size(image.width.toFloat(), image.height.toFloat())) {
         withTransform({ scale(scale, scale, pivot = Offset.Zero) }) { drawPage(template, landscape) }

@@ -31,6 +31,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.ui.Alignment
+import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import app.wanki.graph
@@ -150,6 +151,8 @@ fun MainShell() {
     val undo = remember { Undo(graph.repository, snackbar, uiScope) }
 
     // composed once and placed in either layout: a rotation across 600 dp keeps every screen's state
+    // lists have a floating button and editors keep their tools at the bottom: lift the snackbar above them
+    val snackbarLift = 72.dp
     val content = remember { movableContentOf { n: Navigator -> CompositionLocalProvider(LocalUndo provides undo) { Content(n) } } }
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -174,14 +177,14 @@ fun MainShell() {
                 }
                 Box(Modifier.weight(1f)) {
                     content(nav)
-                    SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter))
+                    SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).padding(bottom = snackbarLift))
                 }
             }
         } else {
             Column(Modifier.fillMaxSize()) {
                 Box(Modifier.weight(1f)) {
                     content(nav)
-                    SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter))
+                    SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).padding(bottom = snackbarLift))
                 }
                 if (!immersive) {
                     // six labels share the width: the bar's text ignores font scale above 1.0 so «Настройки» is never cut

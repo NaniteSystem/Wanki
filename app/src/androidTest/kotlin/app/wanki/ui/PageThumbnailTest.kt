@@ -57,6 +57,31 @@ class PageThumbnailTest {
     }
 
     @Test
+    fun unknownTemplateKeepsPlainPaper() {
+        val repo = graph.repository
+        val page = runBlocking {
+            val nb = repo.createNotebook("Bad ${System.nanoTime()}", PageTemplate.BLANK, "ja")
+            repo.pages(nb.id).first()
+        }.copy(template = "NO_SUCH_TEMPLATE")
+        show(page)
+        rule.waitForIdle()
+        rule.waitUntil(5_000) { darkCount("thumb") == 0 } // still shown, no crash
+    }
+
+    @Test
+    fun landscapePageKeepsItsAspect() {
+        val repo = graph.repository
+        val page = runBlocking {
+            val nb = repo.createNotebook("Land ${System.nanoTime()}", PageTemplate.BLANK, "ja")
+            repo.pages(nb.id).first()
+        }.copy(landscape = true)
+        rule.setContent { PageThumbnail(page, Modifier.size(280.dp).testTag("thumb")) }
+        rule.waitForIdle()
+        val n = rule.onNodeWithTag("thumb").fetchSemanticsNode().size
+        assertEquals(1414f / 1000f, n.width.toFloat() / n.height, 0.02f)
+    }
+
+    @Test
     fun emptyPageHasOnlyPaperColours() {
         val repo = graph.repository
         val page = runBlocking {
@@ -65,7 +90,7 @@ class PageThumbnailTest {
         }
         show(page)
         rule.waitForIdle()
-        Thread.sleep(1500) // let any (wrongly) pending render land
+        rule.mainClock.advanceTimeBy(1500)
         assertEquals(0, darkCount("thumb"))
     }
 }
