@@ -11,7 +11,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.absoluteOffset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.relocation.BringIntoViewRequester
@@ -47,6 +47,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.drawWithContent
@@ -77,9 +78,13 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntRect
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupPositionProvider
 import app.wanki.R
 import app.wanki.data.Settings
 import app.wanki.data.TextPieceEntity
@@ -604,7 +609,7 @@ private fun PieceTyping(render: PieceRender, style: TextStyle, colors: TypingCol
             render.text,
             style = style,
             onTextLayout = { layout = it },
-            modifier = Modifier.fillMaxWidth().drawWithContent {
+            modifier = Modifier.fillMaxWidth().testTag("typing-piece").drawWithContent {
                 drawContent()
                 val l = layout ?: return@drawWithContent
                 if (l.layoutInput.text != render.text) return@drawWithContent
@@ -621,8 +626,9 @@ private fun PieceTyping(render: PieceRender, style: TextStyle, colors: TypingCol
                 val r = l.getPathForRange(w.start, w.end).getBounds()
                 val typedWord = render.text.text.substring(w.start, w.end)
                 val shown = if (w.state == UnitState.WRONG) "$typedWord, правильно: ${w.correct}" else typedWord
+                // layout rectangles are absolute (from the left) even in an RTL text: place them unmirrored
                 Box(
-                    Modifier.offset { IntOffset(r.left.roundToInt(), r.top.roundToInt()) }
+                    Modifier.align(AbsoluteAlignment.TopLeft).absoluteOffset { IntOffset(r.left.roundToInt(), r.top.roundToInt()) }
                         .size(with(density) { r.width.toDp() }, with(density) { r.height.toDp() })
                         .semantics { contentDescription = shown; stateDescription = stateLabel(w.state) }
                         .testTag(if (w.state == null) "typing-extra-${w.unit}" else "typing-word-${w.unit}"),
@@ -630,10 +636,11 @@ private fun PieceTyping(render: PieceRender, style: TextStyle, colors: TypingCol
             }
             popup?.let { w ->
                 val r = l.getPathForRange(w.start, w.end).getBounds()
-                Popup(
-                    offset = IntOffset(r.left.roundToInt(), (r.top - with(density) { 44.dp.toPx() }).roundToInt()),
-                    onDismissRequest = { popup = null },
-                ) {
+                val gap = with(density) { 4.dp.roundToPx() }
+                val position = remember(r, gap) {
+                    WordPopupPosition(IntRect(r.left.roundToInt(), r.top.roundToInt(), r.right.roundToInt(), r.bottom.roundToInt()), gap)
+                }
+                Popup(popupPositionProvider = position, onDismissRequest = { popup = null }) {
                     Surface(shape = MaterialTheme.shapes.small, tonalElevation = 6.dp, shadowElevation = 6.dp) {
                         Text(w.correct, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp).testTag("typing-correct"))
                     }
@@ -646,6 +653,22 @@ private fun PieceTyping(render: PieceRender, style: TextStyle, colors: TypingCol
                 requester.bringIntoView(r.copy(top = r.top - margin, bottom = r.bottom + margin))
             }
         }
+    }
+}
+
+/**
+ * The correct-spelling popup over [word] (absolute pixels in the piece box, as the text layout gives them, so RTL
+ * needs no flip): centred above the word, below it when there is no room above, always inside the window.
+ */
+private class WordPopupPosition(private val word: IntRect, private val gap: Int) : PopupPositionProvider {
+    override fun calculatePosition(anchorBounds: IntRect, windowSize: IntSize, layoutDirection: LayoutDirection, popupContentSize: IntSize): IntOffset {
+        val x = anchorBounds.left + word.left + (word.width - popupContentSize.width) / 2
+        val above = anchorBounds.top + word.top - gap - popupContentSize.height
+        val y = if (above >= 0) above else anchorBounds.top + word.bottom + gap
+        return IntOffset(
+            x.coerceIn(0, maxOf(0, windowSize.width - popupContentSize.width)),
+            y.coerceIn(0, maxOf(0, windowSize.height - popupContentSize.height)),
+        )
     }
 }
 

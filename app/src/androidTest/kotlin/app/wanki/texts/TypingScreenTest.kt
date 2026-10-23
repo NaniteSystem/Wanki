@@ -48,8 +48,8 @@ class TypingScreenTest {
     @After
     fun cleanUp() = runBlocking { created.forEach { graph.texts.deleteText(it) } }
 
-    private fun newText(content: String): TextEntity = runBlocking {
-        graph.texts.createText("Печать ${System.nanoTime()}", "ru", TextKind.POEM, TextSchedule.FSRS, 5, content)!!
+    private fun newText(content: String, language: String = "ru"): TextEntity = runBlocking {
+        graph.texts.createText("Печать ${System.nanoTime()}", language, TextKind.POEM, TextSchedule.FSRS, 5, content)!!
             .also { created += it.id }
     }
 
@@ -234,6 +234,40 @@ class TypingScreenTest {
         rule.onNode(hasTestTag("typing-done")).fits()
         rule.onNode(hasTestTag("typing-result")).fits()
         shot("typing-result")
+    }
+
+    /** RTL: the TalkBack node of each word sits on that word (right to left), and the correct spelling pops up over it. */
+    @Test
+    fun arabicWordNodesFollowTheText() {
+        val content = "بسم الله الرحمن الرحيم"
+        val t = newText(content, "ar")
+        openPractice(t.title)
+        type("بسم الكه الرحمن ")
+        val text = rule.onNode(hasTestTag("typing-piece")).fetchSemanticsNode()
+        val textLeft = text.positionOnScreen.x
+        val textRight = textLeft + text.size.width
+        val words = (0..2).map { rule.onNode(hasTestTag("typing-word-$it")).fetchSemanticsNode() }
+        for (w in words) {
+            val left = w.positionOnScreen.x
+            assertTrue("word at $left..${left + w.size.width} outside the text $textLeft..$textRight", left >= textLeft - 1 && left + w.size.width <= textRight + 1)
+        }
+        val lefts = words.map { it.positionOnScreen.x }
+        assertTrue("not right to left: $lefts", lefts[0] > lefts[1] && lefts[1] > lefts[2])
+        // the first word starts at the right edge of the line
+        assertTrue("first word at ${lefts[0] + words[0].size.width}, text ends at $textRight", textRight - (lefts[0] + words[0].size.width) < words[0].size.width)
+
+        val wrong = rule.onNode(hasTestTag("typing-word-1"))
+        wrong.assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "неверно"))
+        wrong.performTouchInput { longClick() }
+        rule.waitUntilAtLeastOneExists(hasTestTag("typing-correct"), 5_000)
+        val popup = rule.onNode(hasTestTag("typing-correct")).fetchSemanticsNode()
+        val popupCenter = popup.positionOnScreen.x + popup.size.width / 2f
+        val word = words[1]
+        assertTrue(
+            "popup centre $popupCenter not over the word ${word.positionOnScreen.x}..${word.positionOnScreen.x + word.size.width}",
+            popupCenter >= word.positionOnScreen.x && popupCenter <= word.positionOnScreen.x + word.size.width,
+        )
+        shot("typing-arabic-popup")
     }
 
     /** Evidence for the layout review, pulled from the app's files dir; never an assertion. */
