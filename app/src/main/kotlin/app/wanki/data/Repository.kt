@@ -708,6 +708,16 @@ class Repository(private val db: WankiDatabase) {
     suspend fun loadInk(pageId: String): List<InkStroke> =
         notebooks.ink(pageId)?.let { runCatching { InkCodec.decode(it.strokes).strokes }.getOrNull() }.orEmpty()
 
+    /** Like [loadInk], but a blob that fails to decode is reported, so the editor can refuse to overwrite it. */
+    suspend fun loadInkResult(pageId: String): InkLoad {
+        val row = notebooks.ink(pageId) ?: return InkLoad.Ok(emptyList())
+        return try {
+            InkLoad.Ok(InkCodec.decode(row.strokes).strokes)
+        } catch (e: Exception) {
+            InkLoad.Unreadable(e)
+        }
+    }
+
     /**
      * Deletes ink rows whose blob decodes to zero strokes (left by versions that kept the row of an emptied page).
      * A blob that fails to decode is kept. Returns the number of deleted rows.
@@ -723,19 +733,23 @@ class Repository(private val db: WankiDatabase) {
 
     suspend fun recognizedText(pageId: String): String = notebooks.ink(pageId)?.recognizedText.orEmpty()
 
-    suspend fun saveInk(page: PageEntity, strokes: List<InkStroke>) {
+    suspend fun saveInk(page: PageEntity, strokes: List<InkStroke>) =
+        saveInkBlob(page, if (strokes.isEmpty()) null else InkCodec.encode(InkDrawing(strokes)))
+
+    /** Stores an already encoded ink blob; null (an emptied page) deletes the ink row. */
+    suspend fun saveInkBlob(page: PageEntity, blob: ByteArray?) {
         val old = notebooks.ink(page.id)
         val now = System.currentTimeMillis()
         db.withTransaction {
             insertPageIfMissing(page)
-            if (strokes.isEmpty()) {
+            if (blob == null) {
                 // an emptied page keeps no ink row, so the diary stops marking its day
                 notebooks.deleteInk(page.id)
             } else {
                 notebooks.upsertInk(
                     PageInkEntity(
                         pageId = page.id,
-                        strokes = InkCodec.encode(InkDrawing(strokes)),
+                        strokes = blob,
                         recognizedText = old?.recognizedText.orEmpty(),
                         recognizedAt = old?.recognizedAt ?: 0,
                         updatedAt = now,
@@ -782,4 +796,10 @@ class Repository(private val db: WankiDatabase) {
         fun catalogNoteId(catalogId: String, key: String) = "$catalogId:$key"
         fun catalogCardId(catalogId: String, key: String) = "$catalogId:$key:0"
     }
+}
+
+/** Result of reading a page's ink: strokes, or the error of a blob that cannot be decoded. */
+sealed interface InkLoad {
+    data class Ok(val strokes: List<InkStroke>) : InkLoad
+    data class Unreadable(val error: Throwable) : InkLoad
 }

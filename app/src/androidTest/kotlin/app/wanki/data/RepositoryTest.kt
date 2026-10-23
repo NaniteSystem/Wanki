@@ -35,6 +35,33 @@ class RepositoryTest {
         repo.addCards(deckId, (1..n).map { Repository.NewCard("$prefix$it", "a$it", AnswerMode.CLASSIC) })
 
     @Test
+    fun saveInkBlobRoundTrip() = runBlocking {
+        val page = repo.createNotebook("Blob", app.wanki.data.PageTemplate.LINED, "auto").let { repo.pages(it.id).single() }
+        val s = app.wanki.ink.InkStroke(listOf(app.wanki.ink.InkPoint(5f, 5f, 0), app.wanki.ink.InkPoint(40f, 30f, 20)))
+        val blob = app.wanki.ink.InkCodec.encode(app.wanki.ink.InkDrawing(listOf(s)))
+        repo.saveInkBlob(page, blob)
+        val loaded = repo.loadInkResult(page.id)
+        assertTrue(loaded is InkLoad.Ok)
+        assertEquals(1, (loaded as InkLoad.Ok).strokes.size)
+    }
+
+    @Test
+    fun saveInkBlobNullDeletesRow() = runBlocking {
+        val page = repo.createNotebook("Blob", app.wanki.data.PageTemplate.LINED, "auto").let { repo.pages(it.id).single() }
+        val s = app.wanki.ink.InkStroke(listOf(app.wanki.ink.InkPoint(5f, 5f, 0), app.wanki.ink.InkPoint(40f, 30f, 20)))
+        repo.saveInkBlob(page, app.wanki.ink.InkCodec.encode(app.wanki.ink.InkDrawing(listOf(s))))
+        repo.saveInkBlob(page, null)
+        assertNull(db.notebooks().ink(page.id))
+    }
+
+    @Test
+    fun undecodableInkIsUnreadable() = runBlocking {
+        val page = repo.createNotebook("Blob", app.wanki.data.PageTemplate.LINED, "auto").let { repo.pages(it.id).single() }
+        db.notebooks().upsertInk(PageInkEntity(pageId = page.id, strokes = byteArrayOf(1, 2, 3)))
+        assertTrue(repo.loadInkResult(page.id) is InkLoad.Unreadable)
+    }
+
+    @Test
     fun newCardLimitsApplyThroughSubdecks() = runBlocking {
         val parent = repo.createDeck("P", "ja", AnswerMode.CLASSIC).let { it.copy(newPerDay = 5).also { d -> repo.updateDeck(d) } }
         val child = repo.createDeck("C", "ja", AnswerMode.CLASSIC, parent.id)

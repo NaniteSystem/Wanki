@@ -40,6 +40,8 @@ internal class InkInputHandler(
     var eraserRadiusPx: Float = 22f
     var onStrokeStarted: () -> Unit = {}
     var onStrokeFinished: () -> Unit = {}
+    /** A pan or pinch ended (the viewport changed). */
+    var onViewGestureEnd: () -> Unit = {}
 
     /**
      * Points are captured here, straight from the touch events, so the stroke model does not
@@ -255,7 +257,7 @@ internal class InkInputHandler(
             drawStroke = null
             drawPointer = -1
         }
-        if (id == panPointer) panPointer = -1
+        if (id == panPointer) { panPointer = -1; onViewGestureEnd() }
         if (pinching && (e.actionMasked == MotionEvent.ACTION_UP || e.pointerCount - 1 < 2)) endNavigation()
     }
 
@@ -367,8 +369,10 @@ internal class InkInputHandler(
     }
 
     private fun endNavigation() {
+        val moved = pinching || panPointer >= 0
         pinching = false
         panPointer = -1
+        if (moved) onViewGestureEnd()
     }
 
     private fun pinchGeometry(e: MotionEvent): Triple<Float, Float, Float> {

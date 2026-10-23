@@ -64,7 +64,12 @@ import app.wanki.ui.common.PageGeometry
 import app.wanki.ui.common.drawBoard
 import app.wanki.ui.common.drawPage
 import app.wanki.ui.common.label
+import app.wanki.data.InkLoad
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 
 /**
@@ -139,7 +144,12 @@ class PageEditorState(
         private set
     var recognizing by mutableStateOf(false)
         private set
-    private var savedVersion = -1
+    private var savedRev = -1
+
+    /** The stored ink could not be decoded: the page is shown empty, cannot be drawn on and is never saved. */
+    var readOnly by mutableStateOf(false)
+        private set
+    private var viewJob: Job? = null
     private var recognizedVersion = -1
 
     val template: PageTemplate get() = runCatching { PageTemplate.valueOf(page.template) }.getOrDefault(PageTemplate.BLANK)
@@ -157,23 +167,30 @@ class PageEditorState(
         }
 
     suspend fun load() {
-        val strokes = graph.repository.loadInk(page.id)
-        layer.replaceAll(strokes, undoable = false)
+        when (val r = graph.repository.loadInkResult(page.id)) {
+            is InkLoad.Ok -> layer.replaceAll(r.strokes, undoable = false)
+            is InkLoad.Unreadable -> {
+                // the stored blob stays untouched: nothing is saved or recognized from this page
+                Log.e("Wanki", "page ${page.id}: ink cannot be read", r.error)
+                readOnly = true
+            }
+        }
         recognizedText = graph.repository.recognizedText(page.id)
-        savedVersion = layer.version
+        savedRev = layer.strokesRev
         recognizedVersion = layer.version
         loaded = true
     }
 
     private suspend fun saveIfDirty() {
-        if (!loaded || layer.version == savedVersion) return
-        val v = layer.version
-        graph.repository.saveInk(page, layer.strokes.toList())
-        savedVersion = v
+        if (!loaded || readOnly || layer.strokesRev == savedRev) return
+        val rev = layer.strokesRev
+        val encode = layer.snapshotEncoder() // the stroke list is taken here, the joining runs on IO
+        withContext(Dispatchers.IO) { graph.repository.saveInkBlob(page, encode()) }
+        savedRev = rev
     }
 
     suspend fun recognizeIfDirty() {
-        if (!loaded || layer.version == recognizedVersion) return
+        if (!loaded || readOnly || layer.version == recognizedVersion) return
         val v = layer.version
         val strokes: List<InkStroke> = layer.strokes.toList()
         recognizing = true
@@ -186,6 +203,21 @@ class PageEditorState(
             graph.repository.setRecognizedText(page.id, text)
             recognizedText = text
             recognizedVersion = v
+        }
+    }
+
+    /** A pan or pinch ended: stores the view a second later (a following gesture restarts the wait). */
+    fun onViewGestureEnd() {
+        viewJob?.cancel()
+        viewJob = graph.appScope.launch {
+            delay(1000)
+            try {
+                saveView()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e("Wanki", "page ${page.id}: view not saved", e)
+            }
         }
     }
 
@@ -271,13 +303,24 @@ fun PageEditor(
             if (state.layer.hasSelection) {
                 SelectionBar(state.layer, state.notebook.language, Modifier.padding(horizontal = 8.dp, vertical = 2.dp))
             }
+            if (state.readOnly) {
+                Surface(color = MaterialTheme.colorScheme.errorContainer, modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        "Страницу не удалось прочитать",
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp).testTag("page-unreadable"),
+                    )
+                }
+            }
             Row(Modifier.weight(1f).fillMaxWidth()) {
                 InkSurface(
                     layer = state.layer,
                     tool = state.tool,
                     viewport = state.viewport,
-                    enabled = state.loaded,
+                    enabled = state.loaded && !state.readOnly,
                     gestures = true,
+                    onViewGestureEnd = state::onViewGestureEnd,
                     modifier = Modifier.weight(1f).fillMaxSize().testTag("page-canvas"),
                     background = {
                         if (state.infinite) drawBoard(state.viewport.visibleWorld(), state.viewport.scale)

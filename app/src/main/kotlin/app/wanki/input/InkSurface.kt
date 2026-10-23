@@ -35,12 +35,14 @@ fun InkSurface(
     gestures: Boolean = false,
     onStrokeStarted: () -> Unit = {},
     onStrokeFinished: () -> Unit = {},
+    onViewGestureEnd: () -> Unit = {},
     background: DrawScope.() -> Unit = {},
     overlay: DrawScope.() -> Unit = {},
 ) {
     val renderer = remember { CanvasStrokeRenderer.create() }
     val started by rememberUpdatedState(onStrokeStarted)
     val finished by rememberUpdatedState(onStrokeFinished)
+    val viewEnded by rememberUpdatedState(onViewGestureEnd)
 
     // clip: page backgrounds are drawn far beyond the visible area
     Box(modifier.clipToBounds().onSizeChanged { viewport?.onScreenSize(it.width.toFloat(), it.height.toFloat()) }) {
@@ -90,6 +92,7 @@ fun InkSurface(
                     it.gestures = gestures
                     it.onStrokeStarted = { started() }
                     it.onStrokeFinished = { finished() }
+                    it.onViewGestureEnd = { viewEnded() }
                 }
             },
         )
