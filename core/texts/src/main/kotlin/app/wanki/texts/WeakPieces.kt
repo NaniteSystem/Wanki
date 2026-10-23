@@ -8,10 +8,17 @@ object WeakPieces {
     const val RECENT = 5
     const val ERRORS = 2
 
-    fun weak(outcomes: List<PieceOutcome>): Set<String> =
-        outcomes.groupBy { it.pieceId }
+    /**
+     * A piece is weak with [ERRORS] errors among its last [RECENT] recitations, or with a word typed wrong in
+     * [ERRORS] of its recent typed runs ([words]: the word history of each piece).
+     */
+    fun weak(outcomes: List<PieceOutcome>, words: Map<String, Collection<WordStat>> = emptyMap()): Set<String> {
+        val byRecitals = outcomes.groupBy { it.pieceId }
             .filterValues { l -> l.sortedByDescending { it.at }.take(RECENT).count { it.error } >= ERRORS }
             .keys
+        val byWords = words.filterValues { l -> l.any { Integer.bitCount(it.recent) >= ERRORS } }.keys
+        return byRecitals + byWords
+    }
 }
 
 /** Daily-load hint for the text editor. */

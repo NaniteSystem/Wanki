@@ -752,11 +752,11 @@ private fun TypingResultButtons(state: StudyState, s: TypingSession, scope: kotl
                 StudyKind.REVIEW -> {
                     val piece = run.pieces.values.first()
                     Button(
-                        onClick = { scope.launch { state.rateTyped(TypingScore.rating(piece, easy = false), piece.hints, duration) } },
+                        onClick = { scope.launch { state.rateTyped(TypingScore.rating(piece, easy = false), piece.hints, duration, error = piece.errors > 0) } },
                         enabled = !state.busy, modifier = Modifier.testTag("typing-next"),
                     ) { Text("Дальше") }
                     if (clean) OutlinedButton(
-                        onClick = { scope.launch { state.rateTyped(TypingScore.rating(piece, easy = true), piece.hints, duration) } },
+                        onClick = { scope.launch { state.rateTyped(TypingScore.rating(piece, easy = true), piece.hints, duration, error = piece.errors > 0) } },
                         enabled = !state.busy, modifier = Modifier.testTag("typing-easy"),
                     ) { Text("Легко") }
                 }

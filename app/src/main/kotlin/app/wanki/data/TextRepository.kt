@@ -322,15 +322,16 @@ class TextRepository(
             dao.upsertText(text.copy(lastPortionDay = today, updatedAt = now))
         }
 
-    /** One FSRS review of a piece; Again counts as an error. */
+    /** One FSRS review of a piece; [error] (an Again, or a typed run with wrong or skipped words) marks the log row. */
     suspend fun reviewPiece(
         pieceId: String, rating: Rating, hints: Int, durationMs: Long, now: Long = System.currentTimeMillis(), check: String = MODE_SELF,
+        error: Boolean = rating == Rating.AGAIN,
     ) =
         db.withTransaction {
             val piece = dao.getPiece(pieceId) ?: return@withTransaction
             val next = piece.withSrs(scheduler().review(piece.srs(), rating, now, piece.seed), now)
             dao.upsertPieces(listOf(next))
-            val errors = if (rating == Rating.AGAIN) setOf(pieceId) else emptySet()
+            val errors = if (error) setOf(pieceId) else emptySet()
             dao.insertRecitations(logRows(listOf(next), RecitationPart.REVIEW, now, durationMs, hints, errors, check) { rating.value })
         }
 
@@ -389,9 +390,12 @@ class TextRepository(
         dao.insertRecitations(logRows(pieceIds.distinct().mapNotNull { byId[it] }, RecitationPart.PRACTICE, now, durationMs, hints, errorIds, check) { null })
     }
 
-    /** Pieces with repeated recent mistakes over every recitation of the text. */
-    suspend fun weakPieces(textId: String): Set<String> =
-        WeakPieces.weak(dao.recitations(textId).map { PieceOutcome(it.pieceId, it.at, it.error) })
+    /** Pieces with repeated recent mistakes over every recitation of the text, or with words often typed wrong. */
+    suspend fun weakPieces(textId: String): Set<String> {
+        val recitals = dao.recitations(textId).map { PieceOutcome(it.pieceId, it.at, it.error) }
+        val words = wordStats(dao.pieces(textId).map { it.id }).entries.groupBy({ it.key.pieceId }, { it.value })
+        return WeakPieces.weak(recitals, words)
+    }
 
     // --- today -------------------------------------------------------------------------------
 

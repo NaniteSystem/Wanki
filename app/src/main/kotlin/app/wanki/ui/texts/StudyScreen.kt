@@ -263,11 +263,11 @@ class StudyState(private val graph: AppGraph, val request: StudyRequest, initial
         finished = true
     }
 
-    /** The typed review of the current piece, rated by [TypingScore], then the next piece. */
-    suspend fun rateTyped(rating: Rating, hints: Int, durationMs: Long) = saving.run {
+    /** The typed review of the current piece, rated by [TypingScore], then the next piece; [error]: wrong or skipped words. */
+    suspend fun rateTyped(rating: Rating, hints: Int, durationMs: Long, error: Boolean) = saving.run {
         if (finished) return@run
         val piece = pieces.getOrNull(reviewIndex) ?: return@run
-        graph.texts.reviewPiece(piece.id, rating, hints, durationMs, check = TextRepository.MODE_TYPED)
+        graph.texts.reviewPiece(piece.id, rating, hints, durationMs, check = TextRepository.MODE_TYPED, error = error)
         nextReview()
     }
 

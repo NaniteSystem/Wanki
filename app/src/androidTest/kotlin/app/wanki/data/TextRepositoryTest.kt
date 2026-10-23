@@ -399,6 +399,32 @@ class TextRepositoryTest {
         assertEquals(listOf("NEW" to "SELF", "REVIEW" to "TYPED"), modes)
     }
 
+    /** A typed review with wrong or skipped words is logged as an error even when it is rated Hard (spec §6). */
+    @Test
+    fun typedReviewWithWrongWordsLogsError() = runBlocking {
+        val t = texts.createText("Т", "ru", TextKind.POEM, TextSchedule.FSRS, 1, "a\nb")!!
+        val (a, b) = texts.pieces(t.id).map { it.id }
+        texts.completePortion(t.id, listOf(a, b), 0, now)
+        texts.reviewPiece(a, Rating.HARD, 0, 0, now + DAY, TextRepository.MODE_TYPED, error = true)
+        texts.reviewPiece(b, Rating.HARD, 1, 0, now + DAY, TextRepository.MODE_TYPED, error = false)
+        val rows = db.texts().recitations(t.id).filter { it.part == "REVIEW" }.associate { it.pieceId to it.error }
+        assertEquals(mapOf(a to true, b to false), rows)
+        // without the flag an Again is still the error
+        texts.reviewPiece(b, Rating.AGAIN, 0, 0, now + 2 * DAY)
+        assertTrue(db.texts().recitations(t.id).last { it.pieceId == b }.error)
+    }
+
+    /** «Слабые места» also count words typed wrong in two of their recent runs. */
+    @Test
+    fun weakPiecesCountWordHistory() = runBlocking {
+        val t = texts.createText("Т", "ru", TextKind.POEM, TextSchedule.FSRS, 1, "ab\ncd")!!
+        val (a, b) = texts.pieces(t.id).map { it.id }
+        texts.recordWords(mapOf(WordKey(a, 0) to WordOutcome.WRONG, WordKey(b, 0) to WordOutcome.WRONG), now)
+        assertEquals(emptySet<String>(), texts.weakPieces(t.id))
+        texts.recordWords(mapOf(WordKey(a, 1) to WordOutcome.WRONG, WordKey(b, 0) to WordOutcome.WRONG), now + DAY)
+        assertEquals(setOf(b), texts.weakPieces(t.id))
+    }
+
     /** One token per character, no readings. [hook] runs once on the next call: it plays a write that lands mid-compute. */
     private object CharMorphology : Morphology {
         @Volatile var hook: (() -> Unit)? = null
