@@ -28,7 +28,15 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import app.wanki.graph
+import app.wanki.ui.common.LocalUndo
+import app.wanki.ui.common.Undo
+import app.wanki.ui.common.rememberUiScope
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import app.wanki.practice.PracticeScreen
@@ -135,8 +143,14 @@ fun MainShell() {
     // the pen rule is per screen: a pen seen on one page does not stop fingers drawing on the next
     LaunchedEffect(nav.current) { StylusTracker.onScreenChanged() }
 
+    // one snackbar host for the whole app: «Удалено · Отменить» outlives the screen that deleted
+    val snackbar = remember { SnackbarHostState() }
+    val graph = LocalContext.current.graph
+    val uiScope = rememberUiScope()
+    val undo = remember { Undo(graph.repository, snackbar, uiScope) }
+
     // composed once and placed in either layout: a rotation across 600 dp keeps every screen's state
-    val content = remember { movableContentOf { n: Navigator -> Content(n) } }
+    val content = remember { movableContentOf { n: Navigator -> CompositionLocalProvider(LocalUndo provides undo) { Content(n) } } }
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val wide = maxWidth >= 600.dp
@@ -158,11 +172,17 @@ fun MainShell() {
                         )
                     }
                 }
-                Box(Modifier.weight(1f)) { content(nav) }
+                Box(Modifier.weight(1f)) {
+                    content(nav)
+                    SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter))
+                }
             }
         } else {
             Column(Modifier.fillMaxSize()) {
-                Box(Modifier.weight(1f)) { content(nav) }
+                Box(Modifier.weight(1f)) {
+                    content(nav)
+                    SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter))
+                }
                 if (!immersive) {
                     // six labels share the width: the bar's text ignores font scale above 1.0 so «Настройки» is never cut
                     val density = LocalDensity.current

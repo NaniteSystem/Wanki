@@ -15,18 +15,22 @@ object PageGeometry {
     const val WIDTH = 1000f
     const val HEIGHT = 1414f
     val BOUNDS = InkRect(0f, 0f, WIDTH, HEIGHT)
+
+    /** Portrait 1000 × 1414, landscape 1414 × 1000. */
+    fun size(landscape: Boolean): Size = if (landscape) Size(HEIGHT, WIDTH) else Size(WIDTH, HEIGHT)
+
+    fun bounds(landscape: Boolean): InkRect = if (landscape) InkRect(0f, 0f, HEIGHT, WIDTH) else BOUNDS
 }
 
-private val PaperColor = Color(0xFFFFFEFA)
+internal val PaperColor = Color(0xFFFFFEFA)
 private val DeskColor = Color(0xFFE6E3DC)
 private val RuleColor = Color(0xFFB8C7DA)
 private val MarginColor = Color(0x66D23C3C)
 private val GuideColor = Color(0x55B0503C)
 
 /** Draws a page (paper + template) in world coordinates. */
-fun DrawScope.drawPage(template: PageTemplate) {
-    val w = PageGeometry.WIDTH
-    val h = PageGeometry.HEIGHT
+fun DrawScope.drawPage(template: PageTemplate, landscape: Boolean = false) {
+    val (w, h) = PageGeometry.size(landscape).let { it.width to it.height }
     drawRect(DeskColor, Offset(-5000f, -5000f), Size(w + 10000f, h + 10000f))
     drawRect(Color(0x22000000), Offset(6f, 8f), Size(w, h))
     drawRect(PaperColor, Offset.Zero, Size(w, h))
