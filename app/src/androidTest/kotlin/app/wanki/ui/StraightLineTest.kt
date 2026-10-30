@@ -87,7 +87,7 @@ class StraightLineTest {
     }
 
     /** A wavy pen stroke across the canvas that stops at its end; [holdMs] later the pen lifts. */
-    private fun wavyStrokeThenLift(holdMs: Long) {
+    private fun wavyStrokeThenLift(holdMs: Long, jitterPx: Float = 0f) {
         val b = canvasBox()
         val t0 = SystemClock.uptimeMillis()
         val steps = 40
@@ -99,7 +99,17 @@ class StraightLineTest {
             send(t0, if (i == 0) MotionEvent.ACTION_DOWN else MotionEvent.ACTION_MOVE, last, MotionEvent.TOOL_TYPE_STYLUS)
             SystemClock.sleep(10)
         }
-        SystemClock.sleep(holdMs)
+        if (jitterPx == 0f) SystemClock.sleep(holdMs)
+        else {
+            // a real pen at rest still reports moves: jitter around the end point
+            val until = SystemClock.uptimeMillis() + holdMs
+            var k = 0
+            while (SystemClock.uptimeMillis() < until) {
+                val d = if (k++ % 2 == 0) jitterPx else -jitterPx
+                send(t0, MotionEvent.ACTION_MOVE, Offset(last.x + d, last.y - d), MotionEvent.TOOL_TYPE_STYLUS)
+                SystemClock.sleep(15)
+            }
+        }
         send(t0, MotionEvent.ACTION_UP, last, MotionEvent.TOOL_TYPE_STYLUS)
         rule.waitForIdle()
     }
@@ -117,6 +127,18 @@ class StraightLineTest {
         assertTrue("the line is longer than a few points", pts.size > 5)
         rule.onNodeWithTag("undo").performClick()
         rule.waitUntil(5_000) { strokes(layer).isEmpty() }
+    }
+
+    @Test
+    fun jitteringPenStillStraightens() {
+        val title = "Straight jitter $stamp"
+        runBlocking { repo.createNotebook(title, PageTemplate.BLANK, "auto") }
+        val layer = open(title)
+        wavyStrokeThenLift(700, jitterPx = 2f)
+        rule.waitUntil(5_000) { strokes(layer).size == 1 }
+        val pts = strokes(layer).single().points
+        val y0 = pts.first().y
+        assertTrue("a straight line: ${pts.maxOf { abs(it.y - y0) }}", pts.all { abs(it.y - y0) < 0.5f })
     }
 
     @Test

@@ -77,6 +77,9 @@ internal class InkInputHandler(
     private var lineEnd: InkPoint? = null
     private val density get() = view.resources.displayMetrics.density
     private val holdCheck = Runnable { checkHold() }
+    // a pen held still still sends moves (pressure and tilt noise): only a move out of the slop restarts the timer
+    private var anchorX = 0f
+    private var anchorY = 0f
 
     private var drawPointer = -1
     private var drawStroke: InProgressStrokeId? = null
@@ -252,7 +255,10 @@ internal class InkInputHandler(
             if (di >= 0) {
                 capture?.let { addPoints(it, e, drawPointer, historical = true) }
                 view.addToStroke(e, drawPointer, s)
-                scheduleHold()
+                capture?.points?.lastOrNull()?.let { p ->
+                    val slop = SLOP_DP * density / (viewport?.scale ?: 1f)
+                    if (hypot(p.x - anchorX, p.y - anchorY) > slop) scheduleHold()
+                }
             }
         }
         val vp = viewport ?: return
@@ -290,6 +296,7 @@ internal class InkInputHandler(
             drawPointer = -1
         }
         if (id == drawPointer) {
+            view.removeCallbacks(holdCheck)
             drawStroke?.let { s ->
                 if (isCanceled(e)) {
                     view.cancelStroke(s, e)
@@ -363,6 +370,7 @@ internal class InkInputHandler(
     /** A still pen sends no moves, so the hold is checked by a timer that every move pushes back. */
     private fun scheduleHold() {
         if (viewport == null || readOnly) return
+        capture?.points?.lastOrNull()?.let { anchorX = it.x; anchorY = it.y }
         view.removeCallbacks(holdCheck)
         view.postDelayed(holdCheck, StraightLine.HOLD_MS)
     }
@@ -374,7 +382,10 @@ internal class InkInputHandler(
         val base = layer?.timeBaseUptime?.takeIf { it >= 0 } ?: return
         val scale = vp.scale
         val now = SystemClock.uptimeMillis() - base
-        if (!StraightLine.isHeld(c.points, now, SLOP_DP * density / scale, MIN_LENGTH_DP * density / scale)) return
+        if (!StraightLine.isHeld(c.points, now, SLOP_DP * density / scale, MIN_LENGTH_DP * density / scale)) {
+            scheduleHold() // too short or drifted: look again later
+            return
+        }
         view.cancelStroke(s)
         drawStroke = null
         lineEnd = c.points.last()
@@ -585,6 +596,11 @@ internal class InkInputHandler(
         MotionEvent.TOOL_TYPE_FINGER -> InkTool.FINGER
         MotionEvent.TOOL_TYPE_MOUSE -> InkTool.MOUSE
         else -> InkTool.UNKNOWN
+    }
+
+    /** The view goes away: no timer may outlive it. */
+    fun release() {
+        view.removeCallbacks(holdCheck)
     }
 
     /** androidx.ink finished rendering: our layer already has the stroke, drop the in-progress copy. */

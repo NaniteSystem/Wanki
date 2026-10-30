@@ -106,6 +106,7 @@ fun InkSurface(
                     view.setOnHoverListener(handler)
                 }
             },
+            onRelease = { view -> (view.tag as InkInputHandler).release() },
             update = { view ->
                 (view.tag as InkInputHandler).also {
                     it.layer = layer
