@@ -21,6 +21,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import app.wanki.input.InkTiles
 import app.wanki.ui.MainShell
 
 class MainActivity : ComponentActivity() {
@@ -43,6 +44,12 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    /** Tile bitmaps are a cache: give their memory back when the system asks. */
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        InkTiles.trimAll()
     }
 
     private companion object {

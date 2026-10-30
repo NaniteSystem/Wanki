@@ -26,12 +26,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.LayoutDirection
-import androidx.ink.rendering.android.canvas.CanvasStrokeRenderer
 import app.wanki.data.PageEntity
 import app.wanki.data.PageTemplate
 import app.wanki.graph
 import app.wanki.ink.InkStroke
-import app.wanki.input.StrokeConversion
+import app.wanki.input.InkRaster
 import android.util.Log
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.semantics.contentDescription
@@ -79,10 +78,7 @@ fun PageThumbnail(page: PageEntity, modifier: Modifier = Modifier) {
 }
 
 /** A hairline stroke would vanish at thumbnail scale: keep it at least about a pixel wide in the bitmap. */
-private fun InkStroke.atLeastPixels(scale: Float): InkStroke {
-    val min = 1.2f / scale
-    return if (brush.size >= min) this else copy(brush = brush.copy(size = min))
-}
+private const val MIN_STROKE_PX = 1.2f
 
 /** Draws the page with [drawPage] and the strokes with the editor's stroke renderer into a bitmap. */
 internal fun renderThumbnail(template: PageTemplate, landscape: Boolean, strokes: List<InkStroke>): ImageBitmap {
@@ -92,17 +88,7 @@ internal fun renderThumbnail(template: PageTemplate, landscape: Boolean, strokes
     val canvas = ComposeCanvas(image)
     CanvasDrawScope().draw(Density(1f), LayoutDirection.Ltr, canvas, androidx.compose.ui.geometry.Size(image.width.toFloat(), image.height.toFloat())) {
         withTransform({ scale(scale, scale, pivot = Offset.Zero) }) { drawPage(template, landscape) }
-        if (strokes.isNotEmpty()) {
-            val renderer = CanvasStrokeRenderer.create()
-            // the renderer ignores its transform on a bitmap canvas: scale the canvas itself
-            val identity = android.graphics.Matrix()
-            drawIntoCanvas { c ->
-                c.nativeCanvas.save()
-                c.nativeCanvas.scale(scale, scale)
-                for (s in strokes) StrokeConversion.toInk(s.atLeastPixels(scale))?.let { renderer.draw(c.nativeCanvas, it, identity) }
-                c.nativeCanvas.restore()
-            }
-        }
+        if (strokes.isNotEmpty()) drawIntoCanvas { InkRaster.draw(it.nativeCanvas, strokes, scale, 0f, 0f, MIN_STROKE_PX) }
     }
     return image
 }
@@ -160,17 +146,7 @@ internal fun renderBoardThumbnail(strokes: List<InkStroke>): ImageBitmap {
     CanvasDrawScope().draw(Density(1f), LayoutDirection.Ltr, canvas, androidx.compose.ui.geometry.Size(image.width.toFloat(), image.height.toFloat())) {
         val visible = app.wanki.ink.InkRect(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2)
         withTransform({ scale(scale, scale, pivot = Offset.Zero); translate(-visible.left, -visible.top) }) { drawBoard(visible, scale) }
-        if (strokes.isNotEmpty()) {
-            val renderer = CanvasStrokeRenderer.create()
-            val identity = android.graphics.Matrix()
-            drawIntoCanvas { c ->
-                c.nativeCanvas.save()
-                c.nativeCanvas.scale(scale, scale)
-                c.nativeCanvas.translate(-visible.left, -visible.top)
-                for (s in strokes) StrokeConversion.toInk(s.atLeastPixels(scale))?.let { renderer.draw(c.nativeCanvas, it, identity) }
-                c.nativeCanvas.restore()
-            }
-        }
+        if (strokes.isNotEmpty()) drawIntoCanvas { InkRaster.draw(it.nativeCanvas, strokes, scale, visible.left, visible.top, MIN_STROKE_PX) }
     }
     return image
 }

@@ -26,6 +26,9 @@ import kotlin.math.hypot
 class InkLayer(initial: List<InkStroke> = emptyList()) {
     val strokes = mutableStateListOf<InkStroke>().apply { addAll(initial) }
 
+    /** A plain copy of [strokes], kept in step by the edit helpers: walking a state list is slow on big pages. */
+    private val plain = ArrayList(initial)
+
     var version by mutableIntStateOf(0)
         private set
 
@@ -33,14 +36,28 @@ class InkLayer(initial: List<InkStroke> = emptyList()) {
     var strokesRev by mutableIntStateOf(0)
         private set
 
-    private val render = IdentityHashMap<InkStroke, Stroke?>()
+    private val render = IdentityHashMap<InkStroke, Stroke?>() // guarded by itself: tiles convert off main
     private val boundsCache = IdentityHashMap<InkStroke, InkRect?>()
     private val grid = SpatialGrid<InkStroke>()
     private val chunks = IdentityHashMap<InkStroke, ByteArray>()
 
+    /** Hears every change to [strokes] on the main thread (the ink tiles). */
+    interface ChangeListener {
+        /** Something changed inside [area] (world units, brush width included). */
+        fun changed(area: InkRect)
+
+        /** [stroke] was added on top of all others; it covers [area]. */
+        fun appended(stroke: InkStroke, area: InkRect)
+    }
+
+    private val changeListeners = ArrayList<ChangeListener>()
+
     init {
         initial.forEach(::indexStroke)
     }
+
+    fun addChangeListener(l: ChangeListener) { changeListeners += l }
+    fun removeChangeListener(l: ChangeListener) { changeListeners -= l }
     private val undoStack = ArrayDeque<Edit>()
     private val redoStack = ArrayDeque<Edit>()
 
@@ -141,18 +158,47 @@ class InkLayer(initial: List<InkStroke> = emptyList()) {
 
     fun drawing() = InkDrawing(strokes.toList())
 
-    fun renderable(s: InkStroke): Stroke? = render.getOrPut(s) { StrokeConversion.toInk(s) }
+    /** The androidx.ink stroke for [s], converted once per stroke instance. Thread-safe. */
+    fun renderable(s: InkStroke): Stroke? {
+        synchronized(render) { if (render.containsKey(s)) return render[s] }
+        val made = StrokeConversion.toInk(s)
+        return synchronized(render) { if (render.containsKey(s)) render[s] else made.also { render[s] = it } }
+    }
     fun bounds(s: InkStroke): InkRect? = boundsCache.getOrPut(s) { s.bounds() }
 
     /**
-     * Strokes whose bounds may touch [rect] (grid cells, a superset), in layer order.
+     * Strokes that may paint inside [rect] (grid cells over their bounds plus half the brush, a superset), in layer order.
      * Main thread only: it reads the Compose-state stroke list and the [SpatialGrid], which the editing
      * functions mutate on the main thread without locking. Off-thread drawing must work from a copy.
      */
     fun strokesIn(rect: InkRect): List<InkStroke> {
         val found = grid.query(rect)
         if (found.isEmpty()) return emptyList()
-        return strokes.filter { it in found }
+        if (found.size > plain.size / 8) return plain.filter { it in found }
+        // a small part of a big page (a tile): sort the hits by their place instead of walking every stroke
+        val order = order()
+        return found.sortedBy { order[it] ?: Int.MAX_VALUE }
+    }
+
+    /** Those of [subset] still in the layer, in layer order. Main thread only. */
+    fun inLayerOrder(subset: Collection<InkStroke>): List<InkStroke> {
+        if (subset.isEmpty()) return emptyList()
+        val order = order()
+        return subset.filter { it in order }.sortedBy { order.getValue(it) }
+    }
+
+    private var orderMap = IdentityHashMap<InkStroke, Int>()
+    private var orderRev = -1
+
+    /** Index of every stroke in [strokes], rebuilt once per [strokesRev]. */
+    private fun order(): IdentityHashMap<InkStroke, Int> {
+        if (orderRev != strokesRev) {
+            val m = IdentityHashMap<InkStroke, Int>(plain.size * 2)
+            plain.forEachIndexed { i, s -> m[s] = i }
+            orderMap = m
+            orderRev = strokesRev
+        }
+        return orderMap
     }
 
     /** The encoded chunk of [s] (see [InkCodec.encodeStroke]), made once per stroke instance. Thread-safe. */
@@ -182,12 +228,16 @@ class InkLayer(initial: List<InkStroke> = emptyList()) {
     }
 
     fun eraseAt(x: Float, y: Float, radius: Float): Boolean {
-        val hit = strokes.withIndex().filter { (_, s) ->
+        // the grid narrows the candidates to strokes whose bounds come within [radius]
+        val near = grid.query(InkRect(x - radius, y - radius, x + radius, y + radius))
+        if (near.isEmpty()) return false
+        val touched = near.filter { s ->
             val b = bounds(s) ?: return@filter false
             x >= b.left - radius && x <= b.right + radius && y >= b.top - radius && y <= b.bottom + radius &&
                 s.points.any { hypot(it.x - x, it.y - y) <= radius + s.brush.size / 2 }
         }
-        if (hit.isEmpty()) return false
+        if (touched.isEmpty()) return false
+        val hit = plain.withIndex().filter { (_, s) -> touched.any { it === s } }
         hit.asReversed().forEach { removeIndex(it.index) }
         if (eraseBefore != null) eraseChanged = true else push(Edit.Removed(hit.map { it.index to it.value }))
         return true
@@ -232,6 +282,7 @@ class InkLayer(initial: List<InkStroke> = emptyList()) {
         resetStrokes(newStrokes)
         val live = java.util.Collections.newSetFromMap(IdentityHashMap<InkStroke, Boolean>()).apply { addAll(strokes) }
         synchronized(chunks) { chunks.keys.retainAll(live) }
+        synchronized(render) { render.keys.retainAll(live) }
         if (undoable) push(Edit.Replaced(before, newStrokes)) else {
             undoStack.clear(); redoStack.clear(); version++
         }
@@ -271,37 +322,77 @@ class InkLayer(initial: List<InkStroke> = emptyList()) {
         version++
     }
 
+    /** The grid holds where a stroke paints (bounds plus half the brush), so a tile finds every stroke reaching into it. */
     private fun indexStroke(s: InkStroke) {
-        bounds(s)?.let { grid.insert(s, it) }
+        paintedArea(s)?.let { grid.insert(s, it) }
+    }
+
+    /** Tells the listeners which area [s] covers (it was added, removed or moved in the stacking order). */
+    private fun changed(s: InkStroke, appended: Boolean = false) {
+        if (changeListeners.isEmpty()) return
+        val r = paintedArea(s) ?: return
+        changeListeners.toList().forEach { if (appended) it.appended(s, r) else it.changed(r) }
+    }
+
+    /** Where [s] may paint: its bounds widened by half the brush (and a little for antialiasing). */
+    fun paintedArea(s: InkStroke): InkRect? {
+        val b = bounds(s) ?: return null
+        val pad = s.brush.size / 2 + 2f
+        return InkRect(b.left - pad, b.top - pad, b.right + pad, b.bottom + pad)
     }
 
     private fun insertAt(i: Int, s: InkStroke) {
         strokes.add(i, s)
+        plain.add(i, s)
         indexStroke(s)
         strokesRev++
+        changed(s, appended = i == strokes.lastIndex)
     }
 
     private fun removeIndex(i: Int) {
         if (i !in strokes.indices) return
-        grid.remove(strokes.removeAt(i))
+        val s = strokes.removeAt(i)
+        plain.removeAt(i)
+        grid.remove(s)
         strokesRev++
+        changed(s)
     }
 
     private fun setAt(i: Int, s: InkStroke) {
-        grid.remove(strokes[i])
+        val old = strokes[i]
+        grid.remove(old)
         strokes[i] = s
+        plain[i] = s
         indexStroke(s)
         strokesRev++
+        changed(old)
+        changed(s)
     }
 
     /** Replaces the whole list; the grid is rebuilt. */
     private fun resetStrokes(list: List<InkStroke>) {
         val copy = list.toList() // [list] may be the live stroke list
+        val old = if (changeListeners.isEmpty()) emptyList() else strokes.toList()
         strokes.clear()
         strokes.addAll(copy)
+        plain.clear()
+        plain.addAll(copy)
         grid.clear()
         copy.forEach(::indexStroke)
         strokesRev++
+        if (changeListeners.isNotEmpty()) changedBetween(old, copy)
+    }
+
+    /** Reports strokes that appear in only one of the lists, or whose place in the stacking order differs. */
+    private fun changedBetween(old: List<InkStroke>, new: List<InkStroke>) {
+        val inOld = java.util.Collections.newSetFromMap(IdentityHashMap<InkStroke, Boolean>()).apply { addAll(old) }
+        val inNew = java.util.Collections.newSetFromMap(IdentityHashMap<InkStroke, Boolean>()).apply { addAll(new) }
+        old.forEach { if (it !in inNew) changed(it) }
+        new.forEach { if (it !in inOld) changed(it) }
+        // strokes common to both, in order: a different sequence means overlaps may stack differently
+        val keptOld = old.filter { it in inNew }
+        val keptNew = new.filter { it in inOld }
+        for (i in keptOld.indices) if (keptOld[i] !== keptNew[i]) { changed(keptOld[i]); changed(keptNew[i]) }
     }
 
     private fun push(e: Edit) {

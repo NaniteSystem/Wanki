@@ -4,6 +4,10 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -22,7 +26,8 @@ import androidx.ink.rendering.android.canvas.CanvasStrokeRenderer
  * pans and zooms (boards, notebook pages).
  *
  * [background] and the strokes are drawn in world coordinates, [overlay] in screen coordinates.
- * In-progress strokes are rendered by androidx.ink with low latency, finished ones by Compose.
+ * In-progress strokes are rendered by androidx.ink with low latency, finished ones by Compose: from
+ * [InkTiles] when there is a viewport, stroke by stroke otherwise.
  */
 @Composable
 fun InkSurface(
@@ -42,6 +47,13 @@ fun InkSurface(
     overlay: DrawScope.() -> Unit = {},
 ) {
     val renderer = remember { CanvasStrokeRenderer.create() }
+    val scope = rememberCoroutineScope()
+    // finished ink of pages and boards comes from cached tiles; small fixed canvases draw it directly
+    val tiles = if (viewport != null) remember(layer) { InkTiles(layer, scope) } else null
+    if (tiles != null) {
+        DisposableEffect(tiles) { onDispose { tiles.dispose() } }
+        LaunchedEffect(tiles) { snapshotFlow { layer.selection.toList() }.collect { tiles.exclude(it) } }
+    }
     val started by rememberUpdatedState(onStrokeStarted)
     val finished by rememberUpdatedState(onStrokeFinished)
     val viewEnded by rememberUpdatedState(onViewGestureEnd)
@@ -54,20 +66,16 @@ fun InkSurface(
             val ox = vp?.offsetX ?: 0f
             val oy = vp?.offsetY ?: 0f
             val matrix = vp?.worldToScreen() ?: android.graphics.Matrix()
-            val visible = vp?.visibleWorld()
             withTransform({
                 translate(ox, oy)
                 scale(scale, scale, pivot = androidx.compose.ui.geometry.Offset.Zero)
             }) {
                 background()
                 if (showInk) {
-                    val canvas = drawContext.canvas.nativeCanvas
-                    for (s in layer.strokes) {
-                        if (visible != null) {
-                            val b = layer.bounds(s) ?: continue
-                            if (!b.intersects(visible)) continue
-                        }
-                        layer.renderable(s)?.let { renderer.draw(canvas, it, matrix) }
+                    if (tiles != null && vp != null) tiles.draw(this, vp)
+                    else {
+                        val canvas = drawContext.canvas.nativeCanvas
+                        for (s in layer.strokes) layer.renderable(s)?.let { renderer.draw(canvas, it, matrix) }
                     }
                 }
                 drawSelection(layer, scale)

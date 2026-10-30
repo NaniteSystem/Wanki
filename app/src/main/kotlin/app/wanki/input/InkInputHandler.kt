@@ -368,6 +368,7 @@ internal class InkInputHandler(
     private fun startPinch(e: MotionEvent) {
         panPointer = -1
         pinching = true
+        viewport?.pinching = true
         val (fx, fy, span) = pinchGeometry(e)
         lastFx = fx; lastFy = fy; lastSpan = span
     }
@@ -375,6 +376,7 @@ internal class InkInputHandler(
     private fun endNavigation() {
         val moved = pinching || panPointer >= 0
         pinching = false
+        viewport?.pinching = false
         panPointer = -1
         if (moved) onViewGestureEnd()
     }

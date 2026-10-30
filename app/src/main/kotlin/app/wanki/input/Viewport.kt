@@ -3,6 +3,7 @@ package app.wanki.input
 import android.graphics.Matrix
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import app.wanki.ink.InkRect
 
@@ -21,6 +22,9 @@ class Viewport(
         private set
     var offsetY by mutableFloatStateOf(0f)
         private set
+
+    /** A pinch is in progress: the ink tiles keep their zoom level until it ends. */
+    var pinching by mutableStateOf(false)
 
     private var screenW = 0f
     private var screenH = 0f

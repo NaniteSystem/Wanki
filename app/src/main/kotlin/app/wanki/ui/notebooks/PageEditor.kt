@@ -188,7 +188,18 @@ class PageEditorState(
 
     suspend fun load() {
         when (val r = graph.repository.loadInkResult(page.id)) {
-            is InkLoad.Ok -> layer.replaceAll(r.strokes, undoable = false)
+            is InkLoad.Ok -> {
+                layer.replaceAll(r.strokes, undoable = false)
+                // encode the stroke chunks now, off main, so the first save after an edit only encodes the new stroke
+                val encode = layer.snapshotEncoder()
+                graph.appScope.launch(Dispatchers.Default) {
+                    try {
+                        encode()
+                    } catch (e: Exception) {
+                        Log.e("Wanki", "page ${page.id}: chunks not prepared", e) // the next save reports it
+                    }
+                }
+            }
             is InkLoad.Unreadable -> {
                 // the stored blob stays untouched: nothing is saved or recognized from this page
                 Log.e("Wanki", "page ${page.id}: ink cannot be read", r.error)
