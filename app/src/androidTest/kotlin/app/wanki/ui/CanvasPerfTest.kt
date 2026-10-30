@@ -21,6 +21,7 @@ import app.wanki.ink.InkBrush
 import app.wanki.ink.InkPoint
 import app.wanki.ink.InkStroke
 import app.wanki.ink.InkTool
+import app.wanki.input.EraserMode
 import app.wanki.input.InkTiles
 import app.wanki.ui.common.LocalUndo
 import app.wanki.ui.common.Undo
@@ -227,24 +228,37 @@ class CanvasPerfTest {
         assertTrue("new stroke took $ms ms", ms <= 32.0)
     }
 
-    @Test
-    fun eraserStepIsCheap() {
-        open(seed("Perf erase"))
+    /** One eraser drag along row 10 of the generated page, 100 steps; the time of each step in ms, sorted. */
+    private fun eraserSteps(name: String, mode: EraserMode): List<Double> {
+        open(seed("Perf erase $name"))
         val tiles = awaitAllVisibleReady()
-        val times = onMain {
+        return onMain {
             val layer = tiles.layer
             layer.beginErase()
-            // along row 10 of the generated page
+            val y = 30f + 10 * 34f + 17f
             val t = (0 until 100).map { i ->
                 val start = SystemClock.elapsedRealtimeNanos()
-                layer.eraseAt(20f + i * 9.6f, 30f + 10 * 34f + 17f, 6f)
+                layer.eraseAlong(20f + (i - 1) * 9.6f, y, 20f + i * 9.6f, y, 6f, mode)
                 SystemClock.elapsedRealtimeNanos() - start
             }
             layer.endErase()
             t
         }.map { it / 1_000_000.0 }.sorted()
+    }
+
+    @Test
+    fun eraserStepIsCheap() {
+        val times = eraserSteps("partial", EraserMode.PARTIAL)
         val median = times[times.size / 2]
-        log("eraser: median %.2f ms, max %.2f ms".format(median, times.last()))
+        log("eraser (partial): median %.2f ms, max %.2f ms".format(median, times.last()))
+        assertTrue("eraser step median $median ms", median <= 4.0)
+    }
+
+    @Test
+    fun eraserWholeStepIsCheap() {
+        val times = eraserSteps("whole", EraserMode.WHOLE)
+        val median = times[times.size / 2]
+        log("eraser (whole): median %.2f ms, max %.2f ms".format(median, times.last()))
         assertTrue("eraser step median $median ms", median <= 4.0)
     }
 

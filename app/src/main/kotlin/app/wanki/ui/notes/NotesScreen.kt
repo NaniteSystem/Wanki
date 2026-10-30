@@ -56,6 +56,7 @@ import app.wanki.graph
 import app.wanki.ink.InkCodec
 import app.wanki.ink.InkRect
 import app.wanki.ink.InkStroke
+import app.wanki.input.EraserSettings
 import app.wanki.input.InkLayer
 import app.wanki.input.InkSurface
 import app.wanki.input.ToolKind
@@ -187,6 +188,7 @@ fun NoteEditorScreen(id: String?, onBack: () -> Unit, onCreated: (String) -> Uni
     val blocks = remember { mutableStateListOf<BlockState>() }
     val changes = remember { NoteChanges() }
     var tool by remember { mutableStateOf(graph.settings.tool(InkSection.NOTE)) }
+    var eraser by remember { mutableStateOf(graph.settings.eraser(InkSection.NOTE)) }
     var activeBlockId by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(id) {
@@ -265,7 +267,8 @@ fun NoteEditorScreen(id: String?, onBack: () -> Unit, onCreated: (String) -> Uni
             if (blocks.any { it.type == NoteBlockType.INK }) {
                 // undo/redo act on the handwriting block touched last
                 val active = blocks.firstOrNull { it.id == activeBlockId && it.layer != null } ?: blocks.first { it.layer != null }
-                InkToolbar(tool, { tool = it; graph.settings.setTool(InkSection.NOTE, it) }, active.layer!!, Modifier.padding(horizontal = 8.dp),
+                InkToolbar(tool, { tool = it; graph.settings.setTool(InkSection.NOTE, it) }, active.layer!!,
+                    eraser, { eraser = it; graph.settings.setEraser(InkSection.NOTE, it) }, Modifier.padding(horizontal = 8.dp),
                     tools = listOf(ToolKind.PEN, ToolKind.MARKER, ToolKind.HIGHLIGHTER, ToolKind.ERASER))
             }
             val colors = TextFieldDefaults.colors(
@@ -296,7 +299,7 @@ fun NoteEditorScreen(id: String?, onBack: () -> Unit, onCreated: (String) -> Uni
                                     },
                             ) {
                                 InkSurface(
-                                    layer = b.layer!!, tool = tool, modifier = Modifier.fillMaxSize(), gestures = true,
+                                    layer = b.layer!!, tool = tool, modifier = Modifier.fillMaxSize(), gestures = true, eraser = eraser,
                                     background = { drawTemplate(PageTemplate.LINED, InkRect(0f, 0f, size.width, size.height)) },
                                 )
                             }

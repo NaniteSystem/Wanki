@@ -12,8 +12,8 @@ import app.wanki.ink.InkDrawing
 import app.wanki.ink.InkRect
 import app.wanki.ink.InkStroke
 import app.wanki.ink.SpatialGrid
+import app.wanki.ink.StrokeEraser
 import java.util.IdentityHashMap
-import kotlin.math.hypot
 
 /**
  * The strokes of one canvas (world coordinates) with undo/redo. Renderable androidx.ink strokes
@@ -241,19 +241,46 @@ class InkLayer(initial: List<InkStroke> = emptyList()) {
         push(Edit.Added(listOf(s)))
     }
 
-    fun eraseAt(x: Float, y: Float, radius: Float): Boolean {
-        // the grid narrows the candidates to strokes whose bounds come within [radius]
-        val near = grid.query(InkRect(x - radius, y - radius, x + radius, y + radius))
+    fun eraseAt(x: Float, y: Float, radius: Float): Boolean = eraseAlong(x, y, x, y, radius, EraserMode.WHOLE)
+
+    /**
+     * Erases under the capsule a–b (the eraser moved from a to b, radius [radius] in world units): whole strokes
+     * touched ([EraserMode.WHOLE]) or only their parts under it ([EraserMode.PARTIAL], see [StrokeEraser]; a cut
+     * stroke becomes its pieces at the same place in the stacking order). In an eraser drag ([beginErase]) it
+     * makes no undo step of its own. True when anything changed. Main thread.
+     */
+    fun eraseAlong(ax: Float, ay: Float, bx: Float, by: Float, radius: Float, mode: EraserMode): Boolean {
+        // the grid holds each stroke's painted area (bounds plus half the brush), so the swept bounds widened by the radius find every candidate
+        val near = grid.query(InkRect(minOf(ax, bx) - radius, minOf(ay, by) - radius, maxOf(ax, bx) + radius, maxOf(ay, by) + radius))
         if (near.isEmpty()) return false
-        val touched = near.filter { s ->
-            val b = bounds(s) ?: return@filter false
-            x >= b.left - radius && x <= b.right + radius && y >= b.top - radius && y <= b.bottom + radius &&
-                s.points.any { hypot(it.x - x, it.y - y) <= radius + s.brush.size / 2 }
+        val cuts = ArrayList<Pair<Int, List<InkStroke>>>()
+        for (s in near) {
+            val b = bounds(s) ?: continue
+            val reach = radius + s.brush.size / 2
+            if (maxOf(ax, bx) < b.left - reach || minOf(ax, bx) > b.right + reach ||
+                maxOf(ay, by) < b.top - reach || minOf(ay, by) > b.bottom + reach) continue
+            val pieces = if (mode == EraserMode.PARTIAL) StrokeEraser.cut(s, ax, ay, bx, by, radius)
+            else if (StrokeEraser.touches(s, ax, ay, bx, by, radius)) emptyList() else null
+            if (pieces != null) cuts += plain.indexOfFirst { it === s } to pieces
         }
-        if (touched.isEmpty()) return false
-        val hit = plain.withIndex().filter { (_, s) -> touched.any { it === s } }
-        hit.asReversed().forEach { removeIndex(it.index) }
-        if (eraseBefore != null) eraseChanged = true else push(Edit.Removed(hit.map { it.index to it.value }))
+        if (cuts.isEmpty()) return false
+        val before = if (eraseBefore == null && mode == EraserMode.PARTIAL) plain.toList() else null
+        val removed = ArrayList<Pair<Int, InkStroke>>()
+        // from the back, so earlier indices stay valid
+        for ((i, pieces) in cuts.sortedByDescending { it.first }) {
+            val old = plain[i]
+            removed += i to old
+            if (pieces.isEmpty()) removeIndex(i)
+            else {
+                setAt(i, pieces[0])
+                for (k in 1 until pieces.size) insertAt(i + k, pieces[k])
+            }
+        }
+        when {
+            eraseBefore != null -> eraseChanged = true
+            before != null -> push(Edit.Replaced(before, plain.toList()))
+            else -> push(Edit.Removed(removed.reversed()))
+        }
         return true
     }
 
@@ -261,7 +288,7 @@ class InkLayer(initial: List<InkStroke> = emptyList()) {
     private var eraseChanged = false
 
     /**
-     * Starts an eraser drag: [eraseAt] then removes strokes live without undo steps or [version]
+     * Starts an eraser drag: [eraseAlong] then removes or cuts strokes live without undo steps or [version]
      * changes, and [endErase] records the whole drag as one undo step.
      */
     fun beginErase() {

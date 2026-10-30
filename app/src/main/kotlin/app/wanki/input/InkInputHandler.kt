@@ -40,7 +40,10 @@ internal class InkInputHandler(
     var readOnly: Boolean = false
     /** Pen gestures (scratch-out to erase). Off where every stroke is an answer (review cells). */
     var gestures: Boolean = false
-    var eraserRadiusPx: Float = 22f
+    /** Mode and size of the eraser; the radius is [EraserSize.radiusDp] on screen at any zoom. */
+    var eraser: EraserSettings = EraserSettings()
+    /** The eraser circle under the pen (screen px, radius px), null when not erasing. */
+    var onEraserCursor: (EraserCursor?) -> Unit = {}
     var onStrokeStarted: () -> Unit = {}
     var onStrokeFinished: () -> Unit = {}
     /** A pan or pinch ended (the viewport changed). */
@@ -60,6 +63,8 @@ internal class InkInputHandler(
     private var drawPointer = -1
     private var drawStroke: InProgressStrokeId? = null
     private var erasePointer = -1
+    private var eraseLastX = 0f
+    private var eraseLastY = 0f
     private var lassoPointer = -1
     private var movePointer = -1
     private var lastWorld = androidx.compose.ui.geometry.Offset.Zero
@@ -324,20 +329,27 @@ internal class InkInputHandler(
         erasePointer = pointerId
         layer?.beginErase()
         onStrokeStarted()
-        erase(x, y)
+        erase(x, y, first = true)
     }
 
-    private fun erase(sx: Float, sy: Float) {
+    /** Erases from the previous sample to this one (a capsule, so a fast drag leaves no gaps). */
+    private fun erase(sx: Float, sy: Float, first: Boolean = false) {
         val l = layer ?: return
         val vp = viewport
-        if (vp == null) l.eraseAt(sx, sy, eraserRadiusPx)
-        else l.eraseAt(vp.toWorldX(sx), vp.toWorldY(sy), eraserRadiusPx / vp.scale)
+        val px = eraser.size.radiusDp * view.resources.displayMetrics.density
+        val (fromX, fromY) = if (first) sx to sy else eraseLastX to eraseLastY
+        if (vp == null) l.eraseAlong(fromX, fromY, sx, sy, px, eraser.mode)
+        else l.eraseAlong(vp.toWorldX(fromX), vp.toWorldY(fromY), vp.toWorldX(sx), vp.toWorldY(sy), px / vp.scale, eraser.mode)
+        eraseLastX = sx
+        eraseLastY = sy
+        onEraserCursor(EraserCursor(sx, sy, px))
     }
 
     /** The eraser lifted: the whole drag becomes one undo step. */
     private fun finishErase() {
         if (erasePointer < 0) return
         erasePointer = -1
+        onEraserCursor(null)
         if (layer?.endErase() == true) onStrokeFinished()
     }
 
@@ -357,6 +369,7 @@ internal class InkInputHandler(
     private fun cancelFingerErase(e: MotionEvent) {
         if (erasePointer < 0 || !isFingerPointer(e, erasePointer)) return
         erasePointer = -1
+        onEraserCursor(null)
         layer?.cancelErase()
     }
 

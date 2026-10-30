@@ -134,4 +134,87 @@ class InkLayerEraseTest {
         layer.cancelErase()
         assertEquals(v0, layer.version)
     }
+
+    /** Three horizontal strokes one above the other, each 0..100 long. */
+    private fun rows() = listOf(0f, 20f, 40f).map { y -> InkStroke(listOf(InkPoint(0f, y, 0), InkPoint(100f, y, 100))) }
+
+    @Test
+    fun partialDragIsOneUndoStep() {
+        val originals = rows()
+        val layer = InkLayer(originals)
+        val v0 = layer.version
+        layer.beginErase()
+        // down the middle across all three, in two steps
+        assertTrue(layer.eraseAlong(50f, -10f, 50f, 25f, 3f, EraserMode.PARTIAL))
+        assertTrue(layer.eraseAlong(50f, 25f, 50f, 50f, 3f, EraserMode.PARTIAL))
+        assertEquals(v0, layer.version, "no version change in the middle of a drag")
+        assertTrue(layer.endErase())
+        assertEquals(6, layer.strokes.size)
+        assertEquals(v0 + 1, layer.version)
+        val pieces = layer.strokes.toList()
+        // pieces stay where the strokes were in the stacking order
+        assertEquals(listOf(0f, 0f, 20f, 20f, 40f, 40f), pieces.map { it.points[0].y })
+        layer.undo()
+        assertEquals(3, layer.strokes.size)
+        originals.forEachIndexed { i, s -> assertTrue(s === layer.strokes[i], "original $i is back as the same instance") }
+        assertFalse(layer.canUndo)
+        layer.redo()
+        assertEquals(pieces, layer.strokes.toList())
+        pieces.forEachIndexed { i, s -> assertTrue(s === layer.strokes[i]) }
+    }
+
+    @Test
+    fun partialEraseOutsideADragIsOneUndoStep() {
+        val originals = rows()
+        val layer = InkLayer(originals)
+        assertTrue(layer.eraseAlong(50f, 0f, 50f, 0f, 3f, EraserMode.PARTIAL))
+        assertEquals(4, layer.strokes.size)
+        layer.undo()
+        assertEquals(originals, layer.strokes.toList())
+        assertFalse(layer.canUndo)
+    }
+
+    @Test
+    fun partialEraseKeepsGridInStep() {
+        val layer = InkLayer(rows())
+        layer.beginErase()
+        layer.eraseAlong(50f, 0f, 50f, 0f, 3f, EraserMode.PARTIAL)
+        layer.endErase()
+        // the grid answers with the pieces, not the cut strokes
+        val found = layer.strokesIn(app.wanki.ink.InkRect(-5f, -5f, 105f, 45f))
+        assertEquals(layer.strokes.toList(), found)
+        assertEquals(4, found.size)
+    }
+
+    @Test
+    fun wholeModeRemovesTouched() {
+        val originals = rows()
+        val layer = InkLayer(originals)
+        layer.beginErase()
+        assertTrue(layer.eraseAlong(50f, 15f, 50f, 25f, 3f, EraserMode.WHOLE))
+        assertTrue(layer.endErase())
+        assertEquals(listOf(originals[0], originals[2]), layer.strokes.toList())
+        layer.undo()
+        assertEquals(originals, layer.strokes.toList())
+    }
+
+    @Test
+    fun partialMissChangesNothing() {
+        val layer = InkLayer(rows())
+        layer.beginErase()
+        assertFalse(layer.eraseAlong(50f, 100f, 60f, 100f, 3f, EraserMode.PARTIAL))
+        assertFalse(layer.endErase())
+    }
+
+    @Test
+    fun cancelledPartialEraseRestoresTheOriginals() {
+        val originals = rows()
+        val layer = InkLayer(originals)
+        layer.beginErase()
+        layer.eraseAlong(50f, 0f, 50f, 40f, 3f, EraserMode.PARTIAL)
+        layer.cancelErase()
+        assertEquals(3, layer.strokes.size)
+        originals.forEachIndexed { i, s -> assertTrue(s === layer.strokes[i]) }
+        assertFalse(layer.canUndo)
+    }
 }

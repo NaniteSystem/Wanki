@@ -54,6 +54,7 @@ import java.util.IdentityHashMap
 import kotlinx.coroutines.isActive
 import app.wanki.input.InkLayer
 import app.wanki.input.InkSurface
+import app.wanki.input.EraserSettings
 import app.wanki.input.InkSection
 import app.wanki.input.ToolSelection
 import app.wanki.input.Viewport
@@ -224,6 +225,13 @@ class PageEditorState(
     fun selectTool(t: ToolSelection) {
         tool = t
         graph.settings.setTool(section, t)
+    }
+    var eraser by mutableStateOf(graph.settings.eraser(section))
+        private set
+
+    fun selectEraser(e: EraserSettings) {
+        eraser = e
+        graph.settings.setEraser(section, e)
     }
     var loaded by mutableStateOf(false)
         private set
@@ -446,7 +454,7 @@ fun PageEditor(
         val sheetMax = maxHeight / 2
         Column(Modifier.fillMaxSize()) {
             ScreenHeader(title, onBack = back, subtitle = subtitle, subtitleMaxLines = 1, primary = primary, menu = menu)
-            InkToolbar(state.tool, state::selectTool, state.layer, Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+            InkToolbar(state.tool, state::selectTool, state.layer, state.eraser, state::selectEraser, Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
             if (state.layer.hasSelection) {
                 SelectionBar(state.layer, state.notebook.language, Modifier.padding(horizontal = 8.dp, vertical = 2.dp))
             }
@@ -468,6 +476,7 @@ fun PageEditor(
                     enabled = state.loaded,
                     readOnly = state.readOnly,
                     gestures = true,
+                    eraser = state.eraser,
                     onViewGestureEnd = state::onViewGestureEnd,
                     modifier = Modifier.weight(1f).fillMaxSize().testTag("page-canvas"),
                     background = {

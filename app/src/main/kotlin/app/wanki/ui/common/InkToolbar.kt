@@ -7,7 +7,13 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.RadioButton
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -40,6 +46,9 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import app.wanki.R
+import app.wanki.input.EraserMode
+import app.wanki.input.EraserSettings
+import app.wanki.input.EraserSize
 import app.wanki.input.InkLayer
 import app.wanki.input.ToolKind
 import app.wanki.input.ToolSelection
@@ -62,7 +71,8 @@ private fun ToolKind.label() = when (this) {
     ToolKind.LASSO -> "Лассо"
 }
 
-private val ToolKind.hasOptions get() = this == ToolKind.PEN || this == ToolKind.MARKER || this == ToolKind.HIGHLIGHTER
+private val ToolKind.hasColors get() = this == ToolKind.PEN || this == ToolKind.MARKER || this == ToolKind.HIGHLIGHTER
+private val ToolKind.hasOptions get() = hasColors || this == ToolKind.ERASER
 
 /**
  * One row of icon buttons: tools, undo, redo. Tapping the selected pen / marker / highlighter opens
@@ -73,6 +83,8 @@ fun InkToolbar(
     tool: ToolSelection,
     onTool: (ToolSelection) -> Unit,
     layer: InkLayer,
+    eraser: EraserSettings,
+    onEraser: (EraserSettings) -> Unit,
     modifier: Modifier = Modifier,
     tools: List<ToolKind> = ToolKind.entries,
 ) {
@@ -84,7 +96,7 @@ fun InkToolbar(
         ) {
             tools.forEach { kind ->
                 Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                    ToolButton(kind, tool, onTool)
+                    ToolButton(kind, tool, onTool, eraser, onEraser)
                 }
             }
             Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
@@ -102,7 +114,9 @@ fun InkToolbar(
 }
 
 @Composable
-private fun ToolButton(kind: ToolKind, tool: ToolSelection, onTool: (ToolSelection) -> Unit) {
+private fun ToolButton(
+    kind: ToolKind, tool: ToolSelection, onTool: (ToolSelection) -> Unit, eraser: EraserSettings, onEraser: (EraserSettings) -> Unit,
+) {
     val selected = tool.kind == kind
     var open by remember { mutableStateOf(false) }
     Box {
@@ -114,7 +128,7 @@ private fun ToolButton(kind: ToolKind, tool: ToolSelection, onTool: (ToolSelecti
             modifier = Modifier.testTag("tool-${kind.name}"),
         ) {
             Icon(painterResource(kind.icon()), contentDescription = kind.label())
-            if (selected && kind.hasOptions) {
+            if (selected && kind.hasColors) {
                 Box(
                     Modifier.align(Alignment.BottomCenter).padding(bottom = 3.dp).size(7.dp)
                         .background(Color(tool.color), CircleShape)
@@ -122,7 +136,10 @@ private fun ToolButton(kind: ToolKind, tool: ToolSelection, onTool: (ToolSelecti
                 )
             }
         }
-        if (open) ToolOptions(tool, onTool) { open = false }
+        if (open) {
+            if (kind == ToolKind.ERASER) EraserOptions(eraser, onEraser) { open = false }
+            else ToolOptions(tool, onTool) { open = false }
+        }
     }
 }
 
@@ -165,6 +182,49 @@ private fun ToolOptions(tool: ToolSelection, onTool: (ToolSelection) -> Unit, on
         onPick = { onTool(tool.copy(color = it)); onDismiss() },
         onDismiss = { custom = false; onDismiss() },
     )
+}
+
+private fun EraserMode.label() = if (this == EraserMode.WHOLE) "Целиком" else "Частично"
+
+private fun EraserSize.label() = when (this) {
+    EraserSize.S -> "Маленький"
+    EraserSize.M -> "Средний"
+    EraserSize.L -> "Большой"
+}
+
+/** Popup of the eraser: whole or partial, and three sizes. */
+@Composable
+private fun EraserOptions(eraser: EraserSettings, onEraser: (EraserSettings) -> Unit, onDismiss: () -> Unit) {
+    DropdownMenu(expanded = true, onDismissRequest = onDismiss) {
+        Column(Modifier.testTag("eraser-options").padding(horizontal = 8.dp)) {
+            EraserMode.entries.forEach { m ->
+                EraserChoice("eraser-${m.name}", m.label(), eraser.mode == m, null) { onEraser(eraser.copy(mode = m)) }
+            }
+            HorizontalDivider(Modifier.padding(vertical = 4.dp))
+            EraserSize.entries.forEach { sz ->
+                EraserChoice("eraser-size-${sz.name}", sz.label(), eraser.size == sz, sz.radiusDp) { onEraser(eraser.copy(size = sz)) }
+            }
+        }
+    }
+}
+
+/** One radio row (at least 48 dp high); [radiusDp] draws the eraser circle of that size. */
+@Composable
+private fun EraserChoice(tag: String, label: String, selected: Boolean, radiusDp: Float?, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 48.dp)
+            .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
+            .testTag(tag),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RadioButton(selected = selected, onClick = null)
+        Text(label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(start = 12.dp).weight(1f, fill = false))
+        if (radiusDp != null) {
+            Spacer(Modifier.width(12.dp))
+            // the circle is drawn at half scale so the largest still fits next to the label
+            Box(Modifier.size((radiusDp / 2).dp).border(1.dp, MaterialTheme.colorScheme.onSurfaceVariant, CircleShape))
+        }
+    }
 }
 
 @Composable

@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
+import app.wanki.input.EraserSettings
 import app.wanki.input.InkSection
 import app.wanki.input.ToolSelection
 import app.wanki.input.decode
@@ -62,6 +63,17 @@ class Settings(context: Context) {
     /** The pen/marker/eraser choice last used in an ink section. */
     fun tool(section: InkSection): ToolSelection = ToolSelection.decode(prefs.getString("tool.${section.name}", null))
     fun setTool(section: InkSection, t: ToolSelection) { prefs.edit().putString("tool.${section.name}", t.encode()).apply() }
+
+    private val erasers = mutableStateMapOf<String, EraserSettings>()
+
+    /** The eraser mode and size last chosen in an ink section. */
+    fun eraser(section: InkSection): EraserSettings =
+        erasers[section.name] ?: EraserSettings.decode(prefs.getString("eraser.${section.name}", null))
+
+    fun setEraser(section: InkSection, e: EraserSettings) {
+        erasers[section.name] = e
+        prefs.edit().putString("eraser.${section.name}", e.encode()).apply()
+    }
 
     private val listSorts = mutableStateMapOf<String, ListSort>()
 

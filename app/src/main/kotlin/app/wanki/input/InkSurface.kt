@@ -3,13 +3,16 @@ package app.wanki.input
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
@@ -17,6 +20,7 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.ink.authoring.InProgressStrokesView
 import androidx.ink.rendering.android.canvas.CanvasStrokeRenderer
@@ -40,6 +44,7 @@ fun InkSurface(
     readOnly: Boolean = false,
     showInk: Boolean = true,
     gestures: Boolean = false,
+    eraser: EraserSettings = EraserSettings(),
     onStrokeStarted: () -> Unit = {},
     onStrokeFinished: () -> Unit = {},
     onViewGestureEnd: () -> Unit = {},
@@ -57,6 +62,8 @@ fun InkSurface(
     val started by rememberUpdatedState(onStrokeStarted)
     val finished by rememberUpdatedState(onStrokeFinished)
     val viewEnded by rememberUpdatedState(onViewGestureEnd)
+    var cursor by remember { mutableStateOf<EraserCursor?>(null) }
+    val cursorColor = MaterialTheme.colorScheme.onSurfaceVariant
 
     // clip: page backgrounds are drawn far beyond the visible area
     Box(modifier.clipToBounds().onSizeChanged { viewport?.onScreenSize(it.width.toFloat(), it.height.toFloat()) }) {
@@ -81,6 +88,7 @@ fun InkSurface(
                 drawSelection(layer, scale)
             }
             overlay()
+            cursor?.let { drawCircle(cursorColor, it.radius, androidx.compose.ui.geometry.Offset(it.x, it.y), style = androidx.compose.ui.graphics.drawscope.Stroke(1.dp.toPx())) }
         }
         AndroidView(
             modifier = Modifier.fillMaxSize(),
@@ -101,6 +109,8 @@ fun InkSurface(
                     it.enabled = enabled
                     it.readOnly = readOnly
                     it.gestures = gestures
+                    it.eraser = eraser
+                    it.onEraserCursor = { c -> cursor = c }
                     it.onStrokeStarted = { started() }
                     it.onStrokeFinished = { finished() }
                     it.onViewGestureEnd = { viewEnded() }
