@@ -90,9 +90,10 @@ class InkLayerEraseTest {
         val v = layer.version
         layer.undo()
         assertEquals(2, layer.strokes.size)
-        assertEquals(105f, layer.strokes[1].points[0].x)
         assertEquals(v, layer.version)
+        // the drag still applies to the strokes when it ends
         layer.endMove()
+        assertEquals(105f, layer.strokes[1].points[0].x)
         layer.undo()
         assertEquals(listOf(a, b), layer.strokes.toList())
     }
@@ -106,8 +107,8 @@ class InkLayerEraseTest {
         layer.moveSelectionBy(5f, 0f)
         layer.cancelMove()
         assertEquals(listOf(a, b), layer.strokes.toList())
-        // a save during the drag may have stored the moved strokes: the restored ones are a new version
-        assertEquals(v + 1, layer.version)
+        // the strokes only change when a drag ends: nothing was saved, nothing to save again
+        assertEquals(v, layer.version)
         assertFalse(layer.canUndo)
         layer.endMove() // no open move any more: nothing pushed
         assertFalse(layer.canUndo)

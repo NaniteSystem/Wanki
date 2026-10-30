@@ -33,6 +33,8 @@ internal data class LinePreview(val from: androidx.compose.ui.geometry.Offset, v
  * - two fingers always pan and zoom (when the canvas has a [viewport]);
  * - with a [viewport], a quick two-finger tap undoes and a three-finger tap redoes ([TapGestures]);
  * - one eraser drag is one undo step ([InkLayer.beginErase]);
+ * - with the lasso, a touch on the selection or its handles ([SelectionHandles]) moves, scales or turns it; the drag
+ *   is shown live through [InkLayer.liveTransform] and becomes one undo step when it ends;
  * - holding the pen still for [StraightLine.HOLD_MS] at the end of a stroke straightens it into a line (canvases with a
  *   [viewport]); the line follows the pen until it lifts;
  * - a two-finger fling past 30 % of the width, with the page edge in view, calls [onPageSwipe] (pages of notebooks).
@@ -87,8 +89,11 @@ internal class InkInputHandler(
     private var eraseLastX = 0f
     private var eraseLastY = 0f
     private var lassoPointer = -1
+    // a drag of the lasso selection: which handle, where it started, and the selection's bounds then
     private var movePointer = -1
-    private var lastWorld = androidx.compose.ui.geometry.Offset.Zero
+    private var moveHandle = Handle.NONE
+    private var moveStart = androidx.compose.ui.geometry.Offset.Zero
+    private var moveBounds: app.wanki.ink.InkRect? = null
 
     // finger navigation
     private var panPointer = -1
@@ -225,11 +230,8 @@ internal class InkInputHandler(
     private fun onMove(e: MotionEvent) {
         if (movePointer >= 0) {
             val i = e.findPointerIndex(movePointer)
-            if (i >= 0) {
-                val w = world(e.getX(i), e.getY(i))
-                layer?.moveSelectionBy(w.x - lastWorld.x, w.y - lastWorld.y)
-                lastWorld = w
-            }
+            val b = moveBounds
+            if (i >= 0 && b != null) layer?.transformSelection(SelectionHandles.transform(moveHandle, b, moveStart, world(e.getX(i), e.getY(i))))
             return
         }
         if (lassoPointer >= 0) {
@@ -280,8 +282,10 @@ internal class InkInputHandler(
         val id = e.getPointerId(e.actionIndex)
         if (id == movePointer) {
             movePointer = -1
-            layer?.endMove()
-            onStrokeFinished()
+            if (isCanceled(e)) layer?.cancelTransform() else {
+                layer?.endTransform()
+                onStrokeFinished()
+            }
         }
         if (id == lassoPointer) {
             lassoPointer = -1
@@ -321,7 +325,7 @@ internal class InkInputHandler(
     private fun cancelAll(e: MotionEvent) {
         cancelDraw(e)
         drawPointer = -1
-        if (movePointer >= 0) { movePointer = -1; layer?.endMove() }
+        if (movePointer >= 0) { movePointer = -1; layer?.cancelTransform() }
         lassoPointer = -1
         layer?.lasso = null
         finishErase()
@@ -337,12 +341,14 @@ internal class InkInputHandler(
         val l = layer ?: return
         val w = world(x, y)
         val b = l.selectionBounds()
-        val pad = 16f / (viewport?.scale ?: 1f)
-        if (b != null && w.x in b.left - pad..b.right + pad && w.y in b.top - pad..b.bottom + pad) {
-            // touching the selection drags it
+        val handle = if (b == null) Handle.NONE else SelectionHandles.hit(w.x, w.y, b, viewport?.scale ?: 1f, TOUCH_DP * density)
+        if (handle != Handle.NONE) {
+            // the selection or one of its handles: move, scale or turn it
             movePointer = pointerId
-            lastWorld = w
-            l.beginMove()
+            moveHandle = handle
+            moveStart = w
+            moveBounds = b
+            l.beginTransform()
             return
         }
         lassoPointer = pointerId
@@ -470,7 +476,7 @@ internal class InkInputHandler(
     private fun cancelFingerSelect(e: MotionEvent) {
         if (movePointer >= 0 && isFingerPointer(e, movePointer)) {
             movePointer = -1
-            layer?.cancelMove()
+            layer?.cancelTransform()
         }
         if (lassoPointer >= 0 && isFingerPointer(e, lassoPointer)) {
             lassoPointer = -1
@@ -612,5 +618,6 @@ internal class InkInputHandler(
         const val TAG = "WankiInk"
         const val SLOP_DP = 6f
         const val MIN_LENGTH_DP = 24f
+        const val TOUCH_DP = 48f
     }
 }

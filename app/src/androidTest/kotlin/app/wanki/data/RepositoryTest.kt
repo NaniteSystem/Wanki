@@ -723,4 +723,100 @@ class RepositoryTest {
         media.dir.deleteRecursively()
         Unit
     }
+
+    // --- «На другую страницу» ---------------------------------------------------------------------
+
+    private fun ink(x: Float, y: Float = 100f) =
+        app.wanki.ink.InkStroke(listOf(app.wanki.ink.InkPoint(x, y, 0), app.wanki.ink.InkPoint(x + 50f, y + 20f, 20)))
+
+    private suspend fun twoPages(): Pair<PageEntity, PageEntity> {
+        val nb = repo.createNotebook("Move", PageTemplate.LINED, "auto")
+        val first = repo.pages(nb.id).single()
+        val second = repo.addPage(nb)
+        return first to second
+    }
+
+    private fun blob(strokes: List<app.wanki.ink.InkStroke>) =
+        if (strokes.isEmpty()) null else app.wanki.ink.InkCodec.encode(app.wanki.ink.InkDrawing(strokes))
+
+    private suspend fun stored(pageId: String) = (repo.loadInkResult(pageId) as InkLoad.Ok).strokes
+
+    @Test
+    fun moveToPageAppendsAndRemoves() = runBlocking {
+        val (from, to) = twoPages()
+        val stay = ink(10f)
+        val go = ink(300f)
+        val old = ink(500f)
+        repo.saveInk(from, listOf(stay, go))
+        repo.saveInk(to, listOf(old))
+        val keys = repo.moveToPage(from, blob(listOf(stay)), to, listOf(go))
+        assertEquals(1, keys.size)
+        assertEquals(listOf(500f, 300f), stored(to.id).map { it.points[0].x })
+        assertEquals(listOf(10f), stored(from.id).map { it.points[0].x })
+        // the source can end up empty: its ink row goes
+        repo.moveToPage(from, null, to, listOf(stay))
+        assertNull(db.notebooks().ink(from.id))
+        assertEquals(3, stored(to.id).size)
+    }
+
+    @Test
+    fun moveToPageIsAtomic() = runBlocking {
+        val (from, to) = twoPages()
+        repo.saveInk(from, listOf(ink(10f), ink(300f)))
+        repo.saveInk(to, listOf(ink(500f)))
+        val fromBefore = db.notebooks().ink(from.id)!!.strokes
+        val toBefore = db.notebooks().ink(to.id)!!.strokes
+        val missing = to.copy(id = "no-such-page")
+        val failed = runCatching { repo.moveToPage(from, blob(listOf(ink(10f))), missing, listOf(ink(300f))) }
+        assertTrue(failed.isFailure)
+        assertTrue(fromBefore.contentEquals(db.notebooks().ink(from.id)!!.strokes))
+        assertTrue(toBefore.contentEquals(db.notebooks().ink(to.id)!!.strokes))
+        assertNull(db.notebooks().ink("no-such-page"))
+        // a target whose ink cannot be read is never overwritten, and the source keeps its strokes
+        db.notebooks().upsertInk(PageInkEntity(pageId = to.id, strokes = byteArrayOf(1, 2, 3)))
+        assertTrue(runCatching { repo.moveToPage(from, blob(listOf(ink(10f))), to, listOf(ink(300f))) }.isFailure)
+        assertTrue(fromBefore.contentEquals(db.notebooks().ink(from.id)!!.strokes))
+        assertTrue(byteArrayOf(1, 2, 3).contentEquals(db.notebooks().ink(to.id)!!.strokes))
+    }
+
+    @Test
+    fun takeBackRemovesOnlyMoved() = runBlocking {
+        val (from, to) = twoPages()
+        val same = ink(300f)
+        // the target already holds an identical stroke (same content, same key) and another one
+        repo.saveInk(to, listOf(same, ink(700f)))
+        repo.saveInk(from, listOf(same, same))
+        val keys = repo.moveToPage(from, null, to, listOf(same))
+        assertEquals(3, stored(to.id).size)
+        assertEquals(1, repo.takeBackFromPage(to.id, keys))
+        // one of the two identical strokes stays: only as many as were moved go
+        assertEquals(listOf(300f, 700f), stored(to.id).map { it.points[0].x })
+        // two moved, two taken back
+        val keys2 = repo.moveToPage(from, null, to, listOf(same, same))
+        assertEquals(2, keys2.size)
+        assertEquals(2, repo.takeBackFromPage(to.id, keys2))
+        assertEquals(listOf(300f, 700f), stored(to.id).map { it.points[0].x })
+        // taking back everything leaves no ink row
+        val (a, b) = twoPages()
+        val k = repo.moveToPage(a, null, b, listOf(ink(10f)))
+        repo.takeBackFromPage(b.id, k)
+        assertNull(db.notebooks().ink(b.id))
+    }
+
+    @Test
+    fun movedStrokesFitInsideTarget() = runBlocking {
+        val (from, to) = twoPages()
+        // strokes at x 1100..1300 (a landscape page is 1414 wide) moved to a portrait page (1000 wide)
+        val strokes = listOf(ink(1100f), ink(1250f))
+        repo.moveToPage(from, null, to, strokes)
+        val placed = stored(to.id)
+        val left = placed.minOf { s -> s.points.minOf { it.x } }
+        val right = placed.maxOf { s -> s.points.maxOf { it.x } }
+        assertTrue("$left..$right", left >= 0f && right <= 1000f)
+        assertEquals(200f, right - left, 0.01f)
+        // strokes already on the page stay where they are
+        val (a, b) = twoPages()
+        repo.moveToPage(a, null, b, listOf(ink(10f, 20f)))
+        assertEquals(10f, stored(b.id).single().points[0].x, 0.01f)
+    }
 }

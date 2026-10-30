@@ -48,9 +48,9 @@ class InkLayerIndexTest {
         layer.beginMove()
         layer.moveSelectionBy(50f, 50f)
         assertIndexMatches(layer)
-        assertEquals(1, layer.strokesIn(InkRect(2040f, 40f, 2060f, 60f)).size)
         layer.endMove()
         assertIndexMatches(layer)
+        assertEquals(1, layer.strokesIn(InkRect(2040f, 40f, 2060f, 60f)).size)
 
         while (layer.canUndo) { layer.undo(); assertIndexMatches(layer) }
         while (layer.canRedo) { layer.redo(); assertIndexMatches(layer) }

@@ -224,6 +224,7 @@ fun NotebookScreen(notebookId: String, initialPageId: String?, onBack: () -> Uni
     val state = remember(page.id) { PageEditorState(graph, nb, page, infinite = false, ui = pageUi, preload = preload) }
     androidx.compose.runtime.SideEffect { state.notebook = nb }
     fun addPage() = adder.add(pages.size) { graph.repository.addPage(nb) }
+    var moving by remember { mutableStateOf(false) }
 
     Box(Modifier.fillMaxSize()) {
         PageEditor(
@@ -241,7 +242,12 @@ fun NotebookScreen(notebookId: String, initialPageId: String?, onBack: () -> Uni
             pageBar = { PageNavBar(i, pages.size, { index = it.coerceIn(0, pages.lastIndex) }) },
             // a fling past the last (or before the first) page does nothing: pages are added with «+»
             onPageSwipe = { dir -> index = (i + dir).coerceIn(0, pages.lastIndex) },
+            onMoveSelection = { moving = true },
         )
+        if (moving) MoveToPageDialog(pages, page.id, onPick = { target ->
+            moving = false
+            moveSelectionToPage(graph, undo, state, nb, target)
+        }, onDismiss = { moving = false })
         if (showSettings) NotebookSettingsDialog(nb, onDismiss = { showSettings = false }) { title, lang, template, size, landscape ->
             showSettings = false
             graph.appScope.listAction(undo, "Не удалось сохранить настройки") {

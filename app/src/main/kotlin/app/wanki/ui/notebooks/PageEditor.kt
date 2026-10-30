@@ -57,6 +57,8 @@ import app.wanki.input.InkSurface
 import app.wanki.input.EraserSettings
 import app.wanki.input.InkSection
 import app.wanki.input.ToolSelection
+import app.wanki.input.ToolKind
+import app.wanki.input.InkClipboard
 import app.wanki.input.Viewport
 import app.wanki.recognition.ModelStatus
 import app.wanki.ui.common.InkToolbar
@@ -287,6 +289,20 @@ class PageEditorState(
             }
         }
 
+    /** This page's editor is on screen and its ink loaded and writable: edits of its page go through its layer. */
+    val editable: Boolean get() = loaded && !readOnly && openEditors[page.id] === this
+
+    companion object {
+        /** The editor on screen for each page (main thread), so an undo from the snackbar edits the open page's layer. */
+        private val openEditors = HashMap<String, PageEditorState>()
+
+        /** The open, loaded and writable editor of [pageId], if any. Main thread. */
+        fun editorOf(pageId: String): PageEditorState? = openEditors[pageId]?.takeIf { it.editable }
+    }
+
+    internal fun opened() { openEditors[page.id] = this }
+    internal fun closed() { if (openEditors[page.id] === this) openEditors.remove(page.id) }
+
     suspend fun load() {
         val slot = preload
         val ahead = slot?.take()?.let { p ->
@@ -387,6 +403,25 @@ class PageEditorState(
         page = page.copy(template = t.name)
     }
 
+    /** Puts the ink clipboard at the centre of the view, selected, with the lasso ready to move it. */
+    fun paste() {
+        val clip = InkClipboard.clip ?: return
+        if (!loaded || readOnly) return
+        val v = viewport.visibleWorld()
+        layer.paste(clip, (v.left + v.right) / 2, (v.top + v.bottom) / 2)
+        selectTool(tool.copy(kind = ToolKind.LASSO))
+    }
+
+    /** Strokes mostly past the edge of the (portrait) sheet, e.g. after the page was turned. */
+    fun offPageCount(): Int = if (infinite) 0 else layer.outside(PageGeometry.bounds(page.landscape)).size
+
+    /** Selects the strokes past the edge, with the lasso ready to move them back. */
+    fun selectOffPage(): Int {
+        val n = layer.selectOutside(PageGeometry.bounds(page.landscape))
+        if (n > 0) selectTool(tool.copy(kind = ToolKind.LASSO))
+        return n
+    }
+
     /** Turns the page; the page re-fits so the whole sheet is in view. */
     suspend fun setLandscape(landscape: Boolean) {
         if (landscape == page.landscape) return
@@ -420,6 +455,8 @@ fun PageEditor(
     pageBar: @Composable () -> Unit = {},
     /** A two-finger fling at the page edge turns the page: +1 next, -1 previous. */
     onPageSwipe: ((Int) -> Unit)? = null,
+    /** «На другую страницу…» for the lasso selection (notebooks only). */
+    onMoveSelection: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val graph = context.graph
@@ -437,7 +474,9 @@ fun PageEditor(
     // leaving while saves fail asks first; leaving any other way still saves once more and reports a failure
     val back = rememberGuardedBack(state.saver, onBack)
     DisposableEffect(state) {
+        state.opened()
         onDispose {
+            state.closed()
             graph.appScope.launch {
                 // a change from the last frame may not have reached the effect above yet
                 val id = state.page.id
@@ -455,10 +494,13 @@ fun PageEditor(
         val wide = maxWidth >= 600.dp
         val sheetMax = maxHeight / 2
         Column(Modifier.fillMaxSize()) {
-            ScreenHeader(title, onBack = back, subtitle = subtitle, subtitleMaxLines = 1, primary = primary, menu = menu)
+            val paste = if (InkClipboard.clip != null && state.loaded && !state.readOnly) {
+                listOf(HeaderAction(R.drawable.ic_content_paste, "Вставить", "menu-paste") { state.paste() })
+            } else emptyList()
+            ScreenHeader(title, onBack = back, subtitle = subtitle, subtitleMaxLines = 1, primary = primary, menu = paste + menu)
             InkToolbar(state.tool, state::selectTool, state.layer, state.eraser, state::selectEraser, Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
-            if (state.layer.hasSelection) {
-                SelectionBar(state.layer, state.notebook.language, Modifier.padding(horizontal = 8.dp, vertical = 2.dp))
+            if (state.layer.hasSelection && !state.readOnly) {
+                SelectionBar(state.layer, state.notebook.language, Modifier.padding(horizontal = 8.dp, vertical = 2.dp), onMoveToPage = onMoveSelection)
             }
             if (state.readOnly) {
                 Surface(color = MaterialTheme.colorScheme.errorContainer, modifier = Modifier.fillMaxWidth()) {
@@ -508,6 +550,9 @@ fun PageEditor(
         }
     }
     if (state.showPaper && !state.infinite) {
+        // turning the page to portrait can leave writing past its edge: offer to select it
+        var turned by remember { mutableStateOf(false) }
+        val offPage = remember(turned, state.page.landscape, state.layer.strokesRev) { if (turned && !state.page.landscape) state.offPageCount() else 0 }
         AlertDialog(
             onDismissRequest = { state.showPaper = false },
             title = { Text("Бумага") },
@@ -515,10 +560,29 @@ fun PageEditor(
                 Column(Modifier.verticalScroll(rememberScrollState())) {
                     FilterChip(
                         state.page.landscape,
-                        { graph.appScope.listAction(undo, "Не удалось повернуть страницу") { state.setLandscape(!state.page.landscape) } },
+                        {
+                            graph.appScope.listAction(undo, "Не удалось повернуть страницу") {
+                                state.setLandscape(!state.page.landscape)
+                                turned = true
+                            }
+                        },
                         { Text("Альбомная страница") },
                         modifier = Modifier.heightIn(min = 48.dp).testTag("paper-landscape"),
                     )
+                    if (offPage > 0) {
+                        Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = MaterialTheme.shapes.medium, modifier = Modifier.padding(vertical = 4.dp)) {
+                            Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                                Text("Часть записей оказалась за краем страницы", style = MaterialTheme.typography.bodyMedium)
+                                TextButton(
+                                    onClick = {
+                                        state.selectOffPage()
+                                        state.showPaper = false
+                                    },
+                                    modifier = Modifier.heightIn(min = 48.dp).testTag("select-offpage"),
+                                ) { Text("Выделить их") }
+                            }
+                        }
+                    }
                     PageTemplate.entries.forEach { t ->
                         TextButton(
                             onClick = {

@@ -18,8 +18,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.painterResource
+import app.wanki.R
+import app.wanki.ink.InkAffine
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.ink.authoring.InProgressStrokesView
@@ -68,6 +74,9 @@ fun InkSurface(
     var line by remember { mutableStateOf<LinePreview?>(null) }
     val swiped by rememberUpdatedState(onPageSwipe)
     val cursorColor = MaterialTheme.colorScheme.onSurfaceVariant
+    val scaleIcon = painterResource(R.drawable.ic_open_in_full)
+    val rotateIcon = painterResource(R.drawable.ic_rotate_right)
+    val touchPx = with(LocalDensity.current) { 48.dp.toPx() }
 
     // clip: page backgrounds are drawn far beyond the visible area
     Box(modifier.clipToBounds().onSizeChanged { viewport?.onScreenSize(it.width.toFloat(), it.height.toFloat()) }) {
@@ -84,14 +93,12 @@ fun InkSurface(
                 background()
                 if (showInk) {
                     if (tiles != null && vp != null) tiles.draw(this, vp)
-                    else {
-                        val canvas = drawContext.canvas.nativeCanvas
-                        for (s in layer.strokes) layer.renderable(s)?.let { renderer.draw(canvas, it, matrix) }
-                    }
+                    else drawStrokesDirect(layer, renderer, matrix)
                 }
-                drawSelection(layer, scale)
+                drawSelection(layer, scale, touchPx)
                 line?.let { drawLinePreview(it) }
             }
+            if (!readOnly) drawHandles(layer, scale, ox, oy, touchPx, scaleIcon, rotateIcon)
             overlay()
             cursor?.let { drawCircle(cursorColor, it.radius, androidx.compose.ui.geometry.Offset(it.x, it.y), style = androidx.compose.ui.graphics.drawscope.Stroke(1.dp.toPx())) }
         }
@@ -139,8 +146,31 @@ private fun DrawScope.drawLinePreview(p: LinePreview) {
 
 private val SelectionColor = androidx.compose.ui.graphics.Color(0xFF1E5BD8)
 
-/** Lasso path while drawing it, then a dashed frame around the selection (world coordinates). */
-private fun DrawScope.drawSelection(layer: InkLayer, scale: Float) {
+/** The same map as an android.graphics.Matrix, for drawing. */
+internal fun InkAffine.toMatrix(): android.graphics.Matrix =
+    android.graphics.Matrix().apply { setValues(floatArrayOf(a, c, tx, b, d, ty, 0f, 0f, 1f)) }
+
+/** Every stroke, one by one (canvases without tiles); a selection being dragged is drawn where the drag puts it. */
+private fun DrawScope.drawStrokesDirect(layer: InkLayer, renderer: CanvasStrokeRenderer, matrix: android.graphics.Matrix) {
+    val canvas = drawContext.canvas.nativeCanvas
+    val live = layer.liveTransform?.takeIf { !it.isIdentity }
+    val moving = if (live == null) emptySet() else java.util.Collections.newSetFromMap(java.util.IdentityHashMap<app.wanki.ink.InkStroke, Boolean>()).apply { addAll(layer.selection) }
+    val m = live?.toMatrix()
+    val full = m?.let { android.graphics.Matrix(matrix).apply { preConcat(it) } }
+    for (s in layer.strokes) {
+        val ink = layer.renderable(s) ?: continue
+        if (m == null || s !in moving) renderer.draw(canvas, ink, matrix)
+        else {
+            canvas.save()
+            canvas.concat(m)
+            renderer.draw(canvas, ink, full!!)
+            canvas.restore()
+        }
+    }
+}
+
+/** Lasso path while drawing it, then a dashed frame around the selection (world coordinates), turned with a running drag. */
+private fun DrawScope.drawSelection(layer: InkLayer, scale: Float, touchPx: Float) {
     val w = 2f / scale
     val dash = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(10f / scale, 8f / scale))
     layer.lasso?.takeIf { it.size > 1 }?.let { pts ->
@@ -150,18 +180,43 @@ private fun DrawScope.drawSelection(layer: InkLayer, scale: Float) {
         }
         drawPath(path, SelectionColor, style = androidx.compose.ui.graphics.drawscope.Stroke(w, pathEffect = dash))
     }
-    layer.selectionBounds()?.let { b ->
-        val pad = 8f / scale
-        drawRect(
-            SelectionColor.copy(alpha = 0.08f),
-            androidx.compose.ui.geometry.Offset(b.left - pad, b.top - pad),
-            androidx.compose.ui.geometry.Size(b.width + 2 * pad, b.height + 2 * pad),
-        )
-        drawRect(
-            SelectionColor,
-            androidx.compose.ui.geometry.Offset(b.left - pad, b.top - pad),
-            androidx.compose.ui.geometry.Size(b.width + 2 * pad, b.height + 2 * pad),
-            style = androidx.compose.ui.graphics.drawscope.Stroke(w, pathEffect = dash),
-        )
+    val b = layer.selectionBounds() ?: return
+    val f = SelectionHandles.frame(b, scale, touchPx)
+    val live = layer.liveTransform ?: InkAffine.identity
+    val corners = listOf(f.left to f.top, f.right to f.top, f.right to f.bottom, f.left to f.bottom).map { (x, y) -> live.apply(x, y) }
+    val path = androidx.compose.ui.graphics.Path().apply {
+        moveTo(corners[0].first, corners[0].second)
+        for (c in corners.drop(1)) lineTo(c.first, c.second)
+        close()
+    }
+    drawPath(path, SelectionColor.copy(alpha = 0.08f))
+    drawPath(path, SelectionColor, style = androidx.compose.ui.graphics.drawscope.Stroke(w, pathEffect = dash))
+}
+
+/**
+ * The scale handle (bottom-right corner) and the rotate handle (above the top centre), in screen coordinates so they
+ * keep their size at any zoom; they follow a running drag.
+ */
+private fun DrawScope.drawHandles(
+    layer: InkLayer, scale: Float, ox: Float, oy: Float, touchPx: Float, scaleIcon: Painter, rotateIcon: Painter,
+) {
+    if (layer.lasso != null) return
+    val b = layer.selectionBounds() ?: return
+    val live = layer.liveTransform ?: InkAffine.identity
+    fun screen(p: androidx.compose.ui.geometry.Offset): androidx.compose.ui.geometry.Offset =
+        live.apply(p.x, p.y).let { (x, y) -> androidx.compose.ui.geometry.Offset(x * scale + ox, y * scale + oy) }
+    val f = SelectionHandles.frame(b, scale, touchPx)
+    val topCentre = screen(androidx.compose.ui.geometry.Offset((f.left + f.right) / 2, f.top))
+    val rot = screen(SelectionHandles.rotateHandle(b, scale, touchPx))
+    val sc = screen(SelectionHandles.scaleHandle(b, scale, touchPx))
+    drawLine(SelectionColor, topCentre, rot, strokeWidth = 2.dp.toPx())
+    val r = 14.dp.toPx()
+    for ((c, icon) in listOf(sc to scaleIcon, rot to rotateIcon)) {
+        drawCircle(androidx.compose.ui.graphics.Color.White, r, c)
+        drawCircle(SelectionColor, r, c, style = androidx.compose.ui.graphics.drawscope.Stroke(2.dp.toPx()))
+        val s = 18.dp.toPx()
+        translate(c.x - s / 2, c.y - s / 2) {
+            with(icon) { draw(androidx.compose.ui.geometry.Size(s, s), colorFilter = androidx.compose.ui.graphics.ColorFilter.tint(SelectionColor)) }
+        }
     }
 }

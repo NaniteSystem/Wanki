@@ -149,9 +149,25 @@ class InkTiles(val layer: InkLayer, private val scope: CoroutineScope) {
             canvas.restore()
         }
         allVisibleReady = allReady
-        for (s in layer.inLayerOrder(excluded)) drawDirect(canvas, s, matrix, direct)
+        drawExcluded(canvas, matrix, direct)
         pendingDirect = direct
         scheduleSoon(view, inner)
+    }
+
+    /** The live selection, on top of the tiles, where a running lasso drag ([InkLayer.liveTransform]) puts it. */
+    private fun drawExcluded(canvas: Canvas, matrix: Matrix, drawn: MutableSet<InkStroke>) {
+        if (excluded.isEmpty()) return
+        val live = layer.liveTransform?.takeIf { !it.isIdentity }
+        if (live == null) {
+            for (s in layer.inLayerOrder(excluded)) drawDirect(canvas, s, matrix, drawn)
+            return
+        }
+        val m = live.toMatrix()
+        canvas.save()
+        canvas.concat(m)
+        val full = Matrix(matrix).apply { preConcat(m) }
+        for (s in layer.inLayerOrder(excluded)) drawDirect(canvas, s, full, drawn)
+        canvas.restore()
     }
 
     private fun drawDirect(canvas: Canvas, s: InkStroke, matrix: Matrix, drawn: MutableSet<InkStroke>) {

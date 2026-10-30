@@ -14,7 +14,19 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.Box
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
+import app.wanki.R
+import app.wanki.input.InkClipboard
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -48,19 +60,26 @@ fun copyToClipboard(context: Context, text: String) {
 }
 
 /**
- * Bar shown while handwriting is selected with the lasso: recognize → text actions
- * (copy, translate, make a card), or delete the strokes.
+ * Bar shown while handwriting is selected with the lasso: the count, recognize → text actions (copy, translate, make a
+ * card), delete, and «⋮» with copy, duplicate, colour, (notebooks only, [onMoveToPage]) «На другую страницу…» and
+ * «Снять выделение». The count is a bare number so the bar fits a 360 dp phone at font scale 1.3.
  */
 @Composable
-fun SelectionBar(layer: InkLayer, language: String, modifier: Modifier = Modifier) {
+fun SelectionBar(layer: InkLayer, language: String, modifier: Modifier = Modifier, onMoveToPage: (() -> Unit)? = null) {
     val graph = LocalContext.current.graph
     var dialog by remember { mutableStateOf(false) }
     var text by remember { mutableStateOf<String?>(null) }
     var failed by remember { mutableStateOf(false) }
+    var menu by remember { mutableStateOf(false) }
+    var coloring by remember { mutableStateOf(false) }
     val scope = rememberUiScope()
+    val count = layer.selection.size
     Surface(tonalElevation = 3.dp, shape = MaterialTheme.shapes.large, modifier = modifier) {
-        Row(Modifier.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("Выделено: ${layer.selection.size}", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(horizontal = 8.dp))
+        Row(Modifier.padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                count.toString(), style = MaterialTheme.typography.labelLarge, maxLines = 1,
+                modifier = Modifier.padding(horizontal = 12.dp).semantics { contentDescription = "Выделено: $count" }.testTag("sel-count"),
+            )
             TextButton(onClick = {
                 dialog = true
                 text = null
@@ -70,9 +89,28 @@ fun SelectionBar(layer: InkLayer, language: String, modifier: Modifier = Modifie
                     val r = graph.textRecognition.recognize(strokes, language)
                     if (r == null) failed = true else text = r.text
                 }
-            }) { Text("Текст и перевод") }
-            TextButton(onClick = layer::deleteSelection) { Text("Удалить") }
-            TextButton(onClick = layer::clearSelection) { Text("✕") }
+            }, modifier = Modifier.weight(1f, fill = false).testTag("sel-text")) { Text("Текст и перевод", maxLines = 1, overflow = TextOverflow.Ellipsis) }
+            IconButton(onClick = layer::deleteSelection, modifier = Modifier.testTag("sel-delete")) {
+                Icon(painterResource(R.drawable.ic_delete), contentDescription = "Удалить")
+            }
+            Box {
+                IconButton(onClick = { menu = true }, modifier = Modifier.testTag("sel-more")) {
+                    Icon(painterResource(R.drawable.ic_more_vert), contentDescription = "Ещё")
+                }
+                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    SelectionMenuItem("Копировать", R.drawable.ic_content_copy, "sel-copy") {
+                        menu = false
+                        InkClipboard.clip = layer.copySelection()
+                    }
+                    SelectionMenuItem("Дублировать", R.drawable.ic_add, "sel-duplicate") { menu = false; layer.duplicateSelection() }
+                    SelectionMenuItem("Цвет…", R.drawable.ic_palette, "sel-color") { menu = false; coloring = true }
+                    if (onMoveToPage != null) SelectionMenuItem("На другую страницу…", R.drawable.ic_move_item, "sel-move-page") {
+                        menu = false
+                        onMoveToPage()
+                    }
+                    SelectionMenuItem("Снять выделение", null, "sel-clear") { menu = false; layer.clearSelection() }
+                }
+            }
         }
     }
     if (dialog) {
@@ -82,6 +120,17 @@ fun SelectionBar(layer: InkLayer, language: String, modifier: Modifier = Modifie
             onDismiss = { dialog = false },
         )
     }
+    if (coloring) ColorPickDialog(onPick = { c -> coloring = false; layer.recolorSelection(c) }, onDismiss = { coloring = false })
+}
+
+@Composable
+private fun SelectionMenuItem(label: String, icon: Int?, tag: String, onClick: () -> Unit) {
+    DropdownMenuItem(
+        text = { Text(label) },
+        onClick = onClick,
+        leadingIcon = icon?.let { { Icon(painterResource(it), contentDescription = null) } },
+        modifier = Modifier.heightIn(min = 48.dp).testTag(tag),
+    )
 }
 
 /** Recognized (editable) text with copy, translate and "make a card". */

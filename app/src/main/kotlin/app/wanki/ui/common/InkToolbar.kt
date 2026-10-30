@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.RadioButton
@@ -148,15 +150,7 @@ private fun ToolOptions(tool: ToolSelection, onTool: (ToolSelection) -> Unit, on
     var custom by remember { mutableStateOf(false) }
     DropdownMenu(expanded = !custom, onDismissRequest = onDismiss) {
         Column(Modifier.testTag("tool-options").padding(horizontal = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            ToolSelection.PALETTE.chunked(4).forEachIndexed { row, colors ->
-                Row {
-                    colors.forEachIndexed { i, c ->
-                        val name = COLOR_NAMES.getOrElse(row * 4 + i) { "" }
-                        Swatch(c, selected = tool.color == c, description = "Цвет: $name") { onTool(tool.copy(color = c)) }
-                    }
-                }
-            }
-            TextButton(onClick = { custom = true }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Свой цвет") }
+            ColorChoices(tool.color, onPick = { onTool(tool.copy(color = it)) }, onCustom = { custom = true })
             Row {
                 ToolSelection.SIZES.forEachIndexed { i, s ->
                     val selected = tool.size == s
@@ -228,9 +222,9 @@ private fun EraserChoice(tag: String, label: String, selected: Boolean, radiusDp
 }
 
 @Composable
-private fun Swatch(color: Int, selected: Boolean, description: String, onClick: () -> Unit) {
+private fun Swatch(color: Int, selected: Boolean, description: String, tag: String, onClick: () -> Unit) {
     Box(
-        Modifier.size(48.dp).clip(CircleShape).semantics { contentDescription = description }.clickable(onClick = onClick),
+        Modifier.size(48.dp).clip(CircleShape).semantics { contentDescription = description }.clickable(onClick = onClick).testTag(tag),
         contentAlignment = Alignment.Center,
     ) {
         Box(
@@ -244,28 +238,65 @@ private fun Swatch(color: Int, selected: Boolean, description: String, onClick: 
     }
 }
 
+/**
+ * The colour row shared by the pen popup and the lasso's «Цвет…»: the palette (swatches tagged `color-<index>`) and
+ * «Свой цвет» ([onCustom]).
+ */
 @Composable
-private fun CustomColorDialog(initial: Int, onPick: (Int) -> Unit, onDismiss: () -> Unit) {
+fun ColorChoices(selected: Int?, onPick: (Int) -> Unit, onCustom: () -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        ToolSelection.PALETTE.chunked(4).forEachIndexed { row, colors ->
+            Row {
+                colors.forEachIndexed { i, c ->
+                    val name = COLOR_NAMES.getOrElse(row * 4 + i) { "" }
+                    Swatch(c, selected = selected == c, description = "Цвет: $name", tag = "color-${row * 4 + i}") { onPick(c) }
+                }
+            }
+        }
+        TextButton(onClick = onCustom, modifier = Modifier.heightIn(min = 48.dp).testTag("color-custom")) { Text("Свой цвет") }
+    }
+}
+
+/** Picks a colour for the lasso selection: the shared colour row, «Свой цвет» opens [CustomColorDialog]. */
+@Composable
+fun ColorPickDialog(onPick: (Int) -> Unit, onDismiss: () -> Unit) {
+    var custom by remember { mutableStateOf(false) }
+    if (!custom) AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Цвет") },
+        text = { ColorChoices(null, onPick = onPick, onCustom = { custom = true }) },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Отмена") } },
+    )
+    else CustomColorDialog(ToolSelection.DEFAULT_INK, onPick = onPick, onDismiss = onDismiss)
+}
+
+/** Hue, saturation and brightness, so any colour can be picked, grey and white too (saturation 0). */
+@Composable
+fun CustomColorDialog(initial: Int, onPick: (Int) -> Unit, onDismiss: () -> Unit) {
     val hsv = remember { FloatArray(3).also { android.graphics.Color.colorToHSV(initial, it) } }
     var hue by remember { mutableFloatStateOf(hsv[0]) }
-    var value by remember { mutableFloatStateOf(hsv[2].coerceIn(0.2f, 1f)) }
-    val sat = if (hsv[1] < 0.2f) 0.8f else hsv[1]
+    var sat by remember { mutableFloatStateOf(hsv[1]) }
+    var value by remember { mutableFloatStateOf(hsv[2]) }
     val color = android.graphics.Color.HSVToColor(floatArrayOf(hue, sat, value))
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Свой цвет") },
         text = {
-            Column {
-                Box(Modifier.fillMaxWidth().size(40.dp).background(Color(color), MaterialTheme.shapes.small))
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                Box(
+                    Modifier.fillMaxWidth().size(40.dp).background(Color(color), MaterialTheme.shapes.small)
+                        .border(1.dp, Color(0x33000000), MaterialTheme.shapes.small),
+                )
                 Text("Оттенок", style = MaterialTheme.typography.labelMedium)
-                // always at full brightness, so the rainbow stays readable for a dark current colour
-                val hueStops = remember(sat) {
-                    (0..6).map { Color(android.graphics.Color.HSVToColor(floatArrayOf(it * 60f, sat, 1f))) }
-                }
-                GradientSlider(hue, { hue = it }, 0f..360f, hueStops, "Оттенок")
+                // at full saturation and brightness, so the rainbow stays readable for a grey or dark current colour
+                val hueStops = remember { (0..6).map { Color(android.graphics.Color.HSVToColor(floatArrayOf(it * 60f, 1f, 1f))) } }
+                GradientSlider(hue, { hue = it }, 0f..360f, hueStops, "Оттенок", "custom-hue")
+                Text("Насыщенность", style = MaterialTheme.typography.labelMedium)
+                val satStops = listOf(0f, 1f).map { Color(android.graphics.Color.HSVToColor(floatArrayOf(hue, it, value.coerceAtLeast(0.5f)))) }
+                GradientSlider(sat, { sat = it }, 0f..1f, satStops, "Насыщенность", "custom-saturation")
                 Text("Яркость", style = MaterialTheme.typography.labelMedium)
-                val valueStops = listOf(0.2f, 1f).map { Color(android.graphics.Color.HSVToColor(floatArrayOf(hue, sat, it))) }
-                GradientSlider(value, { value = it }, 0.2f..1f, valueStops, "Яркость")
+                val valueStops = listOf(0f, 1f).map { Color(android.graphics.Color.HSVToColor(floatArrayOf(hue, sat, it))) }
+                GradientSlider(value, { value = it }, 0f..1f, valueStops, "Яркость", "custom-value")
             }
         },
         confirmButton = { TextButton(onClick = { onPick(color) }) { Text("Готово") } },
@@ -277,11 +308,11 @@ private fun CustomColorDialog(initial: Int, onPick: (Int) -> Unit, onDismiss: ()
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 private fun GradientSlider(
-    value: Float, onChange: (Float) -> Unit, range: ClosedFloatingPointRange<Float>, stops: List<Color>, description: String,
+    value: Float, onChange: (Float) -> Unit, range: ClosedFloatingPointRange<Float>, stops: List<Color>, description: String, tag: String,
 ) {
     Slider(
         value, onChange, valueRange = range,
-        modifier = Modifier.semantics { contentDescription = description },
+        modifier = Modifier.semantics { contentDescription = description }.testTag(tag),
         track = {
             Box(
                 Modifier.fillMaxWidth().height(14.dp)

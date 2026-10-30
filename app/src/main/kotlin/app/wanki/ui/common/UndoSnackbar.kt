@@ -45,6 +45,26 @@ class Undo(
         }
     }
 
+    /**
+     * Something was moved (e.g. strokes to another page): [message] with «Отменить», which runs [onUndo] on the main
+     * thread; a failure of it is shown.
+     */
+    fun moved(message: String, onUndo: suspend () -> Unit) {
+        scope.launch {
+            host.currentSnackbarData?.dismiss()
+            val result = host.showSnackbar(message, actionLabel = "Отменить", duration = SnackbarDuration.Long)
+            if (result != SnackbarResult.ActionPerformed) return@launch
+            try {
+                onUndo()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                android.util.Log.e("Wanki", "undo of a move failed", e)
+                say("Не удалось отменить перенос")
+            }
+        }
+    }
+
     suspend fun say(message: String) {
         host.currentSnackbarData?.dismiss()
         host.showSnackbar(message)

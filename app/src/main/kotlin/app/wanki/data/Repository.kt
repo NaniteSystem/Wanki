@@ -7,7 +7,10 @@ import app.wanki.anki.CardRenderer
 import app.wanki.anki.NoteType
 import app.wanki.catalog.CatalogDeck
 import app.wanki.catalog.CatalogRow
+import app.wanki.ink.InkAffine
 import app.wanki.ink.InkCodec
+import app.wanki.ink.InkRect
+import app.wanki.ui.common.PageGeometry
 import app.wanki.ink.InkDrawing
 import app.wanki.ink.InkStroke
 import app.wanki.media.MediaStore
@@ -777,27 +780,99 @@ class Repository(private val db: WankiDatabase) {
 
     /** Stores an already encoded ink blob; null (an emptied page) deletes the ink row. */
     suspend fun saveInkBlob(page: PageEntity, blob: ByteArray?) {
-        val old = notebooks.ink(page.id)
-        val now = System.currentTimeMillis()
         db.withTransaction {
             insertPageIfMissing(page)
-            if (blob == null) {
-                // an emptied page keeps no ink row, so the diary stops marking its day
-                notebooks.deleteInk(page.id)
-            } else {
-                notebooks.upsertInk(
-                    PageInkEntity(
-                        pageId = page.id,
-                        strokes = blob,
-                        recognizedText = old?.recognizedText.orEmpty(),
-                        recognizedAt = old?.recognizedAt ?: 0,
-                        updatedAt = now,
-                    ),
-                )
-            }
-            notebooks.touchPage(page.id, now)
-            notebooks.touch(page.notebookId, now)
+            writeInk(page, blob, System.currentTimeMillis())
         }
+    }
+
+    /** Inside a transaction: [blob] becomes [page]'s ink (null deletes the row), keeping its recognised text. */
+    private suspend fun writeInk(page: PageEntity, blob: ByteArray?, now: Long) {
+        if (blob == null) {
+            // an emptied page keeps no ink row, so the diary stops marking its day
+            notebooks.deleteInk(page.id)
+        } else {
+            val old = notebooks.ink(page.id)
+            notebooks.upsertInk(
+                PageInkEntity(
+                    pageId = page.id,
+                    strokes = blob,
+                    recognizedText = old?.recognizedText.orEmpty(),
+                    recognizedAt = old?.recognizedAt ?: 0,
+                    updatedAt = now,
+                ),
+            )
+        }
+        notebooks.touchPage(page.id, now)
+        notebooks.touch(page.notebookId, now)
+    }
+
+    /**
+     * «На другую страницу» (Decision 9): adds [strokes] on top of [to]'s ink and stores [fromBlob] (the source page's
+     * ink without them; null = none left) as [from]'s, in one transaction that writes the target first, so the strokes
+     * are on at least one page whatever fails. Strokes that would fall off [to] are shifted onto it. A missing or
+     * trashed target, or a target whose ink cannot be read (it is never overwritten), throws and changes nothing.
+     * Returns the [InkCodec.strokeKey]s of the strokes as stored on [to], for [takeBackFromPage].
+     */
+    suspend fun moveToPage(from: PageEntity, fromBlob: ByteArray?, to: PageEntity, strokes: List<InkStroke>): List<Long> =
+        db.withTransaction {
+            val target = notebooks.page(to.id)?.takeIf { !it.deleted } ?: throw IllegalStateException("page ${to.id} is missing")
+            val existing = notebooks.ink(to.id)?.let { InkCodec.decode(it.strokes).strokes }.orEmpty()
+            val placed = fitInside(strokes, PageGeometry.bounds(target.landscape)).map(InkCodec::encodeStroke)
+            val now = System.currentTimeMillis()
+            writeInk(target, InkCodec.assemble(existing.map(InkCodec::encodeStroke) + placed), now)
+            insertPageIfMissing(from)
+            writeInk(from, fromBlob, now)
+            // keys of the strokes as they read back, exactly as takeBackFromPage will see them
+            InkCodec.decode(InkCodec.assemble(placed)).strokes.map(::keyOf)
+        }
+
+    /**
+     * Undoes [moveToPage] on the target: removes one stored stroke per entry of [keys] (a multiset: identical strokes
+     * share a key, and only as many as were moved go), the topmost matches first. Returns how many were removed.
+     */
+    suspend fun takeBackFromPage(toPageId: String, keys: List<Long>): Int = db.withTransaction {
+        val page = notebooks.page(toPageId) ?: return@withTransaction 0
+        val row = notebooks.ink(toPageId) ?: return@withTransaction 0
+        val strokes = InkCodec.decode(row.strokes).strokes
+        val left = HashMap<Long, Int>().apply { keys.forEach { merge(it, 1, Int::plus) } }
+        val kept = ArrayList<InkStroke>(strokes.size)
+        var removed = 0
+        for (s in strokes.asReversed()) {
+            val k = keyOf(s)
+            val n = left[k] ?: 0
+            if (n > 0) { left[k] = n - 1; removed++ } else kept += s
+        }
+        if (removed > 0) {
+            kept.reverse()
+            writeInk(page, if (kept.isEmpty()) null else InkCodec.encode(InkDrawing(kept)), System.currentTimeMillis())
+        }
+        removed
+    }
+
+    /** Adds [strokes] on top of [page]'s ink in one transaction (a move undone after its editor closed). An unreadable blob throws and stays. */
+    suspend fun appendInk(page: PageEntity, strokes: List<InkStroke>) = db.withTransaction {
+        if (strokes.isEmpty()) return@withTransaction
+        val existing = notebooks.ink(page.id)?.let { InkCodec.decode(it.strokes).strokes }.orEmpty()
+        insertPageIfMissing(page)
+        writeInk(page, InkCodec.encode(InkDrawing(existing + strokes)), System.currentTimeMillis())
+    }
+
+    private fun keyOf(s: InkStroke): Long = InkCodec.strokeKey(InkCodec.encodeStroke(s))
+
+    /** [strokes] shifted (as a group) so their bounds lie inside [page] where they fit; a group wider or taller starts at its edge. */
+    private fun fitInside(strokes: List<InkStroke>, page: InkRect): List<InkStroke> {
+        val b = strokes.mapNotNull { it.bounds() }.reduceOrNull { x, y -> x.union(y) } ?: return strokes
+        fun shift(lo: Float, hi: Float, min: Float, max: Float): Float = when {
+            hi - lo > max - min || lo < min -> min - lo
+            hi > max -> max - hi
+            else -> 0f
+        }
+        val dx = shift(b.left, b.right, page.left, page.right)
+        val dy = shift(b.top, b.bottom, page.top, page.bottom)
+        if (dx == 0f && dy == 0f) return strokes
+        val m = InkAffine.translate(dx, dy)
+        return strokes.map(m::apply)
     }
 
     // --- page objects, recognised lines, background -------------------------------------------
