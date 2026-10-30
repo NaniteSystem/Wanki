@@ -9,6 +9,13 @@ import app.wanki.ink.InkBrush
 import app.wanki.ink.InkPoint
 import app.wanki.ink.InkStroke
 import app.wanki.ui.notebooks.PageEditorState
+import app.wanki.ui.notebooks.preloadInk
+import java.io.IOException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
@@ -31,6 +38,41 @@ class PageEditorStateTest {
         val nb = graph.repository.createNotebook("State $stamp", PageTemplate.LINED, "auto")
         val page = graph.repository.pages(nb.id).first()
         return PageEditorState(graph, nb, page, infinite = false)
+    }
+
+    @Test
+    fun preloadWhoseReadFailsLeavesTheScreenWorkingAndTheEditorReads() = runBlocking(Dispatchers.Main.immediate) {
+        val nb = graph.repository.createNotebook("Preload $stamp", PageTemplate.LINED, "auto")
+        val page = graph.repository.pages(nb.id).first()
+        graph.repository.saveInk(page, listOf(stroke()))
+        // like the screen's rememberCoroutineScope: a plain Job, so a failed child would cancel it
+        val screen = CoroutineScope(Job() + Dispatchers.Main)
+        val slot = screen.preloadInk(graph, nb.id) { throw IOException("disk gone") }
+        val state = PageEditorState(graph, nb, page, infinite = false, preload = slot)
+        state.load()
+        assertEquals(1, state.layer.strokes.size)
+        assertTrue("the screen's scope still runs", screen.isActive)
+        screen.cancel()
+    }
+
+    @Test
+    fun preloadOfAnotherPageIsDroppedAndStopsConverting() = runBlocking(Dispatchers.Main.immediate) {
+        val nb = graph.repository.createNotebook("Preload other $stamp", PageTemplate.LINED, "auto")
+        val first = graph.repository.pages(nb.id).first()
+        graph.repository.addPage(nb)
+        val second = graph.repository.pages(nb.id).first { it.id != first.id }
+        graph.repository.saveInk(first, List(500) { stroke() })
+        graph.repository.saveInk(second, listOf(stroke(), stroke()))
+        val screen = CoroutineScope(Job() + Dispatchers.Main)
+        val slot = screen.preloadInk(graph, nb.id) { pages -> pages.first { it.id == first.id } }
+        val state = PageEditorState(graph, nb, second, infinite = false, preload = slot)
+        state.load()
+        assertEquals("the editor's own page", 2, state.layer.strokes.size)
+        // the discarded preload's conversion work ends (cancelled), leaving the screen's job without children
+        val job = screen.coroutineContext[Job]!!
+        withContext(Dispatchers.Default) { withTimeout(3000) { while (job.children.any()) delay(10) } }
+        assertTrue(screen.isActive)
+        screen.cancel()
     }
 
     @Test

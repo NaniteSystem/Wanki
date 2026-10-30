@@ -77,6 +77,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -110,41 +111,74 @@ class InkPreload(
     val bounds: Map<InkStroke, InkRect?>,
 )
 
-/** Holds a [preloadInk] result until the first editor takes it, so the screen does not keep that ink afterwards. */
-class InkPreloadSlot(deferred: Deferred<InkPreload?>) {
-    private var deferred: Deferred<InkPreload?>? = deferred
+/**
+ * Holds a [preloadInk] result until the first editor takes it, so the screen does not keep that ink afterwards.
+ * [conversion] parents the background conversion of its strokes.
+ */
+class InkPreloadSlot(private val result: Deferred<InkPreload?>, private val conversion: Job) {
+    private var pending: Deferred<InkPreload?>? = result
 
     /** The read-ahead ink, once: later calls (other pages of the screen) get null. Main thread. */
-    fun take(): Deferred<InkPreload?>? = deferred.also { deferred = null }
+    fun take(): Deferred<InkPreload?>? = pending.also { pending = null }
+
+    /** The result will not be used (another page, or its editor left): stops the read and the conversion. */
+    fun discard() {
+        pending = null
+        result.cancel()
+        conversion.cancel()
+    }
 }
 
 /**
  * Starts reading the ink of the page a screen will open ([pageOf] picks it from the notebook's pages) on IO,
  * alongside the screen's own start-up queries, so the editor's [PageEditorState.load] does not wait for them; then
  * converts its strokes for drawing on the other cores while the screen composes.
+ *
+ * Nothing here may fail the receiver scope (the screen's): a failed read gives null, so the editor reads again
+ * and shows the error, and a stroke that does not convert is left to the tile renderer, which handles failures.
  */
 fun CoroutineScope.preloadInk(graph: AppGraph, notebookId: String, pageOf: (List<PageEntity>) -> PageEntity?): InkPreloadSlot {
     val scope = this
-    return InkPreloadSlot(async(Dispatchers.IO) {
-        val page = pageOf(graph.repository.pages(notebookId)) ?: return@async null
-        val ink = graph.repository.loadInkResult(page.id)
-        val converted = java.util.Collections.synchronizedMap(IdentityHashMap<InkStroke, Stroke>())
-        if (ink is InkLoad.Ok && ink.strokes.isNotEmpty()) {
-            val parts = (Runtime.getRuntime().availableProcessors() / 2).coerceIn(1, 3)
-            // not a child of this async: the ink is handed over as soon as it is read
-            ink.strokes.chunked((ink.strokes.size + parts - 1) / parts).forEach { part ->
-                scope.launch(Dispatchers.Default) {
-                    for (s in part) {
-                        if (!isActive) return@launch
-                        if (!converted.containsKey(s)) StrokeConversion.toInk(s)?.let { converted[s] = it }
+    // a child of the screen's job (cancelled with the screen) that a failing conversion cannot cancel
+    val conversion = SupervisorJob(coroutineContext[Job])
+    val result = async(Dispatchers.IO) {
+        try {
+            val page = pageOf(graph.repository.pages(notebookId)) ?: return@async null
+            val ink = graph.repository.loadInkResult(page.id)
+            val converted = java.util.Collections.synchronizedMap(IdentityHashMap<InkStroke, Stroke>())
+            if (ink is InkLoad.Ok && ink.strokes.isNotEmpty()) {
+                val parts = (Runtime.getRuntime().availableProcessors() / 2).coerceIn(1, 3)
+                // not children of this async: the ink is handed over as soon as it is read
+                ink.strokes.chunked((ink.strokes.size + parts - 1) / parts).forEach { part ->
+                    scope.launch(Dispatchers.Default + conversion) {
+                        for (s in part) {
+                            if (!isActive) return@launch
+                            if (converted.containsKey(s)) continue
+                            try {
+                                StrokeConversion.toInk(s)?.let { converted[s] = it }
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (e: Throwable) {
+                                // the tile that needs it converts it again, where a failure is handled
+                                Log.e("Wanki", "page ${page.id}: a stroke not converted ahead", e)
+                            }
+                        }
                     }
                 }
             }
+            val bounds = IdentityHashMap<InkStroke, InkRect?>()
+            if (ink is InkLoad.Ok) for (s in ink.strokes) bounds[s] = s.bounds()
+            InkPreload(page.id, ink, converted, bounds)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            Log.e("Wanki", "notebook $notebookId: ink not read ahead", e) // the editor reads again and shows the error
+            null
+        } finally {
+            conversion.complete() // ends once the conversions started above have
         }
-        val bounds = IdentityHashMap<InkStroke, InkRect?>()
-        if (ink is InkLoad.Ok) for (s in ink.strokes) bounds[s] = s.bounds()
-        InkPreload(page.id, ink, converted, bounds)
-    })
+    }
+    return InkPreloadSlot(result, conversion)
 }
 
 @Composable
@@ -246,13 +280,16 @@ class PageEditorState(
         }
 
     suspend fun load() {
-        val ahead = preload?.take()?.let { p ->
+        val slot = preload
+        val ahead = slot?.take()?.let { p ->
             try {
-                p.await()?.takeIf { it.pageId == page.id }
+                p.await()?.takeIf { it.pageId == page.id } ?: run { slot.discard(); null }
             } catch (e: CancellationException) {
+                slot.discard() // the editor left before the ink arrived
                 throw e
             } catch (e: Exception) {
                 Log.e("Wanki", "page ${page.id}: ink not read ahead", e) // read again below, where a failure is shown
+                slot.discard()
                 null
             }
         }
