@@ -226,4 +226,78 @@ class InkLayerSelectionTest {
         layer.undo()
         assertEquals(4, layer.strokes.size)
     }
+
+    @Test
+    fun restoreTakePastesWhenTheUndoDoesNotRun() {
+        val a = stroke(0f)
+        val b = stroke(100f, 50f)
+        val layer = InkLayer(listOf(a, b))
+        layer.selection.add(b)
+        val clip = layer.takeSelection()
+        val take = layer.undoTop
+        // an eraser drag is open: undo does nothing and says so
+        layer.beginErase()
+        assertFalse(layer.undo())
+        assertSame(take, layer.undoTop)
+        layer.restoreTake(take, clip, 100f, 50f)
+        assertEquals(2, layer.strokes.size)
+        assertEquals(100f, layer.strokes[1].points[0].x, 1e-3f)
+        assertEquals(50f, layer.strokes[1].points[0].y, 1e-3f)
+        layer.endErase()
+        // with nothing open the take itself is undone
+        val layer2 = InkLayer(listOf(a, b))
+        layer2.selection.add(b)
+        val clip2 = layer2.takeSelection()
+        layer2.restoreTake(layer2.undoTop, clip2, 100f, 50f)
+        assertSame(b, layer2.strokes[1])
+        assertFalse(layer2.canUndo)
+        assertTrue(layer2.redo())
+    }
+
+    @Test
+    fun transformFollowsItsStrokesWhenAnotherPointerEdits() {
+        val a = stroke(0f)
+        val b = stroke(100f)
+        val c = stroke(200f)
+        val layer = InkLayer(listOf(a, b, c))
+        layer.selection.add(c)
+        layer.beginTransform()
+        layer.transformSelection(InkAffine.translate(0f, 300f))
+        // the pen's eraser end removes a meanwhile: c is now at index 1
+        layer.removeAt(listOf(0))
+        layer.endTransform()
+        assertSame(b, layer.strokes[0])
+        assertEquals(300f, layer.strokes[1].points[0].y)
+        // the transform's undo step reverts only the transform, not the erase
+        layer.undo()
+        assertEquals(listOf(b, c), layer.strokes.toList())
+        layer.undo()
+        assertEquals(listOf(a, b, c), layer.strokes.toList())
+    }
+
+    @Test
+    fun undoOfAnEditOfTheSameLengthDoesNotMoveTheSelectionToAnotherStroke() {
+        val a = InkStroke(listOf(InkPoint(0f, 0f, 0), InkPoint(10f, 0f, 10)))
+        val b = InkStroke(listOf(InkPoint(0f, 100f, 0), InkPoint(10f, 100f, 10)))
+        val c = InkStroke(listOf(InkPoint(0f, 200f, 0), InkPoint(100f, 200f, 10)))
+        val layer = InkLayer(listOf(a, b, c))
+        // one eraser drag removes a and cuts c in two: [b, c1, c2], the same length as before
+        layer.beginErase()
+        layer.eraseAlong(5f, -5f, 5f, 5f, 3f, EraserMode.PARTIAL)
+        layer.eraseAlong(50f, 195f, 50f, 205f, 3f, EraserMode.PARTIAL)
+        layer.endErase()
+        assertEquals(3, layer.strokes.size)
+        val c1 = layer.strokes[1]
+        layer.selection.add(c1)
+        layer.undo()
+        // c1 is gone; position 1 now holds b, which was never selected
+        assertTrue(layer.selection.isEmpty())
+        // a recolour undone and redone keeps its stroke selected, by identity
+        layer.selection.add(c)
+        layer.recolorSelection(0xFFD23C3C.toInt())
+        layer.undo()
+        assertSame(c, layer.selection.single())
+        layer.redo()
+        assertSame(layer.strokes[2], layer.selection.single())
+    }
 }

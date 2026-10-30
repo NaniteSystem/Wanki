@@ -69,7 +69,12 @@ class InkLayer(initial: List<InkStroke> = emptyList()) {
     private sealed interface Edit {
         data class Added(val strokes: List<InkStroke>) : Edit
         data class Removed(val items: List<Pair<Int, InkStroke>>) : Edit
-        data class Replaced(val before: List<InkStroke>, val after: List<InkStroke>) : Edit
+        /** [changed] pairs each changed stroke (before → after) of a transform or recolour, so undo and redo keep it selected. */
+        data class Replaced(
+            val before: List<InkStroke>,
+            val after: List<InkStroke>,
+            val changed: List<Pair<InkStroke, InkStroke>> = emptyList(),
+        ) : Edit
     }
 
     /** Lasso being drawn (world coordinates), and the strokes it selected (always strokes the layer has, in layer order). */
@@ -125,8 +130,8 @@ class InkLayer(initial: List<InkStroke> = emptyList()) {
 
     // --- lasso transform: the strokes stay as they are while the drag runs, [liveTransform] shows where they go
 
-    private var transformBefore: List<InkStroke>? = null
-    private var transformIndices: List<Int> = emptyList()
+    /** The strokes being transformed (by identity, so an edit from another pointer meanwhile cannot shift them); null when none. */
+    private var transforming: List<InkStroke>? = null
 
     /**
      * Where the selected strokes are being dragged (null when no transform runs). The strokes themselves change only
@@ -139,34 +144,38 @@ class InkLayer(initial: List<InkStroke> = emptyList()) {
     /** Starts scaling, turning or moving the selection; [endTransform] makes the whole drag one undo step. */
     fun beginTransform() {
         if (selection.isEmpty()) return
-        transformBefore = plain.toList()
-        transformIndices = indicesOf(selection)
+        transforming = selection.toList()
         liveTransform = InkAffine.identity
     }
 
     /** The selection as it was at [beginTransform], mapped by [m] (not added to earlier calls). */
     fun transformSelection(m: InkAffine) {
-        if (transformBefore == null) return
+        if (transforming == null) return
         liveTransform = m
     }
 
     /** Applies the drag to the strokes, as one undo step; the transformed strokes stay selected. */
     fun endTransform() {
-        val before = transformBefore ?: return
+        val list = transforming ?: return
         val m = liveTransform ?: InkAffine.identity
-        transformBefore = null
+        transforming = null
         liveTransform = null
         if (m.isIdentity) return
-        val moved = transformIndices.map { i -> m.apply(plain[i]).also { setAt(i, it) } }
-        push(Edit.Replaced(before, plain.toList()))
+        // where the strokes are now: an erase from another pointer during the drag may have moved or removed some,
+        // and the undo step covers only this transform, not that edit
+        val indices = indicesOf(list)
+        if (indices.isEmpty()) return
+        val before = plain.toList()
+        val changed = indices.map { i -> val old = plain[i]; old to m.apply(old).also { setAt(i, it) } }
+        push(Edit.Replaced(before, plain.toList(), changed))
         selection.clear()
-        selection.addAll(moved)
+        selection.addAll(changed.map { it.second })
     }
 
     /** Drops the drag (it turned out to be a pinch or a tap): the strokes never changed, so nothing needs saving. */
     fun cancelTransform() {
-        if (transformBefore == null) return
-        transformBefore = null
+        if (transforming == null) return
+        transforming = null
         liveTransform = null
     }
 
@@ -174,7 +183,7 @@ class InkLayer(initial: List<InkStroke> = emptyList()) {
 
     /** Shifts the selection further by (dx, dy) during a drag. */
     fun moveSelectionBy(dx: Float, dy: Float) {
-        if (transformBefore == null || (dx == 0f && dy == 0f)) return
+        if (transforming == null || (dx == 0f && dy == 0f)) return
         transformSelection((liveTransform ?: InkAffine.identity).then(InkAffine.translate(dx, dy)))
     }
 
@@ -192,15 +201,15 @@ class InkLayer(initial: List<InkStroke> = emptyList()) {
         val indices = indicesOf(selection)
         if (indices.isEmpty()) return
         val before = plain.toList()
-        var any = false
+        val changed = ArrayList<Pair<InkStroke, InkStroke>>()
         val after = indices.map { i ->
             val old = plain[i]
             val new = change(old)
-            if (new != old) { setAt(i, new); any = true }
+            if (new != old) { setAt(i, new); changed += old to new }
             plain[i]
         }
-        if (!any) return
-        push(Edit.Replaced(before, plain.toList()))
+        if (changed.isEmpty()) return
+        push(Edit.Replaced(before, plain.toList(), changed))
         selection.clear()
         selection.addAll(after)
     }
@@ -261,17 +270,15 @@ class InkLayer(initial: List<InkStroke> = emptyList()) {
 
     /**
      * After an edit that may have replaced strokes (erase, undo, redo, reload): a selection may only hold strokes the
-     * layer still has. When the list kept its length (a transform or recolour undone), selected strokes are followed
-     * to the same places in [before] → [after].
+     * layer still has. A stroke changed by a transform or recolour being undone or redone is followed by identity
+     * through [follow] (old instance → new); any other stroke that left the layer leaves the selection.
      */
-    private fun fixSelection(before: List<InkStroke>? = null, after: List<InkStroke>? = null) {
+    private fun fixSelection(follow: List<Pair<InkStroke, InkStroke>> = emptyList()) {
         if (selection.isEmpty()) return
         val order = order()
         if (selection.all { it in order }) return
-        val mapped = if (before != null && after != null && before.size == after.size) {
-            val at = IdentityHashMap<InkStroke, Int>().apply { before.forEachIndexed { i, s -> put(s, i) } }
-            selection.map { s -> if (s in order) s else at[s]?.let { after[it] } }
-        } else selection.toList()
+        val to = IdentityHashMap<InkStroke, InkStroke>().apply { follow.forEach { (a, b) -> put(a, b) } }
+        val mapped = selection.map { s -> if (s in order) s else to[s] }
         val keep = java.util.Collections.newSetFromMap(IdentityHashMap<InkStroke, Boolean>())
         mapped.forEach { if (it != null && it in order) keep += it }
         selection.clear()
@@ -480,7 +487,7 @@ class InkLayer(initial: List<InkStroke> = emptyList()) {
     fun replaceAll(newStrokes: List<InkStroke>, undoable: Boolean = true) {
         val before = strokes.toList()
         eraseBefore = null // a reload or replace ends any eraser drag or move in progress
-        transformBefore = null
+        transforming = null
         liveTransform = null
         convertedAhead = null
         resetStrokes(newStrokes)
@@ -499,24 +506,27 @@ class InkLayer(initial: List<InkStroke> = emptyList()) {
     }
 
     /** An eraser drag or selection transform holds a snapshot; undo/redo now would make it stale. */
-    private val gestureOpen: Boolean get() = eraseBefore != null || transformBefore != null
+    private val gestureOpen: Boolean get() = eraseBefore != null || transforming != null
 
-    fun undo() {
-        if (gestureOpen) return
-        val e = undoStack.removeLastOrNull() ?: return
+    /** Reverts the last edit; false when nothing was undone (no edit, or an eraser drag or transform is open). */
+    fun undo(): Boolean {
+        if (gestureOpen) return false
+        val e = undoStack.removeLastOrNull() ?: return false
         when (e) {
             is Edit.Added -> e.strokes.forEach { s -> removeIndex(strokes.indexOfLast { it === s }) }
             is Edit.Removed -> e.items.sortedBy { it.first }.forEach { (i, s) -> insertAt(i.coerceAtMost(strokes.size), s) }
             is Edit.Replaced -> resetStrokes(e.before)
         }
-        if (e is Edit.Replaced) fixSelection(e.after, e.before) else fixSelection()
+        if (e is Edit.Replaced) fixSelection(e.changed.map { (a, b) -> b to a }) else fixSelection()
         redoStack.addLast(e)
         version++
+        return true
     }
 
-    fun redo() {
-        if (gestureOpen) return
-        val e = redoStack.removeLastOrNull() ?: return
+    /** Re-applies the last undone edit; false when nothing was redone. */
+    fun redo(): Boolean {
+        if (gestureOpen) return false
+        val e = redoStack.removeLastOrNull() ?: return false
         when (e) {
             is Edit.Added -> e.strokes.forEach { insertAt(strokes.size, it) }
             is Edit.Removed -> e.items.sortedByDescending { it.first }.forEach { (_, s) ->
@@ -524,9 +534,20 @@ class InkLayer(initial: List<InkStroke> = emptyList()) {
             }
             is Edit.Replaced -> resetStrokes(e.after)
         }
-        if (e is Edit.Replaced) fixSelection(e.before, e.after) else fixSelection()
+        if (e is Edit.Replaced) fixSelection(e.changed) else fixSelection()
         undoStack.addLast(e)
         version++
+        return true
+    }
+
+    /**
+     * Puts a [takeSelection] back: by undoing it when [take] (its [undoTop]) is still the top step and the undo runs,
+     * otherwise (other edits since, or a gesture open) as a paste of [clip] with its top-left corner at ([left], [top]).
+     */
+    fun restoreTake(take: Any?, clip: InkClip, left: Float, top: Float) {
+        if (take != null && undoTop === take && undo()) return
+        val b = clip.bounds() ?: return
+        paste(clip, left + (b.left + b.right) / 2, top + (b.top + b.bottom) / 2)
     }
 
     /** The grid holds where a stroke paints (bounds plus half the brush), so a tile finds every stroke reaching into it. */

@@ -347,8 +347,14 @@ class PageEditorState(
         loaded = true
     }
 
+    /**
+     * While strokes move to another page ([moveSelectionToPage]) the canvas already lacks them but the target is not
+     * written yet: no save may store the source without them until the move's transaction has. Main thread.
+     */
+    var holdSaves = false
+
     private suspend fun saveIfDirty() {
-        if (!loaded || readOnly || layer.strokesRev == savedRev) return
+        if (!loaded || readOnly || holdSaves || layer.strokesRev == savedRev) return
         val rev = layer.strokesRev
         val encode = layer.snapshotEncoder() // the stroke list is taken here, the joining runs on IO
         withContext(Dispatchers.IO) { graph.repository.saveInkBlob(page, encode()) }

@@ -55,11 +55,13 @@ fun MoveToPageDialog(pages: List<PageEntity>, currentPageId: String, onPick: (Pa
 
 /**
  * Moves the lasso selection of [state] to [target] (null: a new page at the end of [notebook]), Decision 9:
- * - the repository writes the target, then the source without the strokes, in one transaction; only then are the
- *   strokes taken off the canvas (one undo step there: canvas undo brings them back as a copy);
+ * - the strokes leave the canvas at once (one undo step there: canvas undo brings them back as a copy), but the
+ *   editor's saves are held until the repository has written the target, then the source without them, in one
+ *   transaction; then the source is saved from the canvas again. So whatever fails or ends (the editor closing
+ *   meanwhile, process death), the strokes are stored on exactly one page;
+ * - a failed move puts them back on the canvas and shows the error;
  * - the shell snackbar «Перенесено на стр. N» · «Отменить» puts them back on the source first (the open editor's undo
  *   when the take is still its last step, else a paste or a write to the stored page) and then takes them off the target.
- * Failures are shown in the snackbar; the strokes are always on at least one page.
  */
 fun moveSelectionToPage(graph: AppGraph, undo: Undo, state: PageEditorState, notebook: NotebookEntity, target: PageEntity?) {
     val layer = state.layer
@@ -67,26 +69,36 @@ fun moveSelectionToPage(graph: AppGraph, undo: Undo, state: PageEditorState, not
     val bounds = layer.selectionBounds()
     if (strokes.isEmpty() || bounds == null || !state.editable) return
     val from = state.page
-    val encodeRest = layer.snapshotEncoderWithout(strokes)
+    state.holdSaves = true
+    val clip = layer.takeSelection()
+    val take = layer.undoTop
+    val encodeRest = layer.snapshotEncoder()
     graph.appScope.launch {
+        var to: PageEntity? = null
+        var keys: List<Long>? = null
         try {
-            val to = target ?: graph.repository.addPage(notebook)
+            val page = target ?: graph.repository.addPage(notebook)
             val rest = withContext(Dispatchers.Default) { encodeRest() }
-            val keys = graph.repository.moveToPage(from, rest, to, strokes)
-            ui {
-                layer.selection.clear()
-                layer.selection.addAll(layer.inLayerOrder(strokes))
-                val clip = layer.takeSelection()
-                val take = layer.undoTop
-                undo.moved("Перенесено на стр. ${to.pageIndex + 1}") {
-                    moveBack(graph, state, take, clip, from, bounds.left, bounds.top, to, keys)
-                }
-            }
+            keys = graph.repository.moveToPage(from, rest, page, strokes)
+            to = page
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             Log.e("Wanki", "page ${from.id}: strokes not moved", e)
-            undo.say("Не удалось перенести")
+        }
+        ui {
+            // not moved: back on the canvas (saved below, also when the editor has closed meanwhile)
+            if (keys == null) layer.restoreTake(take, clip, bounds.left, bounds.top)
+            state.holdSaves = false
+            // a closed editor's layer is saved too, unless the page was opened again meanwhile (its new editor read
+            // the page itself)
+            if (state.editable || PageEditorState.editorOf(from.id) == null) state.saver.request()
+            val k = keys
+            val page = to
+            if (k == null || page == null) undo.say("Не удалось перенести")
+            else undo.moved("Перенесено на стр. ${page.pageIndex + 1}") {
+                moveBack(graph, state, take, clip, from, bounds.left, bounds.top, page, k)
+            }
         }
     }
 }
@@ -98,14 +110,15 @@ private suspend fun moveBack(
 ) = ui {
     val source = PageEditorState.editorOf(from.id)
     if (source != null) {
-        val b = clip.bounds()
-        if (source === mover && source.layer.undoTop === take) source.layer.undo()
-        else if (b != null) source.layer.paste(clip, left + (b.left + b.right) / 2, top + (b.top + b.bottom) / 2)
+        // the take is undone only if it is still the top step and the undo ran (not during a drag): else a paste
+        source.layer.restoreTake(if (source === mover) take else null, clip, left, top)
         source.saver.request()
         source.saver.flush()
         // not stored on the source: the strokes stay on the target too rather than only in memory
         source.saver.error.value?.let { throw IllegalStateException("source page not saved", it) }
     } else {
+        // the editor that moved them has closed: wait for its last save, then add them to the stored page
+        mover.saver.flush()
         graph.repository.appendInk(from, clip.strokes.map(InkAffine.translate(left, top)::apply))
     }
     val target = PageEditorState.editorOf(to.id)
