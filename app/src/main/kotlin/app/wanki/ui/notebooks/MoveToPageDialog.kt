@@ -69,7 +69,7 @@ fun moveSelectionToPage(graph: AppGraph, undo: Undo, state: PageEditorState, not
     val bounds = layer.selectionBounds()
     if (strokes.isEmpty() || bounds == null || !state.editable) return
     val from = state.page
-    state.holdSaves = true
+    state.saveHolds++
     val clip = layer.takeSelection()
     val take = layer.undoTop
     val encodeRest = layer.snapshotEncoder()
@@ -89,7 +89,7 @@ fun moveSelectionToPage(graph: AppGraph, undo: Undo, state: PageEditorState, not
         ui {
             // not moved: back on the canvas (saved below, also when the editor has closed meanwhile)
             if (keys == null) layer.restoreTake(take, clip, bounds.left, bounds.top)
-            state.holdSaves = false
+            state.saveHolds--
             // a closed editor's layer is saved too, unless the page was opened again meanwhile (its new editor read
             // the page itself)
             if (state.editable || PageEditorState.editorOf(from.id) == null) state.saver.request()

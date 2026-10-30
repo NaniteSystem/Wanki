@@ -300,4 +300,34 @@ class InkLayerSelectionTest {
         layer.redo()
         assertSame(layer.strokes[2], layer.selection.single())
     }
+
+    @Test
+    fun restoredStrokesSurviveACancelledEraseDrag() {
+        val a = InkStroke(listOf(InkPoint(0f, 0f, 0), InkPoint(100f, 0f, 10)))
+        val b = stroke(300f, 300f)
+        val layer = InkLayer(listOf(a, b))
+        layer.selection.add(b)
+        val clip = layer.takeSelection()
+        val take = layer.undoTop
+        // a finger eraser drag is open (and has cut a) when «Отменить» or a failed move puts the strokes back
+        layer.beginErase()
+        layer.eraseAlong(50f, -5f, 50f, 5f, 5f, EraserMode.PARTIAL)
+        layer.restoreTake(take, clip, 300f, 300f)
+        // the drag turns out to be a pinch: its erase is dropped, the restored strokes stay
+        layer.cancelErase()
+        assertEquals(2, layer.strokes.size)
+        assertSame(a, layer.strokes[0])
+        assertEquals(300f, layer.strokes[1].points[0].x, 1e-3f)
+        assertEquals(300f, layer.strokes[1].points[0].y, 1e-3f)
+        // an erase drag that ends keeps them too, and its undo step does not remove them
+        val layer2 = InkLayer(listOf(a))
+        layer2.beginErase()
+        layer2.eraseAlong(50f, -5f, 50f, 5f, 5f, EraserMode.PARTIAL)
+        layer2.paste(clip, 500f, 500f)
+        assertTrue(layer2.endErase())
+        layer2.undo() // the erase
+        assertEquals(2, layer2.strokes.size)
+        layer2.undo() // the paste
+        assertEquals(listOf(a), layer2.strokes.toList())
+    }
 }

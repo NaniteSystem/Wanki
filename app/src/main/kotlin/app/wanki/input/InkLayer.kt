@@ -242,6 +242,8 @@ class InkLayer(initial: List<InkStroke> = emptyList()) {
     private fun addSelected(list: List<InkStroke>) {
         if (list.isEmpty()) return
         list.forEach { insertAt(strokes.size, it) }
+        // an eraser drag still open (a paste from the snackbar, the pen's eraser end) must not drop these if it is cancelled
+        eraseBefore = eraseBefore?.let { it + list }
         push(Edit.Added(list))
         selection.clear()
         selection.addAll(list)
