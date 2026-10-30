@@ -5,6 +5,7 @@ import androidx.room.Embedded
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
+import app.wanki.input.ToolSelection
 import java.util.UUID
 
 fun newId(): String = UUID.randomUUID().toString()
@@ -14,7 +15,8 @@ enum class AnswerMode { CLASSIC, HANDWRITING }
 
 enum class NotebookKind { NOTEBOOK, DIARY, BOARD }
 
-enum class PageSize { A4, A5 }
+/** [ENDLESS] pages have no fixed size: the canvas grows with the content. */
+enum class PageSize { A4, A5, ENDLESS }
 
 /** What the trash holds: a whole notebook, board or note, or one page of a notebook / one diary day. */
 enum class TrashKind { NOTEBOOK, BOARD, NOTE, PAGE, DIARY_DAY }
@@ -191,7 +193,52 @@ data class PageEntity(
     val viewY: Float? = null,
     val deletedAt: Long? = null,
     val landscape: Boolean = false,
+    /** Background picture or PDF in the media store (`page-*` file); null = none. */
+    val backgroundMedia: String? = null,
+    /** PDF page index of [backgroundMedia]; null = the media is a picture. */
+    val backgroundPage: Int? = null,
 )
+
+enum class PageObjectKind { TEXT, IMAGE }
+
+/** A text box or picture placed on a page; coordinates are world units, [rotation] in degrees. */
+@Entity(tableName = "page_objects", indices = [Index("pageId")])
+data class PageObjectEntity(
+    @PrimaryKey val id: String = newId(),
+    val pageId: String,
+    /** A [PageObjectKind] name. */
+    val kind: String,
+    val x: Float,
+    val y: Float,
+    val w: Float,
+    val h: Float,
+    val rotation: Float = 0f,
+    val z: Int = 0,
+    val text: String = "",
+    val color: Int = ToolSelection.DEFAULT_INK,
+    /** Text size in world units. */
+    val textSize: Float = 32f,
+    /** Media store file name of a picture. */
+    val media: String? = null,
+    val updatedAt: Long,
+)
+
+/** One recognised line of a page's handwriting; [corrected] is the user's fix of [recognized]. */
+@Entity(tableName = "page_lines", primaryKeys = ["pageId", "lineKey"], indices = [Index("pageId")])
+data class PageLineEntity(
+    val pageId: String,
+    val lineKey: Long,
+    val lineIndex: Int,
+    val left: Float,
+    val top: Float,
+    val right: Float,
+    val bottom: Float,
+    val recognized: String,
+    val corrected: String? = null,
+    val updatedAt: Long,
+) {
+    val shown: String get() = corrected ?: recognized
+}
 
 @Entity(tableName = "page_ink")
 data class PageInkEntity(

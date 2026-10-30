@@ -41,6 +41,8 @@ class Settings(context: Context) {
     var emptyInkCleaned by pref("emptyInkCleaned", false)
     /** Epoch day the expired trash was last purged. */
     var trashPurgedDay by pref("trashPurgedDay", -1L)
+    /** Why the last daily cleanup (trash purge, media GC) failed; "" = it did not. */
+    var lastCleanupError by pref("lastCleanupError", "")
 
     /** Hifz: how many study days a newly learned piece stays in sabqi. */
     var sabqiDays by pref("sabqiDays", 7)

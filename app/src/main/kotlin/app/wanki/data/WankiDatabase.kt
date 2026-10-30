@@ -12,7 +12,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         DeckEntity::class, NoteEntity::class, CardEntity::class, ReviewLogEntity::class, InkAttemptEntity::class,
         NotebookEntity::class, PageEntity::class, PageInkEntity::class, TextNoteEntity::class, NoteBlockEntity::class,
         CharScoreEntity::class, NoteTypeEntity::class, TextEntity::class, TextPieceEntity::class, RecitationEntity::class,
-        TextWordStatEntity::class, TypingDraftEntity::class,
+        TextWordStatEntity::class, TypingDraftEntity::class, PageObjectEntity::class, PageLineEntity::class,
     ],
     version = WankiDatabase.VERSION,
     exportSchema = true,
@@ -30,7 +30,7 @@ abstract class WankiDatabase : RoomDatabase() {
 
     companion object {
         const val NAME = "wanki.db"
-        const val VERSION = 9
+        const val VERSION = 10
 
         fun create(context: Context): WankiDatabase =
             Room.databaseBuilder(context, WankiDatabase::class.java, NAME)
@@ -179,9 +179,30 @@ abstract class WankiDatabase : RoomDatabase() {
             }
         }
 
+        /** v10: objects (text, pictures) and recognised lines of a page, page backgrounds. */
+        val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `page_objects` (`id` TEXT NOT NULL, `pageId` TEXT NOT NULL, `kind` TEXT NOT NULL, " +
+                        "`x` REAL NOT NULL, `y` REAL NOT NULL, `w` REAL NOT NULL, `h` REAL NOT NULL, `rotation` REAL NOT NULL, " +
+                        "`z` INTEGER NOT NULL, `text` TEXT NOT NULL, `color` INTEGER NOT NULL, `textSize` REAL NOT NULL, " +
+                        "`media` TEXT, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_page_objects_pageId` ON `page_objects` (`pageId`)")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `page_lines` (`pageId` TEXT NOT NULL, `lineKey` INTEGER NOT NULL, `lineIndex` INTEGER NOT NULL, " +
+                        "`left` REAL NOT NULL, `top` REAL NOT NULL, `right` REAL NOT NULL, `bottom` REAL NOT NULL, " +
+                        "`recognized` TEXT NOT NULL, `corrected` TEXT, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`pageId`, `lineKey`))",
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_page_lines_pageId` ON `page_lines` (`pageId`)")
+                db.execSQL("ALTER TABLE `pages` ADD COLUMN `backgroundMedia` TEXT")
+                db.execSQL("ALTER TABLE `pages` ADD COLUMN `backgroundPage` INTEGER")
+            }
+        }
+
         val MIGRATIONS = arrayOf(
             MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8,
-            MIGRATION_8_9,
+            MIGRATION_8_9, MIGRATION_9_10,
         )
     }
 }

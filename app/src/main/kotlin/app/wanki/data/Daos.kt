@@ -360,6 +360,12 @@ interface NotebookDao {
     @Query("DELETE FROM page_ink WHERE pageId IN (SELECT id FROM pages WHERE notebookId = :notebookId)")
     suspend fun deleteInkOfNotebook(notebookId: String)
 
+    @Query("DELETE FROM page_objects WHERE pageId IN (SELECT id FROM pages WHERE notebookId = :notebookId)")
+    suspend fun deleteObjectsOfNotebook(notebookId: String)
+
+    @Query("DELETE FROM page_lines WHERE pageId IN (SELECT id FROM pages WHERE notebookId = :notebookId)")
+    suspend fun deleteLinesOfNotebook(notebookId: String)
+
     @Query("DELETE FROM pages WHERE notebookId = :notebookId")
     suspend fun deletePagesOf(notebookId: String)
 
@@ -456,6 +462,34 @@ interface NotebookDao {
 
     @Query("UPDATE pages SET landscape = :landscape, updatedAt = :now WHERE id = :id")
     suspend fun setPageLandscape(id: String, landscape: Boolean, now: Long)
+
+    @Query("UPDATE pages SET backgroundMedia = :media, backgroundPage = :pdfPage, updatedAt = :now WHERE id = :id")
+    suspend fun setPageBackground(id: String, media: String?, pdfPage: Int?, now: Long)
+
+    @Query("SELECT * FROM page_objects WHERE pageId = :pageId ORDER BY z, id")
+    suspend fun objects(pageId: String): List<PageObjectEntity>
+
+    @Query("DELETE FROM page_objects WHERE pageId = :pageId")
+    suspend fun deleteObjects(pageId: String)
+
+    @Insert
+    suspend fun insertObjects(objects: List<PageObjectEntity>)
+
+    @Query("SELECT * FROM page_lines WHERE pageId = :pageId ORDER BY lineIndex")
+    suspend fun lines(pageId: String): List<PageLineEntity>
+
+    @Query("DELETE FROM page_lines WHERE pageId = :pageId")
+    suspend fun deleteLines(pageId: String)
+
+    @Query("UPDATE page_lines SET corrected = :text, updatedAt = :now WHERE pageId = :pageId AND lineKey = :lineKey")
+    suspend fun setLineCorrection(pageId: String, lineKey: Long, text: String?, now: Long)
+
+    @Insert
+    suspend fun insertLines(lines: List<PageLineEntity>)
+
+    /** Media files still used by an object or a background (pages in the trash included). */
+    @Query("SELECT media FROM page_objects WHERE media IS NOT NULL UNION SELECT backgroundMedia FROM pages WHERE backgroundMedia IS NOT NULL")
+    suspend fun referencedMedia(): List<String>
 
     @Query("UPDATE pages SET viewScale = :scale, viewX = :x, viewY = :y WHERE id = :id")
     suspend fun setPageView(id: String, scale: Float, x: Float, y: Float)

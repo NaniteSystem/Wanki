@@ -178,7 +178,37 @@ class MigrationTest {
         }
     }
 
+    @Test
+    fun migrate9To10AddsObjectsLinesAndBackground() {
+        helper.createDatabase(DB10, 9).apply {
+            execSQL("INSERT INTO notebooks (id, title, kind, language, template, updatedAt, deleted, pinned, createdAt, pageSize, landscape) VALUES ('nb', 'N', 'NOTEBOOK', 'ru', 'LINED', 500, 0, 0, 500, 'A4', 0)")
+            execSQL("INSERT INTO pages (id, notebookId, pageIndex, template, date, updatedAt, deleted, landscape) VALUES ('p1', 'nb', 0, 'LINED', NULL, 5, 0, 0)")
+            execSQL("INSERT INTO page_ink (pageId, strokes, recognizedText, recognizedAt, updatedAt) VALUES ('p1', X'0102', 'hello', 7, 8)")
+            close()
+        }
+        val db = helper.runMigrationsAndValidate(DB10, 10, true, WankiDatabase.MIGRATION_9_10)
+        fun count(sql: String) = db.query(sql).use { it.moveToFirst(); it.getInt(0) }
+        assertEquals(0, count("SELECT COUNT(*) FROM page_objects"))
+        assertEquals(0, count("SELECT COUNT(*) FROM page_lines"))
+        db.query("SELECT backgroundMedia, backgroundPage FROM pages").use { c ->
+            c.moveToFirst()
+            assertEquals(true, c.isNull(0))
+            assertEquals(true, c.isNull(1))
+        }
+        db.query("SELECT length(strokes), recognizedText, recognizedAt FROM page_ink").use { c ->
+            c.moveToFirst()
+            assertEquals(2, c.getInt(0))
+            assertEquals("hello", c.getString(1))
+            assertEquals(7L, c.getLong(2))
+        }
+        db.query("SELECT pageSize FROM notebooks").use { c ->
+            c.moveToFirst()
+            assertEquals("A4", c.getString(0))
+        }
+    }
+
     private companion object {
+        const val DB10 = "migration-test-10"
         const val DB9 = "migration-test-9"
         const val DB8 = "migration-test-8"
         const val DB7 = "migration-test-7"

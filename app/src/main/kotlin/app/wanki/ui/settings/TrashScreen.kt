@@ -99,6 +99,7 @@ fun TrashScreen(onBack: () -> Unit) {
     }
 
     val now = System.currentTimeMillis()
+    val cleanupError = LocalContext.current.graph.settings.lastCleanupError
     Column(Modifier.fillMaxSize()) {
         ScreenHeader(
             "Корзина", onBack = onBack,
@@ -106,6 +107,12 @@ fun TrashScreen(onBack: () -> Unit) {
                 HeaderAction(R.drawable.ic_delete, "Очистить корзину", "menu-empty-trash", enabled = !items.isNullOrEmpty()) { emptying = true },
             ),
         )
+        if (cleanupError.isNotEmpty()) {
+            Text(
+                "Очистка не удалась: $cleanupError", style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp).testTag("trash-cleanup-error"),
+            )
+        }
         val list = items
         when {
             list == null -> Unit

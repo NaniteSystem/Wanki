@@ -20,6 +20,7 @@ import app.wanki.reminders.Reminders
 import app.wanki.review.AnswerGrader
 import app.wanki.texts.KuromojiMorphology
 import app.wanki.texts.Morphology
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -63,7 +64,17 @@ class WankiApp : Application() {
         graph.appScope.launch {
             val today = java.time.LocalDate.now().toEpochDay()
             if (graph.settings.trashPurgedDay != today) {
-                runCatching { graph.repository.purgeExpired() }.onSuccess { graph.settings.trashPurgedDay = today }
+                try {
+                    graph.repository.purgeExpired()
+                    graph.repository.collectMediaGarbage(graph.media)
+                    graph.settings.trashPurgedDay = today
+                    graph.settings.lastCleanupError = ""
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    android.util.Log.e("Wanki", "daily cleanup failed", e)
+                    graph.settings.lastCleanupError = e.message ?: e.javaClass.simpleName
+                }
             }
         }
         graph.appScope.launch { runCatching { graph.backup.autoBackupIfDue() } }

@@ -585,4 +585,142 @@ class RepositoryTest {
         assertTrue(runCatching { repo.insertPage(diary.id, 0) }.exceptionOrNull() is IllegalArgumentException)
         assertTrue(runCatching { repo.movePage(diary.id, 0, 0) }.exceptionOrNull() is IllegalArgumentException)
     }
+
+    // --- page objects, lines, backgrounds (v10) ---
+
+    private suspend fun onePage(): PageEntity =
+        repo.createNotebook("Obj", PageTemplate.LINED, "auto").let { repo.pages(it.id).single() }
+
+    private fun obj(page: PageEntity, text: String, media: String? = null) = PageObjectEntity(
+        pageId = page.id, kind = if (media == null) PageObjectKind.TEXT.name else PageObjectKind.IMAGE.name,
+        x = 1f, y = 2f, w = 30f, h = 40f, rotation = 15f, z = if (media == null) 0 else 1, text = text, media = media, updatedAt = 5,
+    )
+
+    private fun line(page: PageEntity, key: Long, index: Int, text: String, corrected: String? = null) = PageLineEntity(
+        pageId = page.id, lineKey = key, lineIndex = index, left = 0f, top = index * 10f, right = 50f, bottom = index * 10f + 8f,
+        recognized = text, corrected = corrected, updatedAt = 1,
+    )
+
+    private suspend fun inkOn(page: PageEntity) {
+        val s = app.wanki.ink.InkStroke(listOf(app.wanki.ink.InkPoint(5f, 5f, 0), app.wanki.ink.InkPoint(40f, 30f, 20)))
+        repo.saveInk(page, listOf(s))
+    }
+
+    @Test
+    fun pageObjectsRoundTrip() = runBlocking {
+        val page = onePage()
+        val a = obj(page, "a")
+        val b = obj(page, "", media = "page-x.jpg")
+        repo.savePageObjects(page, listOf(a, b))
+        assertEquals(listOf(a, b), repo.pageObjects(page.id))
+        repo.savePageObjects(page, listOf(b))
+        assertEquals(listOf(b), repo.pageObjects(page.id))
+    }
+
+    @Test
+    fun saveLinesWritesJoinedText() = runBlocking {
+        val page = onePage()
+        inkOn(page)
+        repo.saveLines(page.id, listOf(line(page, 2, 1, "b", corrected = "B"), line(page, 1, 0, "a")))
+        assertEquals("a\nB", repo.recognizedText(page.id))
+        assertEquals(listOf(page.id), repo.searchPages("B").map { it.pageId })
+        assertEquals(listOf("a", "b"), repo.pageLines(page.id).map { it.recognized })
+    }
+
+    @Test
+    fun setLineCorrectionNullResets() = runBlocking {
+        val page = onePage()
+        inkOn(page)
+        repo.saveLines(page.id, listOf(line(page, 1, 0, "a"), line(page, 2, 1, "b")))
+        repo.setLineCorrection(page.id, 2, "B")
+        assertEquals("a\nB", repo.recognizedText(page.id))
+        assertEquals("B", repo.pageLines(page.id).first { it.lineKey == 2L }.corrected)
+        repo.setLineCorrection(page.id, 2, null)
+        assertEquals("a\nb", repo.recognizedText(page.id))
+        assertNull(repo.pageLines(page.id).first { it.lineKey == 2L }.corrected)
+    }
+
+    @Test
+    fun duplicatePageCopiesObjectsAndLines() = runBlocking {
+        val page = onePage()
+        repo.savePageObjects(page, listOf(obj(page, "t"), obj(page, "", media = "page-x.jpg")))
+        repo.saveLines(page.id, listOf(line(page, 1, 0, "a")))
+        val copy = repo.duplicatePage(page.id)
+        val src = repo.pageObjects(page.id)
+        val dup = repo.pageObjects(copy.id)
+        assertEquals(2, dup.size)
+        assertTrue(dup.map { it.id }.intersect(src.map { it.id }.toSet()).isEmpty())
+        assertEquals(src.map { it.media }.toSet(), dup.map { it.media }.toSet())
+        assertEquals(listOf("a"), repo.pageLines(copy.id).map { it.recognized })
+    }
+
+    @Test
+    fun purgeRemovesObjectsAndLines() = runBlocking {
+        val nb = repo.createNotebook("P", PageTemplate.LINED, "auto")
+        val p1 = repo.pages(nb.id).single()
+        val p2 = repo.insertPage(nb.id, 1)
+        for (p in listOf(p1, p2)) {
+            repo.savePageObjects(p, listOf(obj(p, "t")))
+            repo.saveLines(p.id, listOf(line(p, 1, 0, "a")))
+        }
+        repo.delete(TrashKind.PAGE, p2.id)
+        assertTrue(repo.purge(TrashKind.PAGE, p2.id))
+        assertTrue(repo.pageObjects(p2.id).isEmpty() && repo.pageLines(p2.id).isEmpty())
+        assertEquals(1, repo.pageObjects(p1.id).size)
+        repo.delete(TrashKind.NOTEBOOK, nb.id)
+        assertTrue(repo.purge(TrashKind.NOTEBOOK, nb.id))
+        assertTrue(repo.pageObjects(p1.id).isEmpty() && repo.pageLines(p1.id).isEmpty())
+    }
+
+    @Test
+    fun insertPagesKeepsDenseIndices() = runBlocking {
+        val nb = repo.createNotebook("I", PageTemplate.LINED, "auto")
+        repo.insertPage(nb.id, 1)
+        val made = repo.insertPages(
+            nb.id, 1,
+            listOf(
+                Repository.NewPage(false, "page-a.jpg", null),
+                Repository.NewPage(true, "page-b.pdf", 0),
+                Repository.NewPage(true, "page-b.pdf", 1),
+            ),
+        )
+        assertEquals(3, made.size)
+        val all = repo.pages(nb.id)
+        assertEquals((0..4).toList(), all.map { it.pageIndex })
+        assertEquals(made.map { it.id }, all.subList(1, 4).map { it.id })
+        assertEquals(listOf("page-a.jpg", "page-b.pdf", "page-b.pdf"), all.subList(1, 4).map { it.backgroundMedia })
+        assertEquals(listOf(null, 0, 1), all.subList(1, 4).map { it.backgroundPage })
+        assertEquals(listOf(false, true, true), all.subList(1, 4).map { it.landscape })
+        assertEquals(PageTemplate.BLANK.name, all[2].template)
+    }
+
+    @Test
+    fun setPageBackgroundStoresAndClears() = runBlocking {
+        val page = onePage()
+        repo.setPageBackground(page.id, "page-z.pdf", 3)
+        db.notebooks().page(page.id)!!.let { assertEquals("page-z.pdf", it.backgroundMedia); assertEquals(3, it.backgroundPage) }
+        repo.setPageBackground(page.id, null, null)
+        db.notebooks().page(page.id)!!.let { assertNull(it.backgroundMedia); assertNull(it.backgroundPage) }
+    }
+
+    @Test
+    fun mediaGcKeepsTrashedReferences() = runBlocking {
+        val ctx = InstrumentationRegistry.getInstrumentation().targetContext
+        val media = app.wanki.media.MediaStore(ctx)
+        media.dir.deleteRecursively()
+        for (n in listOf("page-a.jpg", "page-b.pdf", "page-c.jpg", "card-d.jpg")) media.save(n, "x".byteInputStream())
+        val nb = repo.createNotebook("G", PageTemplate.LINED, "auto")
+        val live = repo.pages(nb.id).single()
+        val gone = repo.insertPage(nb.id, 1)
+        repo.savePageObjects(live, listOf(obj(live, "", media = "page-a.jpg")))
+        repo.setPageBackground(gone.id, "page-b.pdf", 0)
+        repo.delete(TrashKind.PAGE, gone.id)
+        assertEquals(1, repo.collectMediaGarbage(media))
+        assertEquals(setOf("page-a.jpg", "page-b.pdf", "card-d.jpg"), media.dir.list().orEmpty().toSet())
+        repo.purge(TrashKind.PAGE, gone.id)
+        assertEquals(1, repo.collectMediaGarbage(media))
+        assertEquals(setOf("page-a.jpg", "card-d.jpg"), media.dir.list().orEmpty().toSet())
+        media.dir.deleteRecursively()
+        Unit
+    }
 }

@@ -10,6 +10,7 @@ import app.wanki.catalog.CatalogRow
 import app.wanki.ink.InkCodec
 import app.wanki.ink.InkDrawing
 import app.wanki.ink.InkStroke
+import app.wanki.media.MediaStore
 import app.wanki.practice.CharQuality
 import app.wanki.practice.WeakChars
 import app.wanki.srs.CardState
@@ -500,6 +501,7 @@ class Repository(private val db: WankiDatabase) {
         val pages = old.map { it.copy(id = newId(), notebookId = copy.id, updatedAt = now) }
         notebooks.insertPages(pages)
         notebooks.upsertInks(old.indices.mapNotNull { i -> notebooks.ink(old[i].id)?.copy(pageId = pages[i].id, updatedAt = now) })
+        old.indices.forEach { i -> copyObjectsAndLines(old[i].id, pages[i].id, now) }
         copy
     }
 
@@ -522,9 +524,18 @@ class Repository(private val db: WankiDatabase) {
         live.add((live.indexOfFirst { it.id == pageId } + 1).coerceAtLeast(0), copy)
         notebooks.insertPages(listOf(copy))
         notebooks.ink(pageId)?.let { notebooks.upsertInk(it.copy(pageId = copy.id, updatedAt = now)) }
+        copyObjectsAndLines(pageId, copy.id, now)
         renumber(live)
         notebooks.touch(src.notebookId, now)
         copy.copy(pageIndex = live.indexOfFirst { it.id == copy.id })
+    }
+
+    /** Objects get new ids and keep their media; lines keep their keys. */
+    private suspend fun copyObjectsAndLines(fromPage: String, toPage: String, now: Long) {
+        val objs = notebooks.objects(fromPage)
+        if (objs.isNotEmpty()) notebooks.insertObjects(objs.map { it.copy(id = newId(), pageId = toPage, updatedAt = now) })
+        val lines = notebooks.lines(fromPage)
+        if (lines.isNotEmpty()) notebooks.insertLines(lines.map { it.copy(pageId = toPage, updatedAt = now) })
     }
 
     // --- pages: insert and move --------------------------------------------------------------
@@ -540,6 +551,30 @@ class Repository(private val db: WankiDatabase) {
         renumber(live)
         notebooks.touch(notebookId)
         p
+    }
+
+    /** A page to insert with [insertPages]: orientation and background picture or PDF page. */
+    data class NewPage(val landscape: Boolean, val backgroundMedia: String?, val backgroundPage: Int?)
+
+    /** Inserts [pages] at position [at] (clamped) in one transaction; the paper is BLANK, indices stay dense. */
+    suspend fun insertPages(notebookId: String, at: Int, pages: List<NewPage>): List<PageEntity> = db.withTransaction {
+        requireNumbered(notebookId)
+        val live = notebooks.pages(notebookId).toMutableList()
+        val pos = at.coerceIn(0, live.size)
+        val now = System.currentTimeMillis()
+        val created = pages.mapIndexed { i, n ->
+            PageEntity(
+                notebookId = notebookId, pageIndex = pos + i, template = PageTemplate.BLANK.name, updatedAt = now,
+                landscape = n.landscape, backgroundMedia = n.backgroundMedia, backgroundPage = n.backgroundPage,
+            )
+        }
+        if (created.isNotEmpty()) {
+            notebooks.insertPages(created)
+            live.addAll(pos, created)
+            renumber(live)
+            notebooks.touch(notebookId, now)
+        }
+        created
     }
 
     /** Moves a page from position [from] to [to]; indices stay 0..n-1. */
@@ -624,6 +659,8 @@ class Repository(private val db: WankiDatabase) {
             TrashKind.NOTEBOOK, TrashKind.BOARD -> {
                 if (notebooks.get(id)?.deleted != true) return@withTransaction false
                 notebooks.deleteInkOfNotebook(id)
+                notebooks.deleteObjectsOfNotebook(id)
+                notebooks.deleteLinesOfNotebook(id)
                 notebooks.deletePagesOf(id)
                 notebooks.deleteNotebookRow(id)
             }
@@ -642,6 +679,8 @@ class Repository(private val db: WankiDatabase) {
 
     private suspend fun removePage(id: String) {
         notebooks.deleteInk(id)
+        notebooks.deleteObjects(id)
+        notebooks.deleteLines(id)
         notebooks.deletePageRow(id)
     }
 
@@ -759,6 +798,55 @@ class Repository(private val db: WankiDatabase) {
             notebooks.touchPage(page.id, now)
             notebooks.touch(page.notebookId, now)
         }
+    }
+
+    // --- page objects, recognised lines, background -------------------------------------------
+
+    suspend fun pageObjects(pageId: String): List<PageObjectEntity> = notebooks.objects(pageId)
+
+    /** Replaces the page's objects in one transaction and touches the page and its notebook. */
+    suspend fun savePageObjects(page: PageEntity, objects: List<PageObjectEntity>) = db.withTransaction {
+        val now = System.currentTimeMillis()
+        insertPageIfMissing(page)
+        notebooks.deleteObjects(page.id)
+        if (objects.isNotEmpty()) notebooks.insertObjects(objects.map { it.copy(pageId = page.id) })
+        notebooks.touchPage(page.id, now)
+        notebooks.touch(page.notebookId, now)
+    }
+
+    suspend fun pageLines(pageId: String): List<PageLineEntity> = notebooks.lines(pageId)
+
+    /** Replaces the page's lines (corrections come from the caller) and rewrites the searchable text from what is shown. */
+    suspend fun saveLines(pageId: String, lines: List<PageLineEntity>) = db.withTransaction {
+        notebooks.deleteLines(pageId)
+        if (lines.isNotEmpty()) notebooks.insertLines(lines.map { it.copy(pageId = pageId) })
+        notebooks.setRecognizedText(pageId, joinedText(lines), System.currentTimeMillis())
+    }
+
+    /** Sets (or with null resets) the user's correction of one line; the searchable text follows. */
+    suspend fun setLineCorrection(pageId: String, lineKey: Long, text: String?) = db.withTransaction {
+        val lines = notebooks.lines(pageId)
+        val line = lines.firstOrNull { it.lineKey == lineKey } ?: return@withTransaction
+        val now = System.currentTimeMillis()
+        val updated = line.copy(corrected = text, updatedAt = now)
+        notebooks.setLineCorrection(pageId, lineKey, text, now)
+        notebooks.setRecognizedText(pageId, joinedText(lines.map { if (it.lineKey == lineKey) updated else it }), now)
+    }
+
+    private fun joinedText(lines: List<PageLineEntity>) = lines.sortedBy { it.lineIndex }.joinToString("\n") { it.shown }
+
+    /** A picture ([pdfPage] null) or a PDF page as the page's background; media null removes it. */
+    suspend fun setPageBackground(pageId: String, media: String?, pdfPage: Int?) =
+        notebooks.setPageBackground(pageId, media, pdfPage, System.currentTimeMillis())
+
+    /**
+     * Deletes `page-*` files nobody uses: not an object's picture and not a page background
+     * (pages in the trash still count). Returns how many files went.
+     */
+    suspend fun collectMediaGarbage(media: MediaStore): Int {
+        val used = notebooks.referencedMedia().toSet()
+        val files = media.dir.listFiles().orEmpty().filter { it.isFile && it.name.startsWith("page-") }
+        return files.count { it.name !in used && it.delete() }
     }
 
     suspend fun setRecognizedText(pageId: String, text: String) =
