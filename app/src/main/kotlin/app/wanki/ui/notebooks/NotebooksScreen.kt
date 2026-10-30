@@ -203,6 +203,10 @@ fun NotebookScreen(notebookId: String, initialPageId: String?, onBack: () -> Uni
     // a page that was just added: the current page stays on screen until it arrives through the flow
     val scope = rememberUiScope()
     val adder = remember(notebookId) { PageAdder(scope) }
+    // the opening page's ink is read now, alongside the notebook and pages queries below
+    val preload = remember(notebookId) {
+        scope.preloadInk(graph, notebookId) { pages -> initialPageId?.let { id -> pages.firstOrNull { it.id == id } } ?: pages.firstOrNull() }
+    }
     val addError by adder.error.collectAsState()
 
     LaunchedEffect(pages, initialPageId) {
@@ -217,7 +221,7 @@ fun NotebookScreen(notebookId: String, initialPageId: String?, onBack: () -> Uni
     val i = index ?: return
     val page = pages.getOrNull(i) ?: return
     val pageUi = rememberPageUi()
-    val state = remember(page.id) { PageEditorState(graph, nb, page, infinite = false, ui = pageUi) }
+    val state = remember(page.id) { PageEditorState(graph, nb, page, infinite = false, ui = pageUi, preload = preload) }
     androidx.compose.runtime.SideEffect { state.notebook = nb }
     fun addPage() = adder.add(pages.size) { graph.repository.addPage(nb) }
 

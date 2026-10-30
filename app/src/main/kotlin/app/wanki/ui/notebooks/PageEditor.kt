@@ -46,7 +46,12 @@ import app.wanki.data.NotebookEntity
 import app.wanki.data.PageEntity
 import app.wanki.data.PageTemplate
 import app.wanki.graph
+import app.wanki.ink.InkRect
 import app.wanki.ink.InkStroke
+import app.wanki.input.StrokeConversion
+import androidx.ink.strokes.Stroke
+import java.util.IdentityHashMap
+import kotlinx.coroutines.isActive
 import app.wanki.input.InkLayer
 import app.wanki.input.InkSurface
 import app.wanki.input.InkSection
@@ -69,7 +74,10 @@ import app.wanki.ui.common.label
 import app.wanki.data.InkLoad
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
@@ -90,6 +98,55 @@ class PageUiState {
     }
 }
 
+/**
+ * A page's stored ink, read and decoded before its editor exists. [converted] fills up (on background threads) with
+ * the strokes already converted for drawing, so the page's tiles need not convert them again.
+ */
+class InkPreload(
+    val pageId: String,
+    val ink: InkLoad,
+    val converted: MutableMap<InkStroke, Stroke>,
+    /** Each stroke's bounds, computed alongside the read. */
+    val bounds: Map<InkStroke, InkRect?>,
+)
+
+/** Holds a [preloadInk] result until the first editor takes it, so the screen does not keep that ink afterwards. */
+class InkPreloadSlot(deferred: Deferred<InkPreload?>) {
+    private var deferred: Deferred<InkPreload?>? = deferred
+
+    /** The read-ahead ink, once: later calls (other pages of the screen) get null. Main thread. */
+    fun take(): Deferred<InkPreload?>? = deferred.also { deferred = null }
+}
+
+/**
+ * Starts reading the ink of the page a screen will open ([pageOf] picks it from the notebook's pages) on IO,
+ * alongside the screen's own start-up queries, so the editor's [PageEditorState.load] does not wait for them; then
+ * converts its strokes for drawing on the other cores while the screen composes.
+ */
+fun CoroutineScope.preloadInk(graph: AppGraph, notebookId: String, pageOf: (List<PageEntity>) -> PageEntity?): InkPreloadSlot {
+    val scope = this
+    return InkPreloadSlot(async(Dispatchers.IO) {
+        val page = pageOf(graph.repository.pages(notebookId)) ?: return@async null
+        val ink = graph.repository.loadInkResult(page.id)
+        val converted = java.util.Collections.synchronizedMap(IdentityHashMap<InkStroke, Stroke>())
+        if (ink is InkLoad.Ok && ink.strokes.isNotEmpty()) {
+            val parts = (Runtime.getRuntime().availableProcessors() / 2).coerceIn(1, 3)
+            // not a child of this async: the ink is handed over as soon as it is read
+            ink.strokes.chunked((ink.strokes.size + parts - 1) / parts).forEach { part ->
+                scope.launch(Dispatchers.Default) {
+                    for (s in part) {
+                        if (!isActive) return@launch
+                        if (!converted.containsKey(s)) StrokeConversion.toInk(s)?.let { converted[s] = it }
+                    }
+                }
+            }
+        }
+        val bounds = IdentityHashMap<InkStroke, InkRect?>()
+        if (ink is InkLoad.Ok) for (s in ink.strokes) bounds[s] = s.bounds()
+        InkPreload(page.id, ink, converted, bounds)
+    })
+}
+
 @Composable
 fun rememberPageUi(): PageUiState = androidx.compose.runtime.saveable.rememberSaveable(saver = PageUiState.Saver) { PageUiState() }
 
@@ -103,6 +160,8 @@ class PageEditorState(
     page: PageEntity,
     val infinite: Boolean,
     val ui: PageUiState = PageUiState(),
+    /** Ink read ahead while the screen was still starting ([preloadInk]); used by the first [load] if it is this page's. */
+    private val preload: InkPreloadSlot? = null,
 ) {
     /** Current notebook settings; replaced when they change, so the state (and unsaved ink) stays. */
     var notebook by mutableStateOf(notebook)
@@ -187,16 +246,31 @@ class PageEditorState(
         }
 
     suspend fun load() {
-        when (val r = graph.repository.loadInkResult(page.id)) {
+        val ahead = preload?.take()?.let { p ->
+            try {
+                p.await()?.takeIf { it.pageId == page.id }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e("Wanki", "page ${page.id}: ink not read ahead", e) // read again below, where a failure is shown
+                null
+            }
+        }
+        // decoding thousands of strokes is not main-thread work
+        when (val r = ahead?.ink ?: withContext(Dispatchers.IO) { graph.repository.loadInkResult(page.id) }) {
             is InkLoad.Ok -> {
+                ahead?.let { layer.adoptBounds(it.bounds) }
                 layer.replaceAll(r.strokes, undoable = false)
+                ahead?.let { layer.adoptConverted(it.converted) }
                 // encode the stroke chunks now, off main, so the first save after an edit only encodes the new stroke
                 val encode = layer.snapshotEncoder()
                 graph.appScope.launch(Dispatchers.Default) {
                     try {
                         encode()
+                    } catch (e: CancellationException) {
+                        throw e
                     } catch (e: Exception) {
-                        Log.e("Wanki", "page ${page.id}: chunks not prepared", e) // the next save reports it
+                        Log.e("Wanki", "page ${page.id}: chunks not prepared", e) // the next save encodes again and reports it
                     }
                 }
             }

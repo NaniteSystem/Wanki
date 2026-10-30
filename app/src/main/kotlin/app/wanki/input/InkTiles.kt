@@ -5,6 +5,7 @@ import android.graphics.Canvas
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.RectF
+import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
@@ -17,6 +18,7 @@ import app.wanki.input.TileMath.TileKey
 import java.util.Collections
 import java.util.IdentityHashMap
 import java.util.WeakHashMap
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -27,7 +29,7 @@ import kotlinx.coroutines.withContext
  * Finished ink of a pan/zoom canvas as cached 512 × 512 px bitmaps ([TileMath]), so a frame draws a
  * few dozen bitmaps instead of every stroke.
  *
- * - Tiles render one at a time on a background thread through [InkRaster]; the stroke list of a tile is
+ * - Tiles render on a few background threads through [InkRaster]; the stroke list of a tile is
  *   taken on the main thread ([InkLayer.strokesIn] is main-thread only) and handed over.
  * - A missing or dirty tile is drawn stroke by stroke (clipped to the tile) until its bitmap is ready.
  *   A stroke added on top only needs itself drawn over the tile's older bitmap until then.
@@ -50,6 +52,8 @@ class InkTiles(val layer: InkLayer, private val scope: CoroutineScope) {
         /** Strokes added on top after [imageGen], with the generation that added each. */
         val onTop = ArrayList<Pair<Int, InkStroke>>()
         var rendering = false
+        /** [gen] whose render failed: not tried again until the tile changes. */
+        var failedGen = -1
 
         /** The picture shows the tile as it is now. */
         val ready: Boolean get() = imageGen == gen
@@ -60,8 +64,8 @@ class InkTiles(val layer: InkLayer, private val scope: CoroutineScope) {
     private val tiles = HashMap<TileKey, Tile>()
     private val budget = TileBudget(budgetBytes())
     private val directRenderer = CanvasStrokeRenderer.create()
-    /** Used only on the render thread. */
-    private val tileRenderer = CanvasStrokeRenderer.create()
+    /** One renderer per render thread. */
+    private val tileRenderer = ThreadLocal.withInitial { CanvasStrokeRenderer.create() }
     private val bitmapPaint = Paint(Paint.FILTER_BITMAP_FLAG)
     private val dst = RectF()
 
@@ -88,6 +92,7 @@ class InkTiles(val layer: InkLayer, private val scope: CoroutineScope) {
     private val listener = object : InkLayer.ChangeListener {
         override fun changed(area: InkRect) = invalidate(area)
         override fun appended(stroke: InkStroke, area: InkRect) {
+            allVisibleReady = false // until a frame shows the change
             for (t in tiles.values) if (TileMath.rect(t.key).intersects(area)) {
                 t.gen++
                 t.onTop += t.gen to stroke
@@ -135,7 +140,8 @@ class InkTiles(val layer: InkLayer, private val scope: CoroutineScope) {
             // a tile without a picture of ink yet (a full page just opened) may wait for its bitmap rather than
             // stall the frame: until then it only lacks strokes. A dirty picture would be wrong: always draw those.
             val noInkYet = tile?.bitmap == null
-            if (noInkYet && strokes.size > directLeft) continue
+            val failed = tile != null && tile.failedGen == tile.gen
+            if (noInkYet && !failed && strokes.size > directLeft) continue
             directLeft -= strokes.size
             canvas.save()
             canvas.clipRect(rect.left, rect.top, rect.right, rect.bottom)
@@ -212,13 +218,26 @@ class InkTiles(val layer: InkLayer, private val scope: CoroutineScope) {
         }
     }
 
-    /** Starts renders for the view's tiles, then (when the budget holds them all) for the margin around it. */
+    /**
+     * Starts renders for the view's tiles, nearest the centre of the view first, then (when the budget holds them
+     * all) for the margin around it.
+     */
     private fun schedule(view: InkRect, level: Int, inner: List<TileKey>) {
         val all = TileMath.visible(view, level)
-        val wanted = if (all.size * TILE_BYTES <= budget.maxBytes) all else inner
+        val cx = (view.left + view.right) / 2
+        val cy = (view.top + view.bottom) / 2
+        val fromCentre = compareBy<TileKey> {
+            val r = TileMath.rect(it)
+            val dx = (r.left + r.right) / 2 - cx
+            val dy = (r.top + r.bottom) / 2 - cy
+            dx * dx + dy * dy
+        }
+        val innerSet = inner.toHashSet()
+        val wanted = inner.sortedWith(fromCentre) +
+            if (all.size * TILE_BYTES <= budget.maxBytes) all.filter { it !in innerSet }.sortedWith(fromCentre) else emptyList()
         for (key in wanted) {
             val tile = tiles.getOrPut(key) { Tile(key) }
-            if (!tile.ready && !tile.rendering) render(tile)
+            if (!tile.ready && !tile.rendering && tile.failedGen != tile.gen) render(tile)
         }
         // tiles without a bitmap are not in the budget: forget the ones far from the view (boards are endless)
         if (tiles.size > wanted.size * 4 + 64) {
@@ -240,20 +259,22 @@ class InkTiles(val layer: InkLayer, private val scope: CoroutineScope) {
         val ppw = TileMath.pixelsPerWorld(tile.key.level)
         scope.launch {
             try {
-                // converting strokes for the renderer costs about as much as drawing them: spread it over the cores
-                withContext(Dispatchers.Default) {
-                    val part = (strokes.size + 3) / 4
-                    strokes.chunked(part).forEach { p -> launch { p.forEach { layer.renderable(it) } } }
-                }
                 val bitmap = withContext(renderThread) {
                     if (tile.fullGen > gen) return@withContext null // changed again while queued
                     Bitmap.createBitmap(TileMath.TILE_PX, TileMath.TILE_PX, Bitmap.Config.ARGB_8888).also {
-                        InkRaster.draw(Canvas(it), strokes, ppw, rect.left, rect.top, renderer = tileRenderer, ink = layer::renderable)
+                        InkRaster.draw(Canvas(it), strokes, ppw, rect.left, rect.top, renderer = tileRenderer.get()!!, ink = layer::renderable)
                         it.prepareToDraw()
                     }
                 }
                 // a later change other than a stroke on top makes this picture wrong; strokes on top are drawn over it
                 if (bitmap != null && tiles[tile.key] === tile && tile.fullGen <= gen) install(tile, gen, bitmap)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                // out of memory, or a stroke the renderer cannot take: the tile keeps drawing stroke by stroke, and
+                // is tried again only after its ink changes
+                Log.e("Wanki", "ink tile ${tile.key} not rendered", e)
+                tile.failedGen = gen
             } finally {
                 tile.rendering = false
                 readyRev++ // draw again: shows the picture, or schedules the next render
@@ -274,6 +295,7 @@ class InkTiles(val layer: InkLayer, private val scope: CoroutineScope) {
 
     /** Marks the tiles over [rect] (world units) dirty: they draw directly until rendered again. */
     fun invalidate(rect: InkRect) {
+        allVisibleReady = false // until a frame shows the change
         for (t in tiles.values) if (TileMath.rect(t.key).intersects(rect)) {
             t.gen++
             t.fullGen = t.gen
@@ -296,11 +318,23 @@ class InkTiles(val layer: InkLayer, private val scope: CoroutineScope) {
         return TileMath.covering(area, l).all { tiles[it]?.ready == true }
     }
 
+    /** The state of the current level's visible tiles, for test failure messages. */
+    fun describe(): String {
+        val v = viewport?.visibleWorld() ?: return "no frame yet"
+        val l = level ?: return "no level"
+        return "level $l prev $previousLevel tiles ${tiles.size} budget ${budget.bytes shr 20} MB; " +
+            TileMath.covering(v, l).joinToString { k ->
+                val t = tiles[k] ?: return@joinToString "$k missing"
+                "$k gen ${t.gen}/${t.fullGen} image ${t.imageGen} failed ${t.failedGen} rendering ${t.rendering} bitmap ${t.bitmap != null}"
+            }
+    }
+
     /** Drops every bitmap; the visible tiles render again on the next frame. */
     fun clear() {
         tiles.clear()
         budget.clear()
         previousLevel = null
+        allVisibleReady = false
         readyRev++
     }
 
@@ -319,8 +353,15 @@ class InkTiles(val layer: InkLayer, private val scope: CoroutineScope) {
         /** How many strokes of tiles without a picture of ink yet one frame may draw directly. */
         private const val MAX_DIRECT_STROKES = 300
 
+        /**
+         * Tiles render in parallel on half the cores (at most [MAX_RENDER_THREADS]), so the UI and render threads keep theirs;
+         * a tile converts its own strokes for the renderer there too (about as costly as drawing them).
+         */
         @OptIn(ExperimentalCoroutinesApi::class)
-        private val renderThread = Dispatchers.Default.limitedParallelism(1)
+        private val renderThread = Dispatchers.Default.limitedParallelism(
+            (Runtime.getRuntime().availableProcessors() / 2).coerceIn(1, MAX_RENDER_THREADS),
+        )
+        private const val MAX_RENDER_THREADS = 3
 
         /** Live instances (main thread), weakly held. */
         private val live = WeakHashMap<InkTiles, Unit>()

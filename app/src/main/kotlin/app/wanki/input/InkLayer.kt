@@ -158,13 +158,27 @@ class InkLayer(initial: List<InkStroke> = emptyList()) {
 
     fun drawing() = InkDrawing(strokes.toList())
 
+    /** Strokes converted before the layer got them ([adoptConverted]); entries move to the cache when used. */
+    @Volatile private var convertedAhead: MutableMap<InkStroke, Stroke>? = null
+
+    /**
+     * Uses strokes converted elsewhere (a page's ink read ahead) instead of converting them again. [converted] may still
+     * be filling up on other threads: it must be a synchronized map. Dropped by the next [replaceAll].
+     */
+    fun adoptConverted(converted: MutableMap<InkStroke, Stroke>) {
+        convertedAhead = converted
+    }
+
     /** The androidx.ink stroke for [s], converted once per stroke instance. Thread-safe. */
     fun renderable(s: InkStroke): Stroke? {
         synchronized(render) { if (render.containsKey(s)) return render[s] }
-        val made = StrokeConversion.toInk(s)
+        val made = convertedAhead?.remove(s) ?: StrokeConversion.toInk(s)
         return synchronized(render) { if (render.containsKey(s)) render[s] else made.also { render[s] = it } }
     }
     fun bounds(s: InkStroke): InkRect? = boundsCache.getOrPut(s) { s.bounds() }
+
+    /** Bounds computed off the main thread (a page's ink read ahead), so [replaceAll] need not compute them. Main thread. */
+    fun adoptBounds(bounds: Map<InkStroke, InkRect?>) = boundsCache.putAll(bounds)
 
     /**
      * Strokes that may paint inside [rect] (grid cells over their bounds plus half the brush, a superset), in layer order.
@@ -279,6 +293,7 @@ class InkLayer(initial: List<InkStroke> = emptyList()) {
         val before = strokes.toList()
         eraseBefore = null // a reload or replace ends any eraser drag or move in progress
         moveBefore = null
+        convertedAhead = null
         resetStrokes(newStrokes)
         val live = java.util.Collections.newSetFromMap(IdentityHashMap<InkStroke, Boolean>()).apply { addAll(strokes) }
         synchronized(chunks) { chunks.keys.retainAll(live) }
@@ -386,6 +401,15 @@ class InkLayer(initial: List<InkStroke> = emptyList()) {
     /** Reports strokes that appear in only one of the lists, or whose place in the stacking order differs. */
     private fun changedBetween(old: List<InkStroke>, new: List<InkStroke>) {
         val inOld = java.util.Collections.newSetFromMap(IdentityHashMap<InkStroke, Boolean>()).apply { addAll(old) }
+        if (old.isEmpty()) {
+            // a page's ink arriving: one area for all of it, not thousands of reports
+            var area: InkRect? = null
+            for (s in new) paintedArea(s)?.let { r ->
+                area = area?.let { InkRect(minOf(it.left, r.left), minOf(it.top, r.top), maxOf(it.right, r.right), maxOf(it.bottom, r.bottom)) } ?: r
+            }
+            area?.let { a -> changeListeners.toList().forEach { it.changed(a) } }
+            return
+        }
         val inNew = java.util.Collections.newSetFromMap(IdentityHashMap<InkStroke, Boolean>()).apply { addAll(new) }
         old.forEach { if (it !in inNew) changed(it) }
         new.forEach { if (it !in inOld) changed(it) }
