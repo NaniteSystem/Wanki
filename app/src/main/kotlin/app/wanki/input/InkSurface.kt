@@ -48,6 +48,8 @@ fun InkSurface(
     onStrokeStarted: () -> Unit = {},
     onStrokeFinished: () -> Unit = {},
     onViewGestureEnd: () -> Unit = {},
+    /** A two-finger fling at the page edge: +1 next page, -1 previous. Null where pages do not turn. */
+    onPageSwipe: ((Int) -> Unit)? = null,
     background: DrawScope.() -> Unit = {},
     overlay: DrawScope.() -> Unit = {},
 ) {
@@ -63,6 +65,8 @@ fun InkSurface(
     val finished by rememberUpdatedState(onStrokeFinished)
     val viewEnded by rememberUpdatedState(onViewGestureEnd)
     var cursor by remember { mutableStateOf<EraserCursor?>(null) }
+    var line by remember { mutableStateOf<LinePreview?>(null) }
+    val swiped by rememberUpdatedState(onPageSwipe)
     val cursorColor = MaterialTheme.colorScheme.onSurfaceVariant
 
     // clip: page backgrounds are drawn far beyond the visible area
@@ -86,6 +90,7 @@ fun InkSurface(
                     }
                 }
                 drawSelection(layer, scale)
+                line?.let { drawLinePreview(it) }
             }
             overlay()
             cursor?.let { drawCircle(cursorColor, it.radius, androidx.compose.ui.geometry.Offset(it.x, it.y), style = androidx.compose.ui.graphics.drawscope.Stroke(1.dp.toPx())) }
@@ -114,10 +119,21 @@ fun InkSurface(
                     it.onStrokeStarted = { started() }
                     it.onStrokeFinished = { finished() }
                     it.onViewGestureEnd = { viewEnded() }
+                    it.onLinePreview = { p -> line = p }
+                    it.onPageSwipe = if (onPageSwipe != null) ({ dir -> swiped?.invoke(dir) }) else null
                 }
             },
         )
     }
+}
+
+/** The held straight line, in the stroke's own brush (highlighter translucent). */
+private fun DrawScope.drawLinePreview(p: LinePreview) {
+    val color = androidx.compose.ui.graphics.Color(p.brush.color)
+    drawLine(
+        if (p.brush.kind == app.wanki.ink.BrushKind.HIGHLIGHTER) color.copy(alpha = color.alpha * 0.4f) else color,
+        p.from, p.to, strokeWidth = p.brush.size, cap = androidx.compose.ui.graphics.StrokeCap.Round,
+    )
 }
 
 private val SelectionColor = androidx.compose.ui.graphics.Color(0xFF1E5BD8)

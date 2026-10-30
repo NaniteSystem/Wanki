@@ -40,7 +40,7 @@ fun PageNavBar(index: Int, count: Int, onIndex: (Int) -> Unit, modifier: Modifie
         }
         TextButton(
             onClick = { jump = true },
-            modifier = Modifier.heightIn(min = 48.dp).widthIn(min = 72.dp).testTag("page-jump"),
+            modifier = Modifier.heightIn(min = 48.dp).widthIn(min = 72.dp).testTag("page-number"),
         ) { Text("${index + 1} / $count", maxLines = 1, softWrap = false) }
         IconButton(onClick = { onIndex(index + 1) }, enabled = index < count - 1, modifier = Modifier.testTag("page-next")) {
             Icon(painterResource(R.drawable.ic_chevron_right), contentDescription = "Следующая страница")

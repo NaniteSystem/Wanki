@@ -418,6 +418,8 @@ fun PageEditor(
     primary: List<HeaderAction> = emptyList(),
     menu: List<HeaderAction> = emptyList(),
     pageBar: @Composable () -> Unit = {},
+    /** A two-finger fling at the page edge turns the page: +1 next, -1 previous. */
+    onPageSwipe: ((Int) -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val graph = context.graph
@@ -478,6 +480,7 @@ fun PageEditor(
                     gestures = true,
                     eraser = state.eraser,
                     onViewGestureEnd = state::onViewGestureEnd,
+                    onPageSwipe = onPageSwipe,
                     modifier = Modifier.weight(1f).fillMaxSize().testTag("page-canvas"),
                     background = {
                         if (state.infinite) drawBoard(state.viewport.visibleWorld(), state.viewport.scale)

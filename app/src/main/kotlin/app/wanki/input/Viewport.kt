@@ -48,6 +48,12 @@ class Viewport(
     /** World rectangle currently on screen. */
     fun visibleWorld(): InkRect = InkRect(toWorldX(0f), toWorldY(0f), toWorldX(screenW), toWorldY(screenH))
 
+    /** True when the page's edge on side [dir] (+1 right, -1 left) is on screen, so the view cannot go further that way. */
+    fun edgeVisible(dir: Int): Boolean {
+        val b = bounds ?: return false
+        return if (dir > 0) b.right * scale + offsetX <= screenW + 2f else b.left * scale + offsetX >= -2f
+    }
+
     fun onScreenSize(w: Float, h: Float) {
         val first = screenW == 0f
         screenW = w

@@ -3,6 +3,7 @@ package app.wanki.input
 import android.annotation.SuppressLint
 import android.graphics.Matrix
 import android.os.Build
+import android.os.SystemClock
 import android.util.Log
 import android.view.MotionEvent
 import android.view.View
@@ -16,7 +17,12 @@ import app.wanki.ink.InkBrush
 import app.wanki.ink.InkPoint
 import app.wanki.ink.InkStroke
 import app.wanki.ink.InkTool
+import app.wanki.ink.StraightLine
+import kotlin.math.abs
 import kotlin.math.hypot
+
+/** A straight line held with the pen, in world coordinates, drawn instead of the stroke while the pen is still down. */
+internal data class LinePreview(val from: androidx.compose.ui.geometry.Offset, val to: androidx.compose.ui.geometry.Offset, val brush: InkBrush)
 
 /**
  * All canvas input in one place, no mode buttons:
@@ -26,7 +32,10 @@ import kotlin.math.hypot
  *   by the system; otherwise it pans. Review answer cells keep the 5-second stylus window;
  * - two fingers always pan and zoom (when the canvas has a [viewport]);
  * - with a [viewport], a quick two-finger tap undoes and a three-finger tap redoes ([TapGestures]);
- * - one eraser drag is one undo step ([InkLayer.beginErase]).
+ * - one eraser drag is one undo step ([InkLayer.beginErase]);
+ * - holding the pen still for [StraightLine.HOLD_MS] at the end of a stroke straightens it into a line (canvases with a
+ *   [viewport]); the line follows the pen until it lifts;
+ * - a two-finger fling past 30 % of the width, with the page edge in view, calls [onPageSwipe] (pages of notebooks).
  */
 internal class InkInputHandler(
     private val view: InProgressStrokesView,
@@ -48,6 +57,10 @@ internal class InkInputHandler(
     var onStrokeFinished: () -> Unit = {}
     /** A pan or pinch ended (the viewport changed). */
     var onViewGestureEnd: () -> Unit = {}
+    /** A two-finger fling at the page edge: +1 next page, -1 previous. Null where pages do not turn. */
+    var onPageSwipe: ((Int) -> Unit)? = null
+    /** The straight line being held (world coordinates and brush), null when no hold is active. */
+    var onLinePreview: (LinePreview?) -> Unit = {}
 
     /**
      * Points are captured here, straight from the touch events, so the stroke model does not
@@ -59,6 +72,11 @@ internal class InkInputHandler(
     }
 
     private var capture: Capture? = null
+
+    // straight line: after a hold the in-progress stroke is cancelled and this line follows the pen
+    private var lineEnd: InkPoint? = null
+    private val density get() = view.resources.displayMetrics.density
+    private val holdCheck = Runnable { checkHold() }
 
     private var drawPointer = -1
     private var drawStroke: InProgressStrokeId? = null
@@ -77,6 +95,16 @@ internal class InkInputHandler(
     private var lastSpan = 0f
     private var lastFx = 0f
     private var lastFy = 0f
+
+    // page fling: where the two-finger gesture started
+    private var startFx = 0f
+    private var startFy = 0f
+    private var startSpan = 0f
+    private var startScale = 1f
+    private var startOx = 0f
+    private var startOy = 0f
+    private var startEdgeNext = false
+    private var startEdgePrev = false
 
     private val taps by lazy { TapGestures(slopPx = ViewConfiguration.get(view.context).scaledTouchSlop.toFloat()) }
 
@@ -98,7 +126,7 @@ internal class InkInputHandler(
                 val tap = trackTapUp(event)
                 onUp(event)
                 // a pen stroke, eraser drag or move still open: undo now would race it, drop the tap
-                val busy = drawStroke != null || erasePointer >= 0 || movePointer >= 0
+                val busy = drawStroke != null || lineEnd != null || erasePointer >= 0 || movePointer >= 0
                 if (tap != null && enabled && !readOnly && !busy) layer?.let { if (tap == Tap.TWO_FINGER) it.undo() else it.redo() }
             }
             MotionEvent.ACTION_CANCEL -> { taps.reset(); cancelAll(event) }
@@ -166,13 +194,13 @@ internal class InkInputHandler(
         val nav = viewport != null
         if (nav && fingerCount(e) >= 2) {
             // second finger: this is a pinch/pan, not writing
-            if (drawStroke != null && isFingerPointer(e, drawPointer)) cancelDraw(e)
+            if ((drawStroke != null || lineEnd != null) && isFingerPointer(e, drawPointer)) cancelDraw(e)
             cancelFingerErase(e)
             cancelFingerSelect(e)
             startPinch(e)
             return
         }
-        if (drawStroke != null || erasePointer >= 0 || pinching) return
+        if (drawStroke != null || lineEnd != null || erasePointer >= 0 || pinching) return
         val fingerDraws = !readOnly && if (canvasRules) StylusTracker.fingerDraws() && !isPalm(e, i) && !isCanceled(e)
         else !StylusTracker.isStylusActive(e.eventTime)
         if (!fingerDraws) {
@@ -210,6 +238,10 @@ internal class InkInputHandler(
             val i = e.findPointerIndex(erasePointer)
             if (i >= 0) erase(e.getX(i), e.getY(i))
         }
+        lineEnd?.let {
+            val di = e.findPointerIndex(drawPointer)
+            if (di >= 0) moveLine(e, di)
+        }
         drawStroke?.let { s ->
             val di = e.findPointerIndex(drawPointer)
             if (canvasRules && di >= 0 && isFinger(e.getToolType(di)) && isPalm(e, di)) {
@@ -220,6 +252,7 @@ internal class InkInputHandler(
             if (di >= 0) {
                 capture?.let { addPoints(it, e, drawPointer, historical = true) }
                 view.addToStroke(e, drawPointer, s)
+                scheduleHold()
             }
         }
         val vp = viewport ?: return
@@ -252,6 +285,10 @@ internal class InkInputHandler(
             }
         }
         if (id == erasePointer) finishErase()
+        if (id == drawPointer && lineEnd != null) {
+            if (isCanceled(e)) clearLine() else commitLine(e)
+            drawPointer = -1
+        }
         if (id == drawPointer) {
             drawStroke?.let { s ->
                 if (isCanceled(e)) {
@@ -267,11 +304,16 @@ internal class InkInputHandler(
             drawPointer = -1
         }
         if (id == panPointer) { panPointer = -1; onViewGestureEnd() }
-        if (pinching && (e.actionMasked == MotionEvent.ACTION_UP || e.pointerCount - 1 < 2)) endNavigation()
+        if (pinching && (e.actionMasked == MotionEvent.ACTION_UP || e.pointerCount - 1 < 2)) {
+            val swipe = if (e.actionMasked == MotionEvent.ACTION_CANCEL) 0 else pageSwipe()
+            endNavigation(keepView = swipe != 0)
+            if (swipe != 0) onPageSwipe?.invoke(swipe)
+        }
     }
 
     private fun cancelAll(e: MotionEvent) {
         cancelDraw(e)
+        drawPointer = -1
         if (movePointer >= 0) { movePointer = -1; layer?.endMove() }
         lassoPointer = -1
         layer?.lasso = null
@@ -315,10 +357,70 @@ internal class InkInputHandler(
         drawStroke = strokeId
         drawPointer = pointerId
         onStrokeStarted()
+        scheduleHold()
+    }
+
+    /** A still pen sends no moves, so the hold is checked by a timer that every move pushes back. */
+    private fun scheduleHold() {
+        if (viewport == null || readOnly) return
+        view.removeCallbacks(holdCheck)
+        view.postDelayed(holdCheck, StraightLine.HOLD_MS)
+    }
+
+    private fun checkHold() {
+        val s = drawStroke ?: return
+        val c = capture ?: return
+        val vp = viewport ?: return
+        val base = layer?.timeBaseUptime?.takeIf { it >= 0 } ?: return
+        val scale = vp.scale
+        val now = SystemClock.uptimeMillis() - base
+        if (!StraightLine.isHeld(c.points, now, SLOP_DP * density / scale, MIN_LENGTH_DP * density / scale)) return
+        view.cancelStroke(s)
+        drawStroke = null
+        lineEnd = c.points.last()
+        showLine()
+    }
+
+    private fun moveLine(e: MotionEvent, i: Int) {
+        val c = capture ?: return
+        val base = layer?.timeBaseUptime?.takeIf { it >= 0 } ?: e.eventTime
+        val w = world(e.getX(i), e.getY(i))
+        lineEnd = InkPoint(w.x, w.y, (e.eventTime - base).coerceAtLeast(c.points.last().timeMs))
+        showLine()
+    }
+
+    private fun showLine() {
+        val c = capture ?: return
+        val end = lineEnd ?: return
+        val a = c.points.first()
+        onLinePreview(LinePreview(androidx.compose.ui.geometry.Offset(a.x, a.y), androidx.compose.ui.geometry.Offset(end.x, end.y), c.brush))
+    }
+
+    private fun clearLine() {
+        if (lineEnd == null) return
+        lineEnd = null
+        onLinePreview(null)
+    }
+
+    /** The pen lifted after a hold: the line replaces the stroke, as one undo step. */
+    private fun commitLine(e: MotionEvent) {
+        val c = capture
+        val end = lineEnd
+        val l = layer
+        val i = e.findPointerIndex(drawPointer)
+        if (i >= 0) moveLine(e, i)
+        val last = lineEnd ?: end
+        clearLine()
+        capture = null
+        if (c == null || last == null || l == null || c.points.isEmpty()) return
+        l.add(StraightLine.line(InkStroke(c.points.toList(), c.tool, c.brush), last))
+        onStrokeFinished()
     }
 
     private fun cancelDraw(e: MotionEvent) {
         drawStroke?.let { view.cancelStroke(it, e) }
+        clearLine()
+        view.removeCallbacks(holdCheck)
         capture = null
         drawStroke = null
         drawPointer = -1
@@ -384,14 +486,36 @@ internal class InkInputHandler(
         viewport?.pinching = true
         val (fx, fy, span) = pinchGeometry(e)
         lastFx = fx; lastFy = fy; lastSpan = span
+        startFx = fx; startFy = fy; startSpan = span
+        viewport?.let {
+            startScale = it.scale; startOx = it.offsetX; startOy = it.offsetY
+            startEdgeNext = it.edgeVisible(1); startEdgePrev = it.edgeVisible(-1)
+        }
     }
 
-    private fun endNavigation() {
+    /**
+     * +1 / -1 when the finished two-finger gesture was a horizontal fling over 30 % of the width without
+     * zooming and with the page edge in that direction in view (the page fits); the view is put back then.
+     */
+    private fun pageSwipe(): Int {
+        if (onPageSwipe == null || !enabled) return 0
+        val vp = viewport ?: return 0
+        val dx = lastFx - startFx
+        val dy = lastFy - startFy
+        val zoomed = startSpan < 1f || lastSpan / startSpan !in 0.8f..1.25f
+        if (zoomed || abs(dx) < 0.3f * view.width || abs(dx) < 2 * abs(dy)) return 0
+        val dir = if (dx < 0) 1 else -1
+        if (!(if (dir > 0) startEdgeNext else startEdgePrev)) return 0
+        vp.restore(startScale, startOx, startOy)
+        return dir
+    }
+
+    private fun endNavigation(keepView: Boolean = false) {
         val moved = pinching || panPointer >= 0
         pinching = false
         viewport?.pinching = false
         panPointer = -1
-        if (moved) onViewGestureEnd()
+        if (moved && !keepView) onViewGestureEnd()
     }
 
     private fun pinchGeometry(e: MotionEvent): Triple<Float, Float, Float> {
@@ -470,5 +594,7 @@ internal class InkInputHandler(
 
     private companion object {
         const val TAG = "WankiInk"
+        const val SLOP_DP = 6f
+        const val MIN_LENGTH_DP = 24f
     }
 }

@@ -239,6 +239,8 @@ fun NotebookScreen(notebookId: String, initialPageId: String?, onBack: () -> Uni
                 state.paperAction(), state.fitAction(),
             ),
             pageBar = { PageNavBar(i, pages.size, { index = it.coerceIn(0, pages.lastIndex) }) },
+            // a fling past the last (or before the first) page does nothing: pages are added with «+»
+            onPageSwipe = { dir -> index = (i + dir).coerceIn(0, pages.lastIndex) },
         )
         if (showSettings) NotebookSettingsDialog(nb, onDismiss = { showSettings = false }) { title, lang, template, size, landscape ->
             showSettings = false
