@@ -144,7 +144,11 @@ class InkLayer(initial: List<InkStroke> = emptyList()) {
     fun renderable(s: InkStroke): Stroke? = render.getOrPut(s) { StrokeConversion.toInk(s) }
     fun bounds(s: InkStroke): InkRect? = boundsCache.getOrPut(s) { s.bounds() }
 
-    /** Strokes whose bounds may touch [rect] (grid cells, a superset), in layer order. */
+    /**
+     * Strokes whose bounds may touch [rect] (grid cells, a superset), in layer order.
+     * Main thread only: it reads the Compose-state stroke list and the [SpatialGrid], which the editing
+     * functions mutate on the main thread without locking. Off-thread drawing must work from a copy.
+     */
     fun strokesIn(rect: InkRect): List<InkStroke> {
         val found = grid.query(rect)
         if (found.isEmpty()) return emptyList()

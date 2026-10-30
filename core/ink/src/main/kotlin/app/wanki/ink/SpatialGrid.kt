@@ -5,7 +5,7 @@ import kotlin.math.floor
 
 /**
  * Uniform grid index over rectangles. Items are tracked by identity, so equal items are separate
- * entries. A rect covering more than [MAX_CELLS] cells goes to an oversize list returned by every query.
+ * entries. Not thread-safe: use from one thread (InkLayer uses it on the main thread). A rect covering more than [MAX_CELLS] cells goes to an oversize list returned by every query.
  */
 class SpatialGrid<T : Any>(val cellSize: Float = 256f) {
     private val cells = HashMap<Long, MutableList<T>>()

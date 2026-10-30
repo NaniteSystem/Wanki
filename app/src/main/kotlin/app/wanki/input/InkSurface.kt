@@ -31,6 +31,8 @@ fun InkSurface(
     modifier: Modifier = Modifier,
     viewport: Viewport? = null,
     enabled: Boolean = true,
+    /** Pan and zoom still work, drawing, erasing and selecting do not. */
+    readOnly: Boolean = false,
     showInk: Boolean = true,
     gestures: Boolean = false,
     onStrokeStarted: () -> Unit = {},
@@ -89,6 +91,7 @@ fun InkSurface(
                     it.viewport = viewport
                     it.tool = tool
                     it.enabled = enabled
+                    it.readOnly = readOnly
                     it.gestures = gestures
                     it.onStrokeStarted = { started() }
                     it.onStrokeFinished = { finished() }

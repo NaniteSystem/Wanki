@@ -35,6 +35,9 @@ internal class InkInputHandler(
     var viewport: Viewport? = null
     var tool: ToolSelection = ToolSelection()
     var enabled: Boolean = true
+
+    /** Navigation (pan, pinch) only: no drawing, erasing, selecting or tap undo/redo. */
+    var readOnly: Boolean = false
     /** Pen gestures (scratch-out to erase). Off where every stroke is an answer (review cells). */
     var gestures: Boolean = false
     var eraserRadiusPx: Float = 22f
@@ -91,7 +94,7 @@ internal class InkInputHandler(
                 onUp(event)
                 // a pen stroke, eraser drag or move still open: undo now would race it, drop the tap
                 val busy = drawStroke != null || erasePointer >= 0 || movePointer >= 0
-                if (tap != null && enabled && !busy) layer?.let { if (tap == Tap.TWO_FINGER) it.undo() else it.redo() }
+                if (tap != null && enabled && !readOnly && !busy) layer?.let { if (tap == Tap.TWO_FINGER) it.undo() else it.redo() }
             }
             MotionEvent.ACTION_CANCEL -> { taps.reset(); cancelAll(event) }
         }
@@ -138,6 +141,7 @@ internal class InkInputHandler(
 
         val stylusLike = type == MotionEvent.TOOL_TYPE_STYLUS || type == MotionEvent.TOOL_TYPE_ERASER || type == MotionEvent.TOOL_TYPE_MOUSE
         if (stylusLike) {
+            if (readOnly) return
             // the pen wins over a finger stroke or gesture that was probably the palm
             cancelDraw(e)
             cancelFingerErase(e)
@@ -164,7 +168,7 @@ internal class InkInputHandler(
             return
         }
         if (drawStroke != null || erasePointer >= 0 || pinching) return
-        val fingerDraws = if (canvasRules) StylusTracker.fingerDraws() && !isPalm(e, i) && !isCanceled(e)
+        val fingerDraws = !readOnly && if (canvasRules) StylusTracker.fingerDraws() && !isPalm(e, i) && !isCanceled(e)
         else !StylusTracker.isStylusActive(e.eventTime)
         if (!fingerDraws) {
             if (nav) startPan(id, e.getX(i), e.getY(i))

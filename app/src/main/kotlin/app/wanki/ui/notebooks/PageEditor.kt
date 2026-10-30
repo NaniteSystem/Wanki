@@ -1,6 +1,7 @@
 package app.wanki.ui.notebooks
 
 import android.util.Log
+import android.widget.Toast
 import app.wanki.ui.common.LocalUndo
 import app.wanki.ui.common.listAction
 import app.wanki.ui.common.ui
@@ -53,6 +54,7 @@ import app.wanki.input.ToolSelection
 import app.wanki.input.Viewport
 import app.wanki.recognition.ModelStatus
 import app.wanki.ui.common.InkToolbar
+import app.wanki.ui.common.ErrorSnackbar
 import app.wanki.ui.common.SaveErrorSnackbar
 import app.wanki.ui.common.SerialSaver
 import app.wanki.ui.common.SelectionBar
@@ -150,6 +152,24 @@ class PageEditorState(
     var readOnly by mutableStateOf(false)
         private set
     private var viewJob: Job? = null
+
+    /** The last zoom/pan save failed; shown in a snackbar until a later view save succeeds. */
+    var viewError by mutableStateOf<Throwable?>(null)
+        private set
+
+    /** Retry from the snackbar: saves the view now. */
+    fun retryViewSave() {
+        graph.appScope.launch {
+            try {
+                saveView()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e("Wanki", "page ${page.id}: view not saved", e)
+                viewError = e
+            }
+        }
+    }
     private var recognizedVersion = -1
 
     val template: PageTemplate get() = runCatching { PageTemplate.valueOf(page.template) }.getOrDefault(PageTemplate.BLANK)
@@ -217,6 +237,7 @@ class PageEditorState(
                 throw e
             } catch (e: Exception) {
                 Log.e("Wanki", "page ${page.id}: view not saved", e)
+                viewError = e
             }
         }
     }
@@ -228,6 +249,7 @@ class PageEditorState(
         if (v == savedView) return
         graph.repository.setPageView(page.id, v.first, v.second, v.third)
         savedView = v
+        viewError = null
     }
 
     suspend fun setTemplate(t: PageTemplate) {
@@ -288,7 +310,10 @@ fun PageEditor(
                 // a change from the last frame may not have reached the effect above yet
                 val id = state.page.id
                 state.saver.finalSave(context.applicationContext, "page $id")
-                runCatching { state.saveView() }.onFailure { Log.e("Wanki", "page $id: view not saved", it) }
+                runCatching { state.saveView() }.onFailure {
+                    Log.e("Wanki", "page $id: view not saved", it)
+                    Toast.makeText(context.applicationContext, "Не удалось сохранить вид страницы", Toast.LENGTH_LONG).show()
+                }
                 runCatching { state.recognizeIfDirty() }.onFailure { Log.e("Wanki", "page $id: recognition failed", it) }
             }
         }
@@ -318,7 +343,8 @@ fun PageEditor(
                     layer = state.layer,
                     tool = state.tool,
                     viewport = state.viewport,
-                    enabled = state.loaded && !state.readOnly,
+                    enabled = state.loaded,
+                    readOnly = state.readOnly,
                     gestures = true,
                     onViewGestureEnd = state::onViewGestureEnd,
                     modifier = Modifier.weight(1f).fillMaxSize().testTag("page-canvas"),
@@ -336,6 +362,7 @@ fun PageEditor(
             pageBar()
         }
         SaveErrorSnackbar(state.saver, Modifier.align(Alignment.BottomCenter))
+        ErrorSnackbar(state.viewError, "Не удалось сохранить вид страницы", onRetry = state::retryViewSave, modifier = Modifier.align(Alignment.BottomCenter))
         if (state.showText && !wide) {
             ModalBottomSheet(
                 onDismissRequest = { state.showText = false },

@@ -72,4 +72,31 @@ class PageEditorStateTest {
         withContext(Dispatchers.Default) { delay(1200) }
         assertEquals(scale, graph.db.notebooks().pages(state.page.notebookId).first().viewScale)
     }
+
+    @Test
+    fun saveDuringEraseDragThenCancelStoresRestoredStrokes() = runBlocking(Dispatchers.Main.immediate) {
+        val state = newState()
+        state.load()
+        val far = InkStroke(listOf(InkPoint(500f, 500f, 0), InkPoint(540f, 560f, 20)), brush = InkBrush(size = 8f, color = 0xFF000000.toInt()))
+        state.layer.add(stroke())
+        state.layer.add(far)
+        state.saver.request()
+        state.saver.flush()
+        assertEquals(2, graph.repository.loadInk(state.page.id).size)
+
+        state.layer.beginErase()
+        assertTrue(state.layer.eraseAt(10f, 10f, 6f))
+        assertEquals(1, state.layer.strokes.size)
+        state.saver.request() // a save mid-drag stores the half-erased state
+        state.saver.flush()
+        assertEquals(1, graph.repository.loadInk(state.page.id).size)
+
+        state.layer.cancelErase()
+        assertEquals(2, state.layer.strokes.size)
+        state.saver.request()
+        state.saver.flush()
+        val stored = graph.repository.loadInk(state.page.id)
+        assertEquals(2, stored.size)
+        assertEquals(state.layer.strokes.map { it.points }, stored.map { it.points })
+    }
 }
