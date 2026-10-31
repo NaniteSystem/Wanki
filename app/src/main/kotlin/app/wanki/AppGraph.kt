@@ -9,6 +9,7 @@ import app.wanki.data.Repository
 import app.wanki.data.Settings
 import app.wanki.data.TextRepository
 import app.wanki.data.WankiDatabase
+import app.wanki.export.PdfExporter
 import app.wanki.media.MediaStore
 import app.wanki.media.VoiceRecorder
 import app.wanki.recognition.RecognizerPool
@@ -81,6 +82,10 @@ class WankiApp : Application() {
             }
         }
         graph.appScope.launch { runCatching { graph.backup.autoBackupIfDue() } }
+        // shared PDFs are not needed after a day
+        graph.appScope.launch(Dispatchers.IO) {
+            runCatching { PdfExporter.clearOld(this@WankiApp) }.onFailure { android.util.Log.e("Wanki", "old exports not cleared", it) }
+        }
     }
 }
 

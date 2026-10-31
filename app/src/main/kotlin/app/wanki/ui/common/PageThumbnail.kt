@@ -33,6 +33,13 @@ import app.wanki.data.PageTemplate
 import app.wanki.graph
 import app.wanki.ink.InkStroke
 import app.wanki.input.InkRaster
+import app.wanki.input.PageBackgrounds
+import app.wanki.input.PageObject
+import app.wanki.input.PictureState
+import app.wanki.input.drawPageObject
+import app.wanki.input.toModelOrNull
+import app.wanki.data.PageObjectKind
+import android.graphics.Bitmap
 import android.util.Log
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.semantics.contentDescription
@@ -45,24 +52,39 @@ import androidx.compose.runtime.collectAsState
 import kotlin.math.roundToInt
 
 private const val THUMB_LONG_SIDE = 340
+private const val THUMB_PICTURE_SIDE = 256
 private val cache = ThumbnailCache<ImageBitmap>(maxEntries = 32)
 
 /**
- * A page as a small picture: paper, template and strokes scaled into the box (aspect 1000:1414, landscape
+ * A page as a small picture: paper, template, background, objects and strokes scaled into the box (aspect 1000:1414, landscape
  * 1414:1000). An [PageSize.ENDLESS] page shows its top 1000 × 1414. Plain paper shows while it renders; the bitmap is
  * cached by page id and `updatedAt`.
  */
 @Composable
 fun PageThumbnail(page: PageEntity, modifier: Modifier = Modifier, pageSize: PageSize = PageSize.A4) {
-    val repository = LocalContext.current.graph.repository
+    val graph = LocalContext.current.graph
+    val repository = graph.repository
     val key = page.id + (if (pageSize == PageSize.ENDLESS) "/e" else if (page.landscape) "/l" else "")
     var bitmap by remember(key, page.updatedAt) { mutableStateOf(cache.get(key, page.updatedAt)) }
     LaunchedEffect(key, page.updatedAt) {
         if (bitmap != null) return@LaunchedEffect
         // a broken page keeps plain paper: one card must not take the list down
         try {
-            val rendered = withContext(Dispatchers.Default) {
-                renderThumbnail(PageTemplate.valueOf(page.template), page.landscape, repository.loadInk(page.id), pageSize)
+            val rendered = withContext(Dispatchers.IO) {
+                val strokes = repository.loadInk(page.id)
+                val objects = repository.pageObjects(page.id).mapNotNull { it.toModelOrNull() }.sortedWith(PageObject.ORDER)
+                val background = page.backgroundMedia?.let { PageBackgrounds.render(graph.media, it, page.backgroundPage, THUMB_LONG_SIDE) }
+                val pictures = objects.mapNotNull { o -> o.media?.takeIf { o.kind == PageObjectKind.IMAGE } }.distinct()
+                    .associateWith { runCatching { graph.media.bitmap(it, THUMB_PICTURE_SIDE) }.getOrNull() }
+                try {
+                    withContext(Dispatchers.Default) {
+                        renderThumbnail(PageTemplate.valueOf(page.template), page.landscape, strokes, pageSize, objects, background, pictures)
+                    }
+                } finally {
+                    // drawn into the thumbnail: no longer needed
+                    background?.recycle()
+                    pictures.values.forEach { it?.recycle() }
+                }
             }
             cache.put(key, page.updatedAt, rendered)
             bitmap = rendered
@@ -83,15 +105,30 @@ fun PageThumbnail(page: PageEntity, modifier: Modifier = Modifier, pageSize: Pag
 /** A hairline stroke would vanish at thumbnail scale: keep it at least about a pixel wide in the bitmap. */
 private const val MIN_STROKE_PX = 1.2f
 
-/** Draws the page with [drawPage] and the strokes with the editor's stroke renderer into a bitmap. */
-internal fun renderThumbnail(template: PageTemplate, landscape: Boolean, strokes: List<InkStroke>, pageSize: PageSize = PageSize.A4): ImageBitmap {
+/**
+ * Draws the page with [drawPage], its [background], [objects] (pictures from [pictures] by media name, a placeholder
+ * where missing) and the strokes with the editor's stroke renderer into a bitmap, in the screen's order.
+ */
+internal fun renderThumbnail(
+    template: PageTemplate, landscape: Boolean, strokes: List<InkStroke>, pageSize: PageSize = PageSize.A4,
+    objects: List<PageObject> = emptyList(), background: Bitmap? = null, pictures: Map<String, Bitmap?> = emptyMap(),
+): ImageBitmap {
     // an endless page is cut at the top 1000 × 1414 (contentBottom 0)
     val page = PageGeometry.size(landscape, pageSize)
     val scale = THUMB_LONG_SIDE / maxOf(page.width, page.height)
     val image = ImageBitmap((page.width * scale).roundToInt(), (page.height * scale).roundToInt())
     val canvas = ComposeCanvas(image)
     CanvasDrawScope().draw(Density(1f), LayoutDirection.Ltr, canvas, androidx.compose.ui.geometry.Size(image.width.toFloat(), image.height.toFloat())) {
-        withTransform({ scale(scale, scale, pivot = Offset.Zero) }) { drawPage(template, landscape, pageSize) }
+        withTransform({ scale(scale, scale, pivot = Offset.Zero) }) {
+            drawPage(template, landscape, pageSize)
+            drawIntoCanvas { c ->
+                background?.let { PageBackgrounds.draw(c.nativeCanvas, it, PageBackgrounds.box(landscape, pageSize)) }
+                for (o in objects) {
+                    val picture = o.media?.let { pictures[it] }?.let { PictureState.Ready(it) } ?: PictureState.Missing
+                    drawPageObject(c.nativeCanvas, o, scale, picture)
+                }
+            }
+        }
         if (strokes.isNotEmpty()) drawIntoCanvas { InkRaster.draw(it.nativeCanvas, strokes, scale, 0f, 0f, MIN_STROKE_PX) }
     }
     return image

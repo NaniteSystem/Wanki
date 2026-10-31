@@ -77,6 +77,12 @@ import app.wanki.data.NotebookKind
 import app.wanki.data.PageObjectEntity
 import app.wanki.data.PageObjectKind
 import app.wanki.input.Viewport
+import app.wanki.input.PageBackgrounds
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.nativeCanvas
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
 import app.wanki.recognition.ModelStatus
 import app.wanki.ui.common.InkToolbar
 import app.wanki.ui.common.ErrorSnackbar
@@ -680,6 +686,34 @@ class PageEditorState(
         selectTool(tool.copy(kind = ToolKind.LASSO))
     }
 
+    /** The page's background picture or PDF page as rendered for the current zoom; null while it loads or when none. */
+    var background by mutableStateOf<android.graphics.Bitmap?>(null)
+        private set
+
+    /** The page has a background that could not be rendered: the paper shows with «Фон не загрузился». */
+    var backgroundFailed by mutableStateOf(false)
+        private set
+
+    /** Renders the background again when the zoom passes a power of two; a finer render that fails keeps the coarser one. */
+    suspend fun followBackground() {
+        val name = page.backgroundMedia
+        if (name == null || infinite) {
+            background = null
+            backgroundFailed = false
+            return
+        }
+        val pdfPage = page.backgroundPage
+        val box = PageBackgrounds.box(page.landscape, pageSize)
+        val long = maxOf(box.width, box.height)
+        snapshotFlow { PageBackgrounds.sideFor(long, viewport.scale) }.distinctUntilChanged().collectLatest { side ->
+            val b = PageBackgrounds.bitmap(graph.media, name, pdfPage, side)
+            if (b != null) {
+                background = b
+                backgroundFailed = false
+            } else if (background == null) backgroundFailed = true
+        }
+    }
+
     /** Strokes mostly past the edge of the (portrait) sheet, e.g. after the page was turned. */
     fun offPageCount(): Int = if (infinite || endless) 0 else bounds.let { layer.outside(it).size + layer.objectsOutside(it).size }
 
@@ -739,6 +773,7 @@ fun PageEditor(
 
     LaunchedEffect(state) { ui { state.load() } }
     LaunchedEffect(state, state.loaded) { if (state.loaded) ui { state.showHighlight() } }
+    LaunchedEffect(state, state.page.backgroundMedia, state.page.backgroundPage, state.page.landscape, state.pageSize) { ui { state.followBackground() } }
     // an endless sheet grows when a stroke or edit ends (and follows a changed paper size)
     LaunchedEffect(state.layer.version, state.layer.strokesRev, state.layer.objectsRev, state.pageSize, state.loaded) {
         if (state.loaded) state.refreshBounds()
@@ -814,10 +849,29 @@ fun PageEditor(
                     modifier = Modifier.fillMaxSize().testTag("page-canvas"),
                     background = {
                         if (state.infinite) drawBoard(state.viewport.visibleWorld(), state.viewport.scale)
-                        else drawPage(state.template, state.page.landscape, state.pageSize, state.contentBottom, state.viewport.visibleWorld())
+                        else {
+                            drawPage(state.template, state.page.landscape, state.pageSize, state.contentBottom, state.viewport.visibleWorld())
+                            state.background?.let { b ->
+                                drawIntoCanvas { PageBackgrounds.draw(it.nativeCanvas, b, PageBackgrounds.box(state.page.landscape, state.pageSize)) }
+                            }
+                        }
                     },
                 )
                 HighlightBoxes(state)
+                if (state.backgroundFailed) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        shape = MaterialTheme.shapes.small,
+                        modifier = Modifier.align(Alignment.TopStart).padding(8.dp),
+                    ) {
+                        Text(
+                            "Фон не загрузился",
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            style = MaterialTheme.typography.labelLarge,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp).testTag("background-failed"),
+                        )
+                    }
+                }
                 }
                 if (state.showText && wide) {
                     Surface(tonalElevation = 1.dp, modifier = Modifier.width(280.dp).fillMaxSize()) {

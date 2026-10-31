@@ -44,6 +44,7 @@ import app.wanki.ui.common.HeaderAction
 import app.wanki.ui.common.LocalUndo
 import app.wanki.ui.common.ScreenHeader
 import app.wanki.ui.notebooks.PageEditor
+import app.wanki.ui.notebooks.ExportDialog
 import app.wanki.ui.notebooks.rememberPageUi
 import app.wanki.ui.notebooks.fitAction
 import app.wanki.ui.notebooks.paperAction
@@ -160,6 +161,7 @@ fun DiaryDayScreen(epochDay: Long, onBack: () -> Unit) {
     val pageUi = rememberPageUi()
     val undo = LocalUndo.current
     val state = remember(page.id) { PageEditorState(graph, diary, page, infinite = false, ui = pageUi) }
+    var exporting by remember { mutableStateOf(false) }
     PageEditor(
         state,
         title = "${date.dayOfMonth} ${date.month.getDisplayName(TextStyle.FULL, ru)} ${date.year}",
@@ -168,10 +170,17 @@ fun DiaryDayScreen(epochDay: Long, onBack: () -> Unit) {
         subtitle = date.dayOfWeek.getDisplayName(TextStyle.FULL, ru).replaceFirstChar { it.uppercase() },
         menu = listOf(
             state.paperAction(), state.fitAction(), state.textAction(),
+            HeaderAction(R.drawable.ic_picture_as_pdf, "Экспорт в PDF", "menu-export-pdf") { exporting = true },
             HeaderAction(R.drawable.ic_delete, "Удалить запись", "menu-delete-day") {
                 undo.deleted(TrashKind.DIARY_DAY, page.id)
                 onBack()
             },
         ),
+    )
+    // a diary day is one page: nothing to choose
+    if (exporting) ExportDialog(
+        diary, page, allPages = null,
+        beforeExport = { state.saver.request(); state.saver.flush() },
+        onDismiss = { exporting = false },
     )
 }

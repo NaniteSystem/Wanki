@@ -68,6 +68,16 @@ import app.wanki.ui.common.ScreenHeader
 import app.wanki.ui.common.label
 import app.wanki.ui.common.languageName
 import kotlinx.coroutines.delay
+import android.content.ActivityNotFoundException
+import android.net.Uri
+import androidx.activity.compose.LocalActivityResultRegistryOwner
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.ActivityResultRegistryOwner
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.CompositionLocalProvider
+import app.wanki.importer.ImportResult
+import app.wanki.importer.PageImporter
+import app.wanki.importer.message
 import kotlinx.coroutines.launch
 
 @Composable
@@ -183,6 +193,25 @@ fun NotebooksScreen(
     }
 }
 
+/**
+ * A launcher of the system's multiple-documents picker for the given MIME types, or null where results cannot be
+ * received. Tests answer it through [PicturePickers.registry].
+ */
+@Composable
+private fun rememberDocumentsPicker(onPicked: (List<Uri>) -> Unit): ((Array<String>) -> Unit)? {
+    val owner = PicturePickers.registry?.let { r ->
+        remember(r) { object : ActivityResultRegistryOwner { override val activityResultRegistry = r } }
+    } ?: LocalActivityResultRegistryOwner.current ?: return null
+    var launch: ((Array<String>) -> Unit)? = null
+    CompositionLocalProvider(LocalActivityResultRegistryOwner provides owner) {
+        val launcher = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+            if (uris.isNotEmpty()) onPicked(uris)
+        }
+        launch = { types -> launcher.launch(types) }
+    }
+    return launch
+}
+
 private fun snippet(text: String, query: String): String {
     val i = text.indexOf(query, ignoreCase = true)
     if (i < 0) return text.take(120)
@@ -235,6 +264,26 @@ fun NotebookScreen(
     androidx.compose.runtime.SideEffect { state.notebook = nb }
     fun addPage() = adder.add(pages.size) { graph.repository.addPage(nb) }
     var moving by remember { mutableStateOf(false) }
+    var exporting by remember { mutableStateOf(false) }
+    var importing by remember { mutableStateOf(false) }
+    // the first imported page, shown once it arrives through the flow
+    var jumpTo by remember { mutableStateOf<Int?>(null) }
+    LaunchedEffect(pages, jumpTo) {
+        jumpTo?.let { if (it < pages.size) { index = it; jumpTo = null } }
+    }
+    val appContext = LocalContext.current.applicationContext
+    val pick = rememberDocumentsPicker { uris ->
+        importing = true
+        val after = i
+        graph.appScope.launch {
+            val r = PageImporter(appContext, graph.repository, graph.media).import(uris, nb.id, after)
+            ui {
+                importing = false
+                if (r is ImportResult.Added && r.pages > 0) jumpTo = after + 1
+                undo.say(r.message())
+            }
+        }
+    }
 
     Box(Modifier.fillMaxSize()) {
         PageEditor(
@@ -248,12 +297,28 @@ fun NotebookScreen(
             menu = listOf(
                 HeaderAction(R.drawable.ic_settings, "Настройки тетради", "menu-notebook-settings") { showSettings = true },
                 state.paperAction(), state.fitAction(),
-            ),
+                HeaderAction(R.drawable.ic_picture_as_pdf, "Экспорт в PDF", "menu-export-pdf") { exporting = true },
+            ) + listOfNotNull(pick?.let { p ->
+                HeaderAction(R.drawable.ic_upload_file, "Импорт PDF или картинок", "menu-import") {
+                    try {
+                        p(arrayOf("application/pdf", "image/*"))
+                    } catch (e: ActivityNotFoundException) {
+                        scope.launch { undo.say("Нет приложения для выбора файлов") }
+                    }
+                }
+            }),
             pageBar = { PageNavBar(i, pages.size, { index = it.coerceIn(0, pages.lastIndex) }) },
             // a fling past the last (or before the first) page does nothing: pages are added with «+»
             onPageSwipe = { dir -> index = (i + dir).coerceIn(0, pages.lastIndex) },
             onMoveSelection = { moving = true },
         )
+        if (exporting) ExportDialog(
+            nb, page,
+            allPages = { graph.repository.pages(nb.id) },
+            beforeExport = { state.saver.request(); state.saver.flush() },
+            onDismiss = { exporting = false },
+        )
+        if (importing) ProgressDialog("Добавляю страницы…", "import-progress")
         if (moving) MoveToPageDialog(pages, page.id, onPick = { target ->
             moving = false
             moveSelectionToPage(graph, undo, state, nb, target)
