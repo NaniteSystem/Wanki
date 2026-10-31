@@ -826,7 +826,10 @@ class Repository(private val db: WankiDatabase) {
     ): MovedInk = db.withTransaction {
         val target = notebooks.page(to.id)?.takeIf { !it.deleted } ?: throw IllegalStateException("page ${to.id} is missing")
         val existing = notebooks.ink(to.id)?.let { InkCodec.decode(it.strokes).strokes }.orEmpty()
-        val m = fitInside(strokes, objects.map { it.toModel() }, PageGeometry.bounds(target.landscape))
+        val targetSize = notebooks.get(target.notebookId)?.let { runCatching { PageSize.valueOf(it.pageSize) }.getOrNull() } ?: PageSize.A4
+        // an endless target grows to take what arrives: only the width limits it
+        val lowest = (existing.mapNotNull { it.bounds()?.bottom } + strokes.mapNotNull { it.bounds()?.bottom } + objects.map { it.toModel().bounds().bottom }).maxOrNull() ?: 0f
+        val m = fitInside(strokes, objects.map { it.toModel() }, PageGeometry.bounds(target.landscape, targetSize, lowest))
         val placed = strokes.map { InkCodec.encodeStroke(m.apply(it)) }
         val now = System.currentTimeMillis()
         if (placed.isNotEmpty()) writeInk(target, InkCodec.assemble(existing.map(InkCodec::encodeStroke) + placed), now)

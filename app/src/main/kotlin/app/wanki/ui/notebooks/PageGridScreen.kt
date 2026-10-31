@@ -59,7 +59,9 @@ fun PageGridScreen(notebookId: String, onBack: () -> Unit, onOpen: (pageId: Stri
     val repository = LocalContext.current.graph.repository
     val undo = LocalUndo.current
     val scope = rememberUiScope()
-    val notebook by produceState<String?>(null, notebookId) { value = repository.notebook(notebookId)?.title }
+    val notebookRow by produceState<app.wanki.data.NotebookEntity?>(null, notebookId) { value = repository.notebook(notebookId) }
+    val notebook = notebookRow?.title
+    val pageSize = notebookRow?.let { runCatching { app.wanki.data.PageSize.valueOf(it.pageSize) }.getOrNull() } ?: app.wanki.data.PageSize.A4
     val pages by remember(notebookId) { repository.observePages(notebookId) }.collectAsState(null)
 
     // the order on screen while dragging; the database order replaces it once the move is stored
@@ -116,6 +118,7 @@ fun PageGridScreen(notebookId: String, onBack: () -> Unit, onOpen: (pageId: Stri
                                     .border(if (dragging) 3.dp else 1.dp, if (dragging) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant)
                                     .testTag("page-thumb-$index")
                                     .combinedClickable(onClick = { onOpen(page.id) }, onLongClick = { menu = true }),
+                                pageSize,
                             )
                             ItemMenu(
                                 expanded = menu, onDismiss = { menu = false },

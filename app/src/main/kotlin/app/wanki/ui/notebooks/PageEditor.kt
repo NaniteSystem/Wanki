@@ -51,7 +51,9 @@ import app.wanki.recognition.PageRecognizer
 import app.wanki.recognition.SearchText
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import app.wanki.data.PageSize
 import app.wanki.data.PageTemplate
+import androidx.compose.runtime.mutableFloatStateOf
 import app.wanki.graph
 import app.wanki.ink.InkRect
 import app.wanki.ink.InkStroke
@@ -244,7 +246,7 @@ class PageEditorState(
     var page by mutableStateOf(page)
         private set
     val layer = InkLayer()
-    val viewport = Viewport(minScale = if (infinite) 0.1f else 0.3f, bounds = if (infinite) null else PageGeometry.bounds(page.landscape))
+    val viewport = Viewport(minScale = if (infinite) 0.1f else 0.3f, bounds = if (infinite) null else PageGeometry.bounds(page.landscape, pageSizeOf(notebook)))
     private val section = InkSection.ofNotebookKind(notebook.kind)
 
     /** Saves the ink one save at a time; a failure is kept in [SerialSaver.error] until a save succeeds. */
@@ -330,6 +332,31 @@ class PageEditorState(
     }
     private var recognizedVersion = -1
 
+    /** The notebook's paper size; pages follow it. */
+    val pageSize: PageSize get() = pageSizeOf(notebook)
+
+    /** An endless sheet: grows downward with the content, always portrait. */
+    val endless: Boolean get() = !infinite && pageSize == PageSize.ENDLESS
+
+    /** The lowest painted point of ink and objects of an endless page (0 elsewhere); moves when a gesture ends. */
+    var contentBottom by mutableFloatStateOf(0f)
+        private set
+
+    /** The sheet in world units, following the paper size and (for endless pages) the content. */
+    val bounds: InkRect get() = PageGeometry.bounds(page.landscape, pageSize, contentBottom)
+
+    /** Recomputes [contentBottom] and the viewport limits; called when a gesture or edit ended, never per move. */
+    fun refreshBounds() {
+        if (infinite) return
+        var low = 0f
+        if (endless) {
+            for (s in layer.strokes) layer.bounds(s)?.let { low = maxOf(low, it.bottom + s.brush.size / 2) }
+            for (o in layer.objects) low = maxOf(low, o.bounds().bottom)
+        }
+        if (low != contentBottom) contentBottom = low
+        if (viewport.bounds != bounds) viewport.bounds = bounds
+    }
+
     val template: PageTemplate get() = runCatching { PageTemplate.valueOf(page.template) }.getOrDefault(PageTemplate.BLANK)
 
     /** Model status across the languages this page is recognized with. */
@@ -410,6 +437,9 @@ class PageEditorState(
         savedRev = layer.strokesRev
         // opening a page does not recognise it (a big page would cost the canvas): lines are checked after an edit
         recognizedVersion = layer.version
+        refreshBounds()
+        // a stored view deep down an endless page was clamped to the short sheet before the ink was read
+        savedView?.let { (sc, x, y) -> if (endless && viewport.hasLayout) viewport.restore(sc, x, y) }
         loaded = true
     }
 
@@ -651,21 +681,21 @@ class PageEditorState(
     }
 
     /** Strokes mostly past the edge of the (portrait) sheet, e.g. after the page was turned. */
-    fun offPageCount(): Int = if (infinite) 0 else PageGeometry.bounds(page.landscape).let { layer.outside(it).size + layer.objectsOutside(it).size }
+    fun offPageCount(): Int = if (infinite || endless) 0 else bounds.let { layer.outside(it).size + layer.objectsOutside(it).size }
 
     /** Selects the strokes past the edge, with the lasso ready to move them back. */
     fun selectOffPage(): Int {
-        val n = layer.selectOutside(PageGeometry.bounds(page.landscape))
+        val n = layer.selectOutside(bounds)
         if (n > 0) selectTool(tool.copy(kind = ToolKind.LASSO))
         return n
     }
 
     /** Turns the page; the page re-fits so the whole sheet is in view. */
     suspend fun setLandscape(landscape: Boolean) {
-        if (landscape == page.landscape) return
+        if (landscape == page.landscape || endless) return
         graph.repository.setPageLandscape(page, landscape)
         page = page.copy(landscape = landscape)
-        viewport.bounds = PageGeometry.bounds(landscape)
+        viewport.bounds = bounds
         viewport.fitWidth()
     }
 }
@@ -709,6 +739,10 @@ fun PageEditor(
 
     LaunchedEffect(state) { ui { state.load() } }
     LaunchedEffect(state, state.loaded) { if (state.loaded) ui { state.showHighlight() } }
+    // an endless sheet grows when a stroke or edit ends (and follows a changed paper size)
+    LaunchedEffect(state.layer.version, state.layer.strokesRev, state.layer.objectsRev, state.pageSize, state.loaded) {
+        if (state.loaded) state.refreshBounds()
+    }
     // version only changes when a gesture ends: save each one; recognize after a pause
     LaunchedEffect(state.layer.version, state.loaded) {
         if (!state.loaded) return@LaunchedEffect
@@ -780,7 +814,7 @@ fun PageEditor(
                     modifier = Modifier.fillMaxSize().testTag("page-canvas"),
                     background = {
                         if (state.infinite) drawBoard(state.viewport.visibleWorld(), state.viewport.scale)
-                        else drawPage(state.template, state.page.landscape)
+                        else drawPage(state.template, state.page.landscape, state.pageSize, state.contentBottom, state.viewport.visibleWorld())
                     },
                 )
                 HighlightBoxes(state)
@@ -808,7 +842,7 @@ fun PageEditor(
     if (state.showPaper && !state.infinite) {
         // turning the page to portrait can leave writing past its edge: offer to select it
         var turned by remember { mutableStateOf(false) }
-        val offPage = remember(turned, state.page.landscape, state.layer.strokesRev) { if (turned && !state.page.landscape) state.offPageCount() else 0 }
+        val offPage = remember(turned, state.page.landscape, state.layer.strokesRev) { if (turned && !state.page.landscape && !state.endless) state.offPageCount() else 0 }
         AlertDialog(
             onDismissRequest = { state.showPaper = false },
             title = { Text("Бумага") },
@@ -823,6 +857,7 @@ fun PageEditor(
                             }
                         },
                         { Text("Альбомная страница") },
+                        enabled = !state.endless,
                         modifier = Modifier.heightIn(min = 48.dp).testTag("paper-landscape"),
                     )
                     if (offPage > 0) {
@@ -966,3 +1001,5 @@ private fun importPicture(context: android.content.Context, graph: AppGraph, und
         }
     }
 }
+
+private fun pageSizeOf(notebook: NotebookEntity): PageSize = runCatching { PageSize.valueOf(notebook.pageSize) }.getOrDefault(PageSize.A4)

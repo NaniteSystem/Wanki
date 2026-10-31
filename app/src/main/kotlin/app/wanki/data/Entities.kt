@@ -26,7 +26,7 @@ const val TRASH_DAYS = 30
 
 data class TrashItem(val kind: TrashKind, val id: String, val title: String, val parentTitle: String?, val deletedAt: Long)
 
-enum class PageTemplate { BLANK, LINED, GRID, DOTS, GENKOU, TIANZIGE, WONGOJI, LINED_RTL }
+enum class PageTemplate { BLANK, LINED, GRID, DOTS, GENKOU, TIANZIGE, WONGOJI, LINED_RTL, MIZIGE, GENKOU_VERTICAL, ARABIC, CORNELL }
 
 @Entity(tableName = "decks")
 data class DeckEntity(

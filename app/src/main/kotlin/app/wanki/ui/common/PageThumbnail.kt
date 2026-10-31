@@ -11,6 +11,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -27,6 +28,7 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.LayoutDirection
 import app.wanki.data.PageEntity
+import app.wanki.data.PageSize
 import app.wanki.data.PageTemplate
 import app.wanki.graph
 import app.wanki.ink.InkStroke
@@ -47,19 +49,20 @@ private val cache = ThumbnailCache<ImageBitmap>(maxEntries = 32)
 
 /**
  * A page as a small picture: paper, template and strokes scaled into the box (aspect 1000:1414, landscape
- * 1414:1000). Plain paper shows while it renders; the bitmap is cached by page id and `updatedAt`.
+ * 1414:1000). An [PageSize.ENDLESS] page shows its top 1000 × 1414. Plain paper shows while it renders; the bitmap is
+ * cached by page id and `updatedAt`.
  */
 @Composable
-fun PageThumbnail(page: PageEntity, modifier: Modifier = Modifier) {
+fun PageThumbnail(page: PageEntity, modifier: Modifier = Modifier, pageSize: PageSize = PageSize.A4) {
     val repository = LocalContext.current.graph.repository
-    val key = if (page.landscape) page.id + "/l" else page.id
+    val key = page.id + (if (pageSize == PageSize.ENDLESS) "/e" else if (page.landscape) "/l" else "")
     var bitmap by remember(key, page.updatedAt) { mutableStateOf(cache.get(key, page.updatedAt)) }
     LaunchedEffect(key, page.updatedAt) {
         if (bitmap != null) return@LaunchedEffect
         // a broken page keeps plain paper: one card must not take the list down
         try {
             val rendered = withContext(Dispatchers.Default) {
-                renderThumbnail(PageTemplate.valueOf(page.template), page.landscape, repository.loadInk(page.id))
+                renderThumbnail(PageTemplate.valueOf(page.template), page.landscape, repository.loadInk(page.id), pageSize)
             }
             cache.put(key, page.updatedAt, rendered)
             bitmap = rendered
@@ -69,7 +72,7 @@ fun PageThumbnail(page: PageEntity, modifier: Modifier = Modifier) {
             Log.e("Wanki", "page ${page.id}: thumbnail not rendered", e)
         }
     }
-    val size = PageGeometry.size(page.landscape)
+    val size = PageGeometry.size(page.landscape, pageSize)
     Canvas(modifier.aspectRatio(size.width / size.height).semantics { contentDescription = "Страница" }) {
         val b = bitmap
         if (b == null) drawRect(PaperColor)
@@ -81,13 +84,14 @@ fun PageThumbnail(page: PageEntity, modifier: Modifier = Modifier) {
 private const val MIN_STROKE_PX = 1.2f
 
 /** Draws the page with [drawPage] and the strokes with the editor's stroke renderer into a bitmap. */
-internal fun renderThumbnail(template: PageTemplate, landscape: Boolean, strokes: List<InkStroke>): ImageBitmap {
-    val page = PageGeometry.size(landscape)
+internal fun renderThumbnail(template: PageTemplate, landscape: Boolean, strokes: List<InkStroke>, pageSize: PageSize = PageSize.A4): ImageBitmap {
+    // an endless page is cut at the top 1000 × 1414 (contentBottom 0)
+    val page = PageGeometry.size(landscape, pageSize)
     val scale = THUMB_LONG_SIDE / maxOf(page.width, page.height)
     val image = ImageBitmap((page.width * scale).roundToInt(), (page.height * scale).roundToInt())
     val canvas = ComposeCanvas(image)
     CanvasDrawScope().draw(Density(1f), LayoutDirection.Ltr, canvas, androidx.compose.ui.geometry.Size(image.width.toFloat(), image.height.toFloat())) {
-        withTransform({ scale(scale, scale, pivot = Offset.Zero) }) { drawPage(template, landscape) }
+        withTransform({ scale(scale, scale, pivot = Offset.Zero) }) { drawPage(template, landscape, pageSize) }
         if (strokes.isNotEmpty()) drawIntoCanvas { InkRaster.draw(it.nativeCanvas, strokes, scale, 0f, 0f, MIN_STROKE_PX) }
     }
     return image
@@ -98,8 +102,11 @@ internal fun renderThumbnail(template: PageTemplate, landscape: Boolean, strokes
 fun FirstPageThumbnail(notebookId: String, modifier: Modifier = Modifier, board: Boolean = false, maxHeight: Dp = 170.dp) {
     val repository = LocalContext.current.graph.repository
     val first by remember(notebookId) { repository.observePages(notebookId).map { it.firstOrNull() } }.collectAsState(null)
+    val size by produceState(PageSize.A4, notebookId) {
+        value = repository.notebook(notebookId)?.let { runCatching { PageSize.valueOf(it.pageSize) }.getOrNull() } ?: PageSize.A4
+    }
     Box(modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-        first?.let { if (board) BoardThumbnail(it, Modifier.fillMaxWidth()) else PageThumbnail(it, Modifier.heightIn(max = maxHeight)) }
+        first?.let { if (board) BoardThumbnail(it, Modifier.fillMaxWidth()) else PageThumbnail(it, Modifier.heightIn(max = maxHeight), size) }
     }
 }
 

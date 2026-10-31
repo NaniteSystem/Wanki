@@ -62,13 +62,15 @@ fun NotebookSettingsDialog(
                 Text("Размер страницы", style = MaterialTheme.typography.labelLarge)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     PageSize.entries.forEach { s ->
-                        FilterChip(size == s, { size = s }, { Text(s.name) }, modifier = Modifier.testTag("settings-size-${s.name}"))
+                        FilterChip(size == s, { size = s }, { Text(s.label()) }, modifier = Modifier.testTag("settings-size-${s.name}"))
                     }
                 }
                 Text("Ориентация новых страниц", style = MaterialTheme.typography.labelLarge)
+                // an endless sheet is always portrait
+                val turnable = size != PageSize.ENDLESS
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    FilterChip(!landscape, { landscape = false }, { Text("Книжная") }, modifier = Modifier.testTag("settings-portrait"))
-                    FilterChip(landscape, { landscape = true }, { Text("Альбомная") }, modifier = Modifier.testTag("settings-landscape"))
+                    FilterChip(!landscape || !turnable, { landscape = false }, { Text("Книжная") }, modifier = Modifier.testTag("settings-portrait"))
+                    FilterChip(landscape && turnable, { landscape = true }, { Text("Альбомная") }, enabled = turnable, modifier = Modifier.testTag("settings-landscape"))
                 }
                 Text("Язык записей (для распознавания)", style = MaterialTheme.typography.labelLarge)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -80,7 +82,7 @@ fun NotebookSettingsDialog(
         },
         confirmButton = {
             TextButton(
-                onClick = { onSave(title.trim().ifBlank { initial?.title ?: "Тетрадь" }, lang, template, size, landscape) },
+                onClick = { onSave(title.trim().ifBlank { initial?.title ?: "Тетрадь" }, lang, template, size, landscape && size != PageSize.ENDLESS) },
                 modifier = Modifier.testTag("settings-save"),
             ) { Text(if (initial == null) "Создать" else "Сохранить") }
         },
