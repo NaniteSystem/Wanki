@@ -408,9 +408,8 @@ class PageEditorState(
         }
         savedObjectsRev = layer.objectsRev
         savedRev = layer.strokesRev
-        // not marked as recognised: the first pause after opening re-checks the lines (cheap when none changed) and
-        // retries the ones that failed before
-        recognizedVersion = -1
+        // opening a page does not recognise it (a big page would cost the canvas): lines are checked after an edit
+        recognizedVersion = layer.version
         loaded = true
     }
 

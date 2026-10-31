@@ -102,6 +102,12 @@ class RecognizedLinesTest {
         sh("screencap -p /sdcard/shots-task9/$name.png")
     }
 
+    /** Opening does not recognise: a far-away fourth line is drawn to start the first recognition (4 lines). */
+    private fun trigger() {
+        addStroke(800f, 3)
+        waitCalls(4)
+    }
+
     private fun lines(page: PageEntity) = runBlocking { repo.pageLines(page.id) }
 
     @Test
@@ -109,16 +115,16 @@ class RecognizedLinesTest {
         val title = "Lines changed $stamp"
         val page = threeLines(title)
         open(title)
-        waitCalls(3)
-        rule.waitUntilAtLeastOneExists(hasTestTag("line-2"), 10_000)
+        trigger()
+        rule.waitUntilAtLeastOneExists(hasTestTag("line-3"), 10_000)
         shot("lines-normal")
         fake.calls.clear()
-        addStroke(400f, 3)
+        addStroke(400f, 4)
         waitCalls(1)
         assertEquals(listOf(2), fake.calls.toList())
         try { rule.waitUntil(4_000) { fake.calls.size > 1 } } catch (_: Throwable) {}
         assertEquals(1, fake.calls.size)
-        assertEquals(3, lines(page).size)
+        assertEquals(4, lines(page).size)
     }
 
     @Test
@@ -127,12 +133,12 @@ class RecognizedLinesTest {
         val page = threeLines(title)
         fake.failAt = 2
         open(title)
-        waitCalls(3)
+        trigger()
         rule.waitUntilAtLeastOneExists(hasText("Не удалось распознать строк: 1 — повторю позже"), 10_000)
         rule.onNodeWithTag("line-0").assertExists()
         rule.onNodeWithTag("line-2").assertExists()
         shot("lines-failed")
-        assertEquals(listOf("строка 1", "строка 3"), lines(page).map { it.recognized })
+        assertEquals(listOf("строка 1", "строка 3", "строка 4"), lines(page).map { it.recognized })
     }
 
     @Test
@@ -140,6 +146,7 @@ class RecognizedLinesTest {
         val title = "Lines corrected $stamp"
         val page = threeLines(title)
         open(title)
+        trigger()
         rule.waitUntilAtLeastOneExists(hasTestTag("line-0"), 20_000)
         rule.onNodeWithTag("line-0").performClick()
         rule.onNodeWithTag("line-edit-0").performTextReplacement("исправлено")
@@ -148,7 +155,7 @@ class RecognizedLinesTest {
         try { rule.waitUntilAtLeastOneExists(hasTestTag("line-reset-0"), 10_000) } catch (e: Throwable) { shot("debug-corrected"); throw e }
         shot("lines-corrected")
         fake.calls.clear()
-        addStroke(600f, 3)
+        addStroke(600f, 4)
         waitCalls(1)
         rule.waitUntil(10_000) { lines(page).any { it.lineIndex == 2 && it.recognized == "строка 3" && it.updatedAt > 0 } }
         assertEquals("исправлено", lines(page).first { it.lineIndex == 0 }.shown)
@@ -161,6 +168,7 @@ class RecognizedLinesTest {
         val title = "Lines reset $stamp"
         val page = threeLines(title)
         open(title)
+        trigger()
         rule.waitUntilAtLeastOneExists(hasTestTag("line-0"), 20_000)
         rule.onNodeWithTag("line-0").performClick()
         rule.onNodeWithTag("line-edit-0").performTextReplacement("исправлено")
