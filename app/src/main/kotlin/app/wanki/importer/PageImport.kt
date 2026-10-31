@@ -1,11 +1,10 @@
 package app.wanki.importer
 
 import android.content.Context
-import android.graphics.pdf.PdfRenderer
 import android.net.Uri
-import android.os.ParcelFileDescriptor
 import android.util.Log
 import app.wanki.data.Repository
+import app.wanki.input.PageBackgrounds
 import app.wanki.media.MediaStore
 import app.wanki.media.PictureImport
 import java.io.File
@@ -56,7 +55,8 @@ class PageImporter(private val context: Context, private val repository: Reposit
             Log.e("Wanki", "import into $notebookId failed: ${e.message}", e.cause)
             discard(written)
             ImportResult.Failed(e.message!!)
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
+            // OutOfMemoryError included: the caller's progress dialog must end with a message
             Log.e("Wanki", "import into $notebookId failed", e)
             discard(written)
             ImportResult.Failed("Не удалось добавить страницы")
@@ -85,7 +85,7 @@ class PageImporter(private val context: Context, private val repository: Reposit
     }
 
     /** Copies the PDF and adds its pages (up to the cap); returns whether pages were left out. */
-    private fun addPdf(uri: Uri, pages: MutableList<Repository.NewPage>, written: MutableList<String>): Boolean {
+    private suspend fun addPdf(uri: Uri, pages: MutableList<Repository.NewPage>, written: MutableList<String>): Boolean {
         val name = "page-${UUID.randomUUID()}.pdf"
         val file = try {
             val input = context.contentResolver.openInputStream(uri) ?: throw IOException("no stream")
@@ -96,25 +96,19 @@ class PageImporter(private val context: Context, private val repository: Reposit
         } catch (e: SecurityException) {
             throw Failure(PDF_UNREADABLE, e)
         }
-        try {
-            ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { fd ->
-                PdfRenderer(fd).use { r ->
-                    if (r.pageCount == 0) throw Failure("В PDF нет страниц")
-                    val room = MAX_PAGES - pages.size
-                    val count = minOf(r.pageCount, room)
-                    for (i in 0 until count) {
-                        val landscape = r.openPage(i).use { p -> p.width > p.height }
-                        pages += Repository.NewPage(landscape, name, i)
-                    }
-                    return r.pageCount > room
-                }
-            }
+        val room = MAX_PAGES - pages.size
+        val pdf = try {
+            // through the background renderer's lock: PdfRenderer is used by one thread at a time
+            PageBackgrounds.pdfPages(file, room)
         } catch (e: IOException) {
             throw Failure(PDF_UNREADABLE, e)
         } catch (e: SecurityException) {
             // encrypted
             throw Failure(PDF_UNREADABLE, e)
         }
+        if (pdf.count == 0) throw Failure("В PDF нет страниц")
+        pdf.landscape.forEachIndexed { i, landscape -> pages += Repository.NewPage(landscape, name, i) }
+        return pdf.count > room
     }
 
     private fun addPicture(uri: Uri, pages: MutableList<Repository.NewPage>, written: MutableList<String>) {

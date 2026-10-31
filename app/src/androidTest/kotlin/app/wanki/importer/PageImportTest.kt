@@ -148,6 +148,21 @@ class PageImportTest {
         assertNull(PageBackgrounds.bitmap(media, "page-missing.pdf", 0, 1024))
     }
 
+    @Test
+    fun backgroundCacheKeepsOneSizePerPage() = runBlocking {
+        val nb = notebook()
+        import(nb, pdf("cache.pdf", listOf(595 to 842)))
+        val p = repo.pages(nb.id)[1]
+        val small = PageBackgrounds.bitmap(media, p.backgroundMedia!!, 0, 1024)!!
+        assertTrue(small === PageBackgrounds.bitmap(media, p.backgroundMedia!!, 0, 1024))
+        val big = PageBackgrounds.bitmap(media, p.backgroundMedia!!, 0, 2048)!!
+        assertTrue(big === PageBackgrounds.bitmap(media, p.backgroundMedia!!, 0, 2048))
+        // the 2048 render replaced the 1024 one
+        assertTrue(small !== PageBackgrounds.bitmap(media, p.backgroundMedia!!, 0, 1024))
+        PageBackgrounds.evictAll()
+        assertTrue(big !== PageBackgrounds.bitmap(media, p.backgroundMedia!!, 0, 2048))
+    }
+
     private fun assertNothingAdded(nb: NotebookEntity, r: ImportResult, message: String) = runBlocking {
         assertEquals(ImportResult.Failed(message), r)
         assertEquals(1, repo.pages(nb.id).size)

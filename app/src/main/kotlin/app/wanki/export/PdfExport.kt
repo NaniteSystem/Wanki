@@ -37,6 +37,9 @@ import app.wanki.ui.common.PaperColor
 import app.wanki.ui.common.drawTemplate
 import java.io.File
 import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
+import android.app.ActivityManager
 import kotlin.math.ceil
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
@@ -82,8 +85,13 @@ object PdfGeometry {
  */
 class PdfExporter(private val context: Context, private val repository: Repository, private val media: MediaStore) {
 
-    /** Writes [pages] of [notebook] into one PDF and returns it; named after the notebook (plus « стр. N» for one page). */
+    /**
+     * Writes [pages] of [notebook] into one PDF and returns it; named after the notebook (plus « стр. N» for one page)
+     * and the time, never over an earlier export.
+     */
     suspend fun export(notebook: NotebookEntity, pages: List<PageEntity>): File = withContext(Dispatchers.IO) {
+        // the screen's cached backgrounds give their memory to the export
+        PageBackgrounds.evictAll()
         val size = runCatching { PageSize.valueOf(notebook.pageSize) }.getOrDefault(PageSize.A4)
         val dir = File(context.cacheDir, DIR).apply { mkdirs() }
         val loaded = pages.map { load(it, size) }
@@ -95,7 +103,7 @@ class PdfExporter(private val context: Context, private val repository: Reposito
                 ensureActive()
                 number = drawPage(doc, p, size, pxPerPt, number)
             }
-            val target = File(dir, fileName(notebook, pages) + ".pdf")
+            val target = uniqueFile(dir, fileName(notebook, pages) + " " + LocalDateTime.now().format(STAMP))
             val part = File(dir, target.name + ".part")
             try {
                 part.outputStream().use { doc.writeTo(it) }
@@ -172,7 +180,7 @@ class PdfExporter(private val context: Context, private val repository: Reposito
 
     /**
      * Pixels per point for backgrounds and pictures: [PX_PER_PT], or less when the whole document's rasters would
-     * pass [RASTER_BUDGET] (PdfDocument keeps every page's bitmaps until it is written).
+     * pass [rasterBudget] (PdfDocument keeps every page's bitmaps until it is written).
      */
     private fun rasterScale(pages: List<Loaded>): Float {
         var pt2 = 0.0
@@ -182,7 +190,7 @@ class PdfExporter(private val context: Context, private val repository: Reposito
             for (o in p.objects) if (o.kind == PageObjectKind.IMAGE) pt2 += (o.w * k) * (o.h * k).toDouble()
         }
         if (pt2 == 0.0) return PX_PER_PT
-        return minOf(PX_PER_PT, sqrt(RASTER_BUDGET / (pt2 * 4)).toFloat()).coerceAtLeast(0.25f)
+        return minOf(PX_PER_PT, sqrt(rasterBudget() / (pt2 * 4)).toFloat()).coerceAtLeast(0.25f)
     }
 
     /** Draws [p] onto as many sheets as it needs, numbered from [number]; returns the next number. */
@@ -246,6 +254,24 @@ class PdfExporter(private val context: Context, private val repository: Reposito
         return n
     }
 
+    /**
+     * Bytes of background and picture pixels one export may hold: a quarter of the app's memory class, an eighth on a
+     * low-RAM device.
+     */
+    private fun rasterBudget(): Double {
+        val am = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        val mb = am.memoryClass.toDouble() / if (am.isLowRamDevice) 8 else 4
+        return mb * 1024 * 1024
+    }
+
+    /** [base].pdf, or [base] (2).pdf etc. when that exists: an app may still be reading an earlier export. */
+    private fun uniqueFile(dir: File, base: String): File {
+        var f = File(dir, "$base.pdf")
+        var n = 2
+        while (f.exists()) f = File(dir, "$base (${n++}).pdf")
+        return f
+    }
+
     /** Paper colour and the template, through the same drawing code as the screen. */
     private fun drawPaper(c: Canvas, template: PageTemplate, w: Float, h: Float) {
         CanvasDrawScope().draw(Density(1f), LayoutDirection.Ltr, androidx.compose.ui.graphics.Canvas(c), Size(w, h)) {
@@ -260,7 +286,7 @@ class PdfExporter(private val context: Context, private val repository: Reposito
         private const val PX_PER_PT = 2f
         private const val PICTURE_MAX_SIDE = 2048
         /** Bytes of background and picture pixels one export may hold. */
-        private const val RASTER_BUDGET = 256.0 * 1024 * 1024
+        private val STAMP = DateTimeFormatter.ofPattern("yyyy-MM-dd HH-mm")
         private const val DAY_MS = 24 * 3_600_000L
 
         private val NotePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {

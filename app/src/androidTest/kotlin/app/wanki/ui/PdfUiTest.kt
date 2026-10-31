@@ -159,10 +159,12 @@ class PdfUiTest {
         rule.waitUntilAtLeastOneExists(hasTestTag("export-all"), 5_000)
         assertTrue(rule.onAllNodes(hasTestTag("export-page")).fetchSemanticsNodes().isNotEmpty())
         shot("export-dialog")
-        val target = File(File(context.cacheDir, PdfExporter.DIR), PdfExporter.safe(title) + ".pdf")
-        target.delete()
+        val exports = File(context.cacheDir, PdfExporter.DIR)
+        fun made() = exports.listFiles().orEmpty().filter { it.name.startsWith(PdfExporter.safe(title) + " ") && it.name.endsWith(".pdf") }
+        made().forEach { it.delete() }
         rule.onNodeWithTag("export-all").performClick()
-        rule.waitUntil(15_000) { target.isFile }
+        rule.waitUntil(15_000) { made().isNotEmpty() }
+        val target = made().single()
         // the share chooser covers the app; the drawn stroke is in the file
         Thread.sleep(1500)
         shot("export-share-chooser")

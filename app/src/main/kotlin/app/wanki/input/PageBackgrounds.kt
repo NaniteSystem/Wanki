@@ -13,7 +13,14 @@ import app.wanki.export.PdfGeometry
 import app.wanki.ink.InkRect
 import app.wanki.media.MediaStore
 import app.wanki.ui.common.PageGeometry
+import android.util.LruCache
+import java.io.File
 import kotlin.math.roundToInt
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
@@ -22,19 +29,79 @@ import kotlinx.coroutines.withContext
 
 /**
  * Page backgrounds (Decision 12): a stored picture, or a page of a stored PDF rendered on demand through
- * [PdfRenderer], one render at a time. The screen's bitmaps are kept in an LRU of [CACHED] entries.
+ * [PdfRenderer], one render at a time. The screen's bitmaps are kept in an LRU bounded by [CACHE_BYTES] (one size
+ * per page). The last PDF opened stays open for consecutive pages until another file is asked for or it is idle for
+ * [IDLE_CLOSE_MS].
  */
 object PageBackgrounds {
     const val MIN_SIDE = 1024
     const val MAX_SIDE = 4096
-    private const val CACHED = 3
+
+    /** Room for one A4 page rendered at [MAX_SIDE] (4096 × 2896 × 4 bytes). */
+    const val CACHE_BYTES = 48 shl 20
+    private const val IDLE_CLOSE_MS = 5_000L
 
     private data class Key(val name: String, val pdfPage: Int?, val side: Int)
 
-    /** PdfRenderer is not to be used from two threads; the cache is guarded by the same lock. */
+    /** PdfRenderer is not to be used from two threads: every use of it, and of [open], holds this lock. */
     private val lock = Mutex()
-    private val cache = object : LinkedHashMap<Key, Bitmap>(CACHED + 1, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Key, Bitmap>?) = size > CACHED
+    private val cache = object : LruCache<Key, Bitmap>(CACHE_BYTES) {
+        override fun sizeOf(key: Key, value: Bitmap) = value.allocationByteCount
+    }
+
+    /** The PDF kept open, and what identifies its file. */
+    private class OpenPdf(val path: String, val modified: Long, val length: Long, val fd: ParcelFileDescriptor, val renderer: PdfRenderer) {
+        fun matches(f: File) = f.path == path && f.lastModified() == modified && f.length() == length
+
+        fun close() {
+            runCatching { renderer.close() }
+            runCatching { fd.close() }
+        }
+    }
+
+    private var open: OpenPdf? = null
+    private val closer = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var closeJob: Job? = null
+
+    /** Drops every cached bitmap (before a PDF export, which needs the memory). */
+    fun evictAll() = cache.evictAll()
+
+    /** Page count and orientation (wider than tall) of the first [max] pages of the PDF [file]; IOException or SecurityException when it cannot be opened. */
+    class PdfPages(val count: Int, val landscape: List<Boolean>)
+
+    suspend fun pdfPages(file: File, max: Int): PdfPages = lock.withLock {
+        withContext(Dispatchers.IO) {
+            val r = rendererLocked(file)
+            PdfPages(r.pageCount, (0 until minOf(r.pageCount, max)).map { i -> r.openPage(i).use { p -> p.width > p.height } })
+        }
+    }
+
+    /** The renderer for [file], reusing the open one; must hold [lock]. A failed open leaves nothing open. */
+    private fun rendererLocked(file: File): PdfRenderer {
+        open?.takeIf { it.matches(file) }?.let { scheduleClose(); return it.renderer }
+        open?.close()
+        open = null
+        val fd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+        val renderer = try {
+            PdfRenderer(fd)
+        } catch (e: Throwable) {
+            fd.close()
+            throw e
+        }
+        open = OpenPdf(file.path, file.lastModified(), file.length(), fd, renderer)
+        scheduleClose()
+        return renderer
+    }
+
+    private fun scheduleClose() {
+        closeJob?.cancel()
+        closeJob = closer.launch {
+            delay(IDLE_CLOSE_MS)
+            lock.withLock {
+                open?.close()
+                open = null
+            }
+        }
     }
 
     /**
@@ -68,7 +135,11 @@ object PageBackgrounds {
     suspend fun bitmap(media: MediaStore, name: String, pdfPage: Int?, longSidePx: Int): Bitmap? {
         val key = Key(name, pdfPage, longSidePx.coerceIn(MIN_SIDE, MAX_SIDE))
         return lock.withLock {
-            cache[key] ?: renderLocked(media, name, pdfPage, key.side)?.also { cache[key] = it }
+            cache.get(key) ?: renderLocked(media, name, pdfPage, key.side)?.also { b ->
+                // one size per page: the others go
+                cache.snapshot().keys.filter { it.name == name && it.pdfPage == pdfPage && it != key }.forEach { cache.remove(it) }
+                cache.put(key, b)
+            }
         }
     }
 
@@ -90,17 +161,14 @@ object PageBackgrounds {
 
     private fun renderPdf(media: MediaStore, name: String, index: Int, side: Int): Bitmap? {
         val f = media.file(name) ?: return null
-        return ParcelFileDescriptor.open(f, ParcelFileDescriptor.MODE_READ_ONLY).use { fd ->
-            PdfRenderer(fd).use { r ->
-                if (index !in 0 until r.pageCount) return null
-                r.openPage(index).use { p ->
-                    val k = side.toFloat() / maxOf(p.width, p.height)
-                    val bmp = Bitmap.createBitmap((p.width * k).roundToInt().coerceAtLeast(1), (p.height * k).roundToInt().coerceAtLeast(1), Bitmap.Config.ARGB_8888)
-                    bmp.eraseColor(Color.WHITE) // a PDF page is transparent where nothing is printed
-                    p.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                    bmp
-                }
-            }
+        val r = rendererLocked(f)
+        if (index !in 0 until r.pageCount) return null
+        return r.openPage(index).use { p ->
+            val k = side.toFloat() / maxOf(p.width, p.height)
+            val bmp = Bitmap.createBitmap((p.width * k).roundToInt().coerceAtLeast(1), (p.height * k).roundToInt().coerceAtLeast(1), Bitmap.Config.ARGB_8888)
+            bmp.eraseColor(Color.WHITE) // a PDF page is transparent where nothing is printed
+            p.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+            bmp
         }
     }
 }

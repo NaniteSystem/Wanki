@@ -82,7 +82,7 @@ class PdfExportTest {
         repo.saveInk(page, (0 until 50).map { line(100f, 600f, 200f + it * 20f) })
         val file = export(nb)
         assertTrue(file.path, file.path.contains("/cache/exports/"))
-        assertEquals("Экспорт стр. 1.pdf", file.name)
+        assertTrue(file.name, file.name.matches(Regex("Экспорт стр\\. 1 \\d{4}-\\d\\d-\\d\\d \\d\\d-\\d\\d\\.pdf")))
         render(file) { r ->
             assertEquals(1, r.pageCount)
             r.openPage(0).use { p ->
@@ -108,7 +108,10 @@ class PdfExportTest {
         repo.addPage(nb)
         repo.saveInk(repo.pages(nb.id)[1], listOf(line(100f, 500f, 300f)))
         val file = export(nb)
-        assertEquals("Экспорт.pdf", file.name)
+        assertTrue(file.name, file.name.matches(Regex("Экспорт \\d{4}-\\d\\d-\\d\\d \\d\\d-\\d\\d\\.pdf")))
+        // a second export never replaces the first (another app may still be reading it)
+        val again = export(nb)
+        assertTrue(again.name, again != file && file.isFile && again.isFile)
         assertEquals(3, render(file) { it.pageCount })
     }
 

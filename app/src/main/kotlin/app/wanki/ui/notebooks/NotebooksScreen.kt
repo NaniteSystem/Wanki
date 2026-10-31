@@ -70,6 +70,8 @@ import app.wanki.ui.common.languageName
 import kotlinx.coroutines.delay
 import android.content.ActivityNotFoundException
 import android.net.Uri
+import android.util.Log
+import kotlinx.coroutines.CancellationException
 import androidx.activity.compose.LocalActivityResultRegistryOwner
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.ActivityResultRegistryOwner
@@ -276,7 +278,16 @@ fun NotebookScreen(
         importing = true
         val after = i
         graph.appScope.launch {
-            val r = PageImporter(appContext, graph.repository, graph.media).import(uris, nb.id, after)
+            // whatever happens, the progress dialog ends with a message
+            val r = try {
+                PageImporter(appContext, graph.repository, graph.media).import(uris, nb.id, after)
+            } catch (e: CancellationException) {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { ui { importing = false } }
+                throw e
+            } catch (e: Throwable) {
+                Log.e("Wanki", "notebook ${nb.id}: import failed", e)
+                ImportResult.Failed("Не удалось добавить страницы")
+            }
             ui {
                 importing = false
                 if (r is ImportResult.Added && r.pages > 0) jumpTo = after + 1
