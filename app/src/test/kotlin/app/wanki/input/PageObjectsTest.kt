@@ -5,6 +5,7 @@ import app.wanki.ink.InkAffine
 import kotlin.math.PI
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class PageObjectsTest {
@@ -88,5 +89,21 @@ class PageObjectsTest {
         assertEquals(512, PageObjectPainter.decodeSide(300f))
         assertEquals(1024, PageObjectPainter.decodeSide(1024f))
         assertEquals(2048, PageObjectPainter.decodeSide(9000f))
+    }
+
+    @Test
+    fun failedFinerDecodeIsNotRetried() {
+        val f = DecodeFailures()
+        assertTrue(f.shouldLoad("p", 2048))
+        f.failed("p", 1024) // a 512 copy is drawn; the 1024 decode ran out of memory
+        assertFalse(f.shouldLoad("p", 1024))
+        assertFalse(f.shouldLoad("p", 2048))
+        assertTrue(f.shouldLoad("p", 512))
+        assertTrue(f.shouldLoad("other", 2048))
+        // a coarser success does not clear it; one at the failed side does
+        f.succeeded("p", 512)
+        assertFalse(f.shouldLoad("p", 1024))
+        f.succeeded("p", 1024)
+        assertTrue(f.shouldLoad("p", 2048))
     }
 }

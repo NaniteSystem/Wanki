@@ -229,6 +229,25 @@ class SizedLru<K, V>(private val budget: Long, private val sizeOf: (V) -> Long) 
 }
 
 /**
+ * The smallest decode side that failed per picture (out of memory at a finer size, or the file gone after a coarser
+ * decode), so a draw never relaunches a decode at that side or finer. A success at that side or finer clears it; a new
+ * painter (the page opened again) starts empty.
+ */
+class DecodeFailures {
+    private val failedSide = HashMap<String, Int>()
+
+    fun shouldLoad(name: String, side: Int): Boolean = failedSide[name]?.let { side < it } ?: true
+
+    fun failed(name: String, side: Int) {
+        failedSide[name] = minOf(failedSide[name] ?: Int.MAX_VALUE, side)
+    }
+
+    fun succeeded(name: String, side: Int) {
+        if ((failedSide[name] ?: return) <= side) failedSide.remove(name)
+    }
+}
+
+/**
  * Draws page objects on screen: pictures are decoded from the [MediaStore] on IO, sampled to the size they are shown
  * at (a finer decode is loaded when zooming in, up to the stored 2048), into an LRU bounded by bytes
  * ([PICTURE_BUDGET]); text layouts are cached. [rev] changes when a picture arrives, so a draw that reads it runs again.
@@ -244,6 +263,7 @@ class PageObjectPainter(private val media: MediaStore?, private val scope: Corou
     private val bitmaps = SizedLru<String, Decoded>(PICTURE_BUDGET) { it.bitmap.byteCount.toLong() }
     private val missing = HashSet<String>()
     private val loading = HashSet<String>()
+    private val failures = DecodeFailures()
     private val layouts = LruCache<LayoutKey, StaticLayout>(64)
 
     private data class LayoutKey(val text: String, val w: Float, val size: Float, val color: Int)
@@ -265,6 +285,8 @@ class PageObjectPainter(private val media: MediaStore?, private val scope: Corou
         val have = bitmaps.get(name)
         if (have != null && have.side >= side) return PictureState.Ready(have.bitmap)
         if (have == null && name in missing) return PictureState.Missing
+        // a decode at this side (or a finer one) already failed: keep what is there
+        if (have != null && !failures.shouldLoad(name, side)) return PictureState.Ready(have.bitmap)
         if (loading.add(name)) scope.launch {
             val bitmap = try {
                 withContext(Dispatchers.IO) { media.bitmap(name, side) }
@@ -276,8 +298,18 @@ class PageObjectPainter(private val media: MediaStore?, private val scope: Corou
                 null
             }
             loading -= name
-            if (bitmap != null) bitmaps.put(name, Decoded(bitmap, side)) else if (bitmaps.get(name) == null) missing += name
-            rev++
+            if (bitmap != null) {
+                bitmaps.put(name, Decoded(bitmap, side))
+                failures.succeeded(name, side)
+                rev++
+            } else {
+                failures.failed(name, side)
+                // nothing to draw yet: the placeholder turns into «missing» once; a coarser copy just stays
+                if (bitmaps.get(name) == null) {
+                    missing += name
+                    rev++
+                }
+            }
         }
         return have?.let { PictureState.Ready(it.bitmap) } ?: PictureState.Loading
     }
