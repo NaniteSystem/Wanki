@@ -423,11 +423,12 @@ interface NotebookDao {
     @Query("SELECT * FROM pages WHERE notebookId = :notebookId AND date = :epochDay AND deleted = 0 LIMIT 1")
     fun observePageForDate(notebookId: String, epochDay: Long): Flow<PageEntity?>
 
-    /** Days whose page holds ink (saveInk drops the ink row of an emptied page). */
+    /** Days whose page holds ink or a page object (saveInk drops the ink row of an emptied page). */
     @Query(
         """
-        SELECT p.date FROM pages p JOIN page_ink i ON i.pageId = p.id
+        SELECT p.date FROM pages p
         WHERE p.notebookId = :notebookId AND p.deleted = 0 AND p.date IS NOT NULL
+          AND (EXISTS (SELECT 1 FROM page_ink i WHERE i.pageId = p.id) OR EXISTS (SELECT 1 FROM page_objects o WHERE o.pageId = p.id))
         """,
     )
     fun observeDiaryDates(notebookId: String): Flow<List<Long>>
@@ -474,6 +475,9 @@ interface NotebookDao {
 
     @Insert
     suspend fun insertObjects(objects: List<PageObjectEntity>)
+
+    @Query("SELECT EXISTS (SELECT 1 FROM page_objects WHERE pageId = :pageId)")
+    suspend fun hasObjects(pageId: String): Boolean
 
     @Query("DELETE FROM page_objects WHERE pageId = :pageId AND id IN (:ids)")
     suspend fun deleteObjectsById(pageId: String, ids: List<String>): Int

@@ -561,6 +561,25 @@ class RepositoryTest {
         assertEquals(listOf(TrashKind.DIARY_DAY), repo.trash().map { it.kind })
     }
 
+    /** A day holding only a picture or text block is written: it is marked, and a restored same-date day never deletes it. */
+    @Test
+    fun diaryDayWithOnlyAnObjectIsTaken() = runBlocking {
+        val day = java.time.LocalDate.of(2026, 10, 22)
+        val diary = repo.diary()
+        val old = repo.diaryPage(day)
+        repo.saveInk(old, listOf(stroke()))
+        repo.delete(TrashKind.DIARY_DAY, old.id)
+        val fresh = repo.diaryPage(day)
+        repo.savePageObjects(fresh, listOf(obj(fresh, "только текст")))
+        assertNull(db.notebooks().ink(fresh.id))
+        assertEquals(listOf(day.toEpochDay()), repo.observeDiaryDates(diary.id).first())
+        val e = runCatching { repo.restore(TrashKind.DIARY_DAY, old.id) }.exceptionOrNull()
+        assertTrue(e is DayTakenException)
+        assertEquals(fresh.id, repo.diaryPage(day).id)
+        assertEquals(listOf("только текст"), repo.pageObjects(fresh.id).map { it.text })
+        assertEquals(listOf(TrashKind.DIARY_DAY), repo.trash().map { it.kind })
+    }
+
     /** Undo while the day was reopened: the editor's empty page was removed, its late save must not bring it back. */
     @Test
     fun saveOnRemovedDayPageDoesNotDuplicateTheDate() = runBlocking {

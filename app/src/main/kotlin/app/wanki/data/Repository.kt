@@ -640,7 +640,8 @@ class Repository(private val db: WankiDatabase) {
                 if (page.date != null) {
                     val taken = notebooks.pageForDate(nb.id, page.date)
                     if (taken != null) {
-                        if (notebooks.ink(taken.id) != null) throw DayTakenException()
+                        // written means ink or an object (a picture or text block alone counts too)
+                        if (notebooks.ink(taken.id) != null || notebooks.hasObjects(taken.id)) throw DayTakenException()
                         removePage(taken.id)
                     }
                 }

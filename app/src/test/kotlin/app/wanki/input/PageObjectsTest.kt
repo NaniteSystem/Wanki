@@ -63,4 +63,30 @@ class PageObjectsTest {
         assertEquals(o, e.toModel())
         assertEquals(null, e.copy(kind = "MASK").toModelOrNull())
     }
+
+    @Test
+    fun pictureCacheEvictsLeastRecentlyUsedByBytes() {
+        val c = SizedLru<String, Long>(100) { it }
+        c.put("a", 40)
+        c.put("b", 40)
+        c.get("a") // a is now the most recent
+        c.put("c", 40) // 120 > 100: b (least recently used) goes
+        assertEquals(setOf("a", "c"), c.keys)
+        assertEquals(80L, c.total)
+        // replacing a value counts only the new size
+        c.put("a", 10)
+        assertEquals(50L, c.total)
+        // one value over the budget stays, alone
+        c.put("big", 500)
+        assertEquals(setOf("big"), c.keys)
+        assertEquals(500L, c.total)
+    }
+
+    @Test
+    fun decodeSideFollowsTheShownSize() {
+        assertEquals(256, PageObjectPainter.decodeSide(10f))
+        assertEquals(512, PageObjectPainter.decodeSide(300f))
+        assertEquals(1024, PageObjectPainter.decodeSide(1024f))
+        assertEquals(2048, PageObjectPainter.decodeSide(9000f))
+    }
 }

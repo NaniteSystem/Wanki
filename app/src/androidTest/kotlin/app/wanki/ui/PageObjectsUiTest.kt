@@ -177,9 +177,8 @@ class PageObjectsUiTest {
         rule.waitUntil(5_000) { stored(page).singleOrNull()?.text == "Старый текст" }
     }
 
-    /** A picture "picked" through a stubbed [ActivityResultRegistry]. */
-    @Test
-    fun insertPictureFromGallery() {
+    /** A 1200 × 800 JPEG in the cache: sky with a sun. */
+    private fun testPicture(): File {
         val ctx = InstrumentationRegistry.getInstrumentation().targetContext
         val file = File(ctx.cacheDir, "test-picture-$stamp.jpg")
         Bitmap.createBitmap(1200, 800, Bitmap.Config.RGB_565).apply {
@@ -188,12 +187,24 @@ class PageObjectsUiTest {
             c.drawCircle(300f, 300f, 200f, android.graphics.Paint().apply { color = Color.rgb(240, 200, 40) })
             file.outputStream().use { compress(Bitmap.CompressFormat.JPEG, 90, it) }
         }
+        return file
+    }
+
+    /** Every picker launch answers with [file]. */
+    private fun stubGallery(file: File) {
         val uri = Uri.fromFile(file)
         PicturePickers.registry = object : ActivityResultRegistry() {
             override fun <I, O> onLaunch(requestCode: Int, contract: ActivityResultContract<I, O>, input: I, options: ActivityOptionsCompat?) {
                 dispatchResult(requestCode, uri)
             }
         }
+    }
+
+    /** A picture "picked" through a stubbed [ActivityResultRegistry]. */
+    @Test
+    fun insertPictureFromGallery() {
+        val file = testPicture()
+        stubGallery(file)
         val title = "Objects picture $stamp"
         val page = notebook(title)
         val layer = open(title)
@@ -236,6 +247,32 @@ class PageObjectsUiTest {
         rule.waitUntil(5_000) { stored(page).isEmpty() }
         rule.onNodeWithTag("redo").performClick()
         rule.waitUntil(5_000) { stored(page).size == 1 }
+    }
+
+    /** Pictures (no keyboard changes the view between them): a second one at a taken spot moves 48 right and down. */
+    @Test
+    fun consecutiveInsertsDoNotStack() {
+        stubGallery(testPicture())
+        val title = "Objects stack $stamp"
+        val page = notebook(title)
+        val layer = open(title)
+        fun pick() {
+            rule.onNodeWithTag("menu").performClick()
+            rule.waitUntilAtLeastOneExists(hasTestTag("menu-insert-image"), 5_000)
+            rule.onNodeWithTag("menu-insert-image").performClick()
+            rule.waitUntilAtLeastOneExists(hasTestTag("insert-gallery"), 5_000)
+            rule.onNodeWithTag("insert-gallery").performClick()
+        }
+        pick()
+        rule.waitUntil(10_000) { rule.runOnUiThread { layer.objects.size == 1 } }
+        // the same view as for the first insert (no selection bar)
+        rule.runOnUiThread { layer.clearSelection() }
+        rule.waitForIdle()
+        pick()
+        rule.waitUntil(10_000) { stored(page).size == 2 }
+        val (a, b) = rule.runOnUiThread { layer.objects.toList() }
+        assertEquals(a.centerX + 48f, b.centerX, 0.5f)
+        assertEquals(a.centerY + 48f, b.centerY, 0.5f)
     }
 
     @Test

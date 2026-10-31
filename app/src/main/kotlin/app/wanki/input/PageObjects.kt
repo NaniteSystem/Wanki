@@ -200,14 +200,48 @@ private fun drawPicturePlaceholder(canvas: Canvas, box: RectF, scale: Float, mis
 }
 
 /**
- * Draws page objects on screen: pictures are decoded from the [MediaStore] (long side ≤ 2048) on IO into an LRU of 16,
- * text layouts are cached. [rev] changes when a picture arrives, so a draw that reads it runs again. Main thread.
+ * A least-recently-used cache bounded by the total [sizeOf] of its values (bytes for bitmaps) rather than by count:
+ * putting a value evicts the least recently used others until the total fits [budget]. A value larger than the budget
+ * on its own is still kept (alone), so the picture on screen can always be drawn. Not thread-safe.
+ */
+class SizedLru<K, V>(private val budget: Long, private val sizeOf: (V) -> Long) {
+    private val map = LinkedHashMap<K, V>(16, 0.75f, true)
+
+    var total = 0L
+        private set
+
+    val keys: Set<K> get() = map.keys
+
+    fun get(key: K): V? = map[key]
+
+    fun put(key: K, value: V) {
+        map.remove(key)?.let { total -= sizeOf(it) }
+        map[key] = value
+        total += sizeOf(value)
+        val it = map.entries.iterator()
+        while (total > budget && map.size > 1) {
+            val e = it.next()
+            if (e.key == key) continue
+            total -= sizeOf(e.value)
+            it.remove()
+        }
+    }
+}
+
+/**
+ * Draws page objects on screen: pictures are decoded from the [MediaStore] on IO, sampled to the size they are shown
+ * at (a finer decode is loaded when zooming in, up to the stored 2048), into an LRU bounded by bytes
+ * ([PICTURE_BUDGET]); text layouts are cached. [rev] changes when a picture arrives, so a draw that reads it runs again.
+ * Main thread.
  */
 class PageObjectPainter(private val media: MediaStore?, private val scope: CoroutineScope) {
     var rev by mutableIntStateOf(0)
         private set
 
-    private val bitmaps = LruCache<String, Bitmap>(16)
+    /** A decoded picture and the long side ([decodeSide]) it was decoded for. */
+    private class Decoded(val bitmap: Bitmap, val side: Int)
+
+    private val bitmaps = SizedLru<String, Decoded>(PICTURE_BUDGET) { it.bitmap.byteCount.toLong() }
     private val missing = HashSet<String>()
     private val loading = HashSet<String>()
     private val layouts = LruCache<LayoutKey, StaticLayout>(64)
@@ -221,17 +255,19 @@ class PageObjectPainter(private val media: MediaStore?, private val scope: Corou
                 val layout = layouts.get(key) ?: textLayout(o.text, o.w, o.textSize, o.color).also { layouts.put(key, it) }
                 drawPageObject(canvas, o, scale, layout = layout)
             }
-            PageObjectKind.IMAGE -> drawPageObject(canvas, o, scale, picture(o.media))
+            PageObjectKind.IMAGE -> drawPageObject(canvas, o, scale, picture(o.media, decodeSide(maxOf(o.w, o.h) * scale)))
         }
     }
 
-    private fun picture(name: String?): PictureState {
+    /** The picture [name] decoded for a long side of [side] px; a coarser one already decoded is drawn meanwhile. */
+    private fun picture(name: String?, side: Int): PictureState {
         if (name == null || media == null) return PictureState.Missing
-        bitmaps.get(name)?.let { return PictureState.Ready(it) }
-        if (name in missing) return PictureState.Missing
+        val have = bitmaps.get(name)
+        if (have != null && have.side >= side) return PictureState.Ready(have.bitmap)
+        if (have == null && name in missing) return PictureState.Missing
         if (loading.add(name)) scope.launch {
             val bitmap = try {
-                withContext(Dispatchers.IO) { media.bitmap(name, MAX_SIDE) }
+                withContext(Dispatchers.IO) { media.bitmap(name, side) }
             } catch (e: CancellationException) {
                 loading -= name
                 throw e
@@ -240,13 +276,23 @@ class PageObjectPainter(private val media: MediaStore?, private val scope: Corou
                 null
             }
             loading -= name
-            if (bitmap != null) bitmaps.put(name, bitmap) else missing += name
+            if (bitmap != null) bitmaps.put(name, Decoded(bitmap, side)) else if (bitmaps.get(name) == null) missing += name
             rev++
         }
-        return PictureState.Loading
+        return have?.let { PictureState.Ready(it.bitmap) } ?: PictureState.Loading
     }
 
     companion object {
         const val MAX_SIDE = 2048
+
+        /** Bytes of decoded pictures kept: min(32 MB, an eighth of the heap). */
+        val PICTURE_BUDGET: Long = minOf(32L shl 20, Runtime.getRuntime().maxMemory() / 8)
+
+        /** The decode size for a picture shown [px] long: the next power of two, 256..[MAX_SIDE], so zooming reloads rarely. */
+        fun decodeSide(px: Float): Int {
+            var s = 256
+            while (s < px && s < MAX_SIDE) s *= 2
+            return s
+        }
     }
 }

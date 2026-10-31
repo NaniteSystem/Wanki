@@ -423,14 +423,29 @@ class PageEditorState(
         selectTool(tool.copy(kind = ToolKind.LASSO))
     }
 
+    /**
+     * Where a new object goes: the centre of the view, moved by +48, +48 world units while an object's centre is
+     * within 24 of it, so consecutive inserts do not hide each other.
+     */
+    private fun insertCentre(): Pair<Float, Float> {
+        val v = viewport.visibleWorld()
+        var x = (v.left + v.right) / 2
+        var y = (v.top + v.bottom) / 2
+        while (layer.objects.any { kotlin.math.hypot(it.centerX - x, it.centerY - y) <= INSERT_TAKEN }) {
+            x += INSERT_STEP
+            y += INSERT_STEP
+        }
+        return x to y
+    }
+
     /** A text block [TEXT_BLOCK_WIDTH] wide at the centre of the view, in the pen's colour; selected. */
     fun insertText(text: String, size: Float) {
         if (!objectsEditable || text.isBlank()) return
-        val v = viewport.visibleWorld()
+        val (cx, cy) = insertCentre()
         val w = TEXT_BLOCK_WIDTH
         val h = textBlockHeight(text, w, size)
         val o = PageObject(
-            PageObject.newId(), PageObjectKind.TEXT, (v.left + v.right) / 2 - w / 2, (v.top + v.bottom) / 2 - h / 2, w, h,
+            PageObject.newId(), PageObjectKind.TEXT, cx - w / 2, cy - h / 2, w, h,
             0f, layer.nextZ(), text, tool.color, size, null,
         )
         layer.addObject(o)
@@ -447,12 +462,12 @@ class PageEditorState(
     /** The stored picture [media] ([width] × [height] px) fitted into 600 × 600 at the centre of the view; selected. */
     fun insertPicture(media: String, width: Int, height: Int): Boolean {
         if (!objectsEditable || width <= 0 || height <= 0) return false
-        val v = viewport.visibleWorld()
+        val (cx, cy) = insertCentre()
         val k = PICTURE_BOX / maxOf(width, height)
         val w = width * k
         val h = height * k
         val o = PageObject(
-            PageObject.newId(), PageObjectKind.IMAGE, (v.left + v.right) / 2 - w / 2, (v.top + v.bottom) / 2 - h / 2, w, h,
+            PageObject.newId(), PageObjectKind.IMAGE, cx - w / 2, cy - h / 2, w, h,
             0f, layer.nextZ(), "", ToolSelection.DEFAULT_INK, 0f, media,
         )
         layer.addObject(o)
@@ -545,6 +560,8 @@ fun PageEditorState.paperAction() = HeaderAction(R.drawable.ic_article, "Бум�
 fun PageEditorState.fitAction() = HeaderAction(R.drawable.ic_fit_screen, "Вписать", "fit") { viewport.fitWidth() }
 private const val TEXT_BLOCK_WIDTH = 600f
 private const val PICTURE_BOX = 600f
+private const val INSERT_TAKEN = 24f
+private const val INSERT_STEP = 48f
 
 fun PageEditorState.textAction() = HeaderAction(R.drawable.ic_notes, "Текст", "show-text") { showText = !showText }
 
