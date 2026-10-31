@@ -5,6 +5,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import app.wanki.catalog.CatalogDeck
 import app.wanki.catalog.CatalogRow
+import app.wanki.input.toModel
 import app.wanki.srs.Rating
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -708,7 +709,7 @@ class RepositoryTest {
         val ctx = InstrumentationRegistry.getInstrumentation().targetContext
         val media = app.wanki.media.MediaStore(ctx)
         media.dir.deleteRecursively()
-        for (n in listOf("page-a.jpg", "page-b.pdf", "page-c.jpg", "card-d.jpg")) media.save(n, "x".byteInputStream())
+        for (n in listOf("page-a.jpg", "page-b.pdf", "page-c.jpg", "card-d.jpg")) media.save(n, "x".byteInputStream()).setLastModified(System.currentTimeMillis() - 2 * Repository.MEDIA_MIN_AGE_MS)
         val nb = repo.createNotebook("G", PageTemplate.LINED, "auto")
         val live = repo.pages(nb.id).single()
         val gone = repo.insertPage(nb.id, 1)
@@ -722,6 +723,58 @@ class RepositoryTest {
         assertEquals(setOf("page-a.jpg", "card-d.jpg"), media.dir.list().orEmpty().toSet())
         media.dir.deleteRecursively()
         Unit
+    }
+
+    @Test
+    fun mediaGcKeepsNewFilesAndReportsFailedDeletes() = runBlocking {
+        val ctx = InstrumentationRegistry.getInstrumentation().targetContext
+        val media = app.wanki.media.MediaStore(ctx)
+        media.dir.deleteRecursively()
+        val old = System.currentTimeMillis() - 2 * Repository.MEDIA_MIN_AGE_MS
+        media.save("page-old.jpg", "x".byteInputStream()).setLastModified(old)
+        // just imported, its object row not saved yet
+        media.save("page-new.jpg", "x".byteInputStream())
+        assertEquals(1, repo.collectMediaGarbage(media))
+        assertEquals(setOf("page-new.jpg"), media.dir.list().orEmpty().toSet())
+        // a day later it goes
+        assertEquals(1, repo.collectMediaGarbage(media, now = System.currentTimeMillis() + 2 * Repository.MEDIA_MIN_AGE_MS))
+        // a file that cannot be deleted is reported, not ignored
+        media.save("page-stuck.jpg", "x".byteInputStream()).setLastModified(old)
+        assertTrue(media.dir.setWritable(false))
+        try {
+            val r = runCatching { repo.collectMediaGarbage(media) }
+            assertTrue(r.exceptionOrNull() is java.io.IOException)
+            assertTrue(r.exceptionOrNull()!!.message!!.contains("page-stuck.jpg"))
+        } finally {
+            media.dir.setWritable(true)
+        }
+        media.dir.deleteRecursively()
+        Unit
+    }
+
+    @Test
+    fun moveToPageCarriesObjects() = runBlocking {
+        val (from, to) = twoPages()
+        val keep = obj(from, "keep")
+        val go = obj(from, "go")
+        repo.savePageObjects(from, listOf(keep, go))
+        repo.saveInk(from, listOf(ink(10f)))
+        val moved = repo.moveToPage(from, blob(listOf(ink(10f))), to, emptyList(), objects = listOf(go), fromObjects = listOf(keep))
+        assertTrue(moved.keys.isEmpty())
+        assertEquals(1, moved.objectIds.size)
+        assertEquals(listOf("keep"), repo.pageObjects(from.id).map { it.text })
+        val placed = repo.pageObjects(to.id).single()
+        assertEquals("go", placed.text)
+        // a new id: the source may get the original back by undo while the target still has it
+        assertTrue(placed.id != go.id)
+        assertEquals(moved.objectIds, listOf(placed.id))
+        // no ink row is made on the target for objects alone
+        assertNull(db.notebooks().ink(to.id))
+        assertEquals(1, repo.takeBackFromPage(to.id, moved.keys, moved.objectIds))
+        assertTrue(repo.pageObjects(to.id).isEmpty())
+        // put back on a closed source page with new ids
+        repo.appendInk(from, emptyList(), listOf(go.toModel()))
+        assertEquals(setOf("keep", "go"), repo.pageObjects(from.id).map { it.text }.toSet())
     }
 
     // --- «На другую страницу» ---------------------------------------------------------------------
@@ -749,7 +802,7 @@ class RepositoryTest {
         val old = ink(500f)
         repo.saveInk(from, listOf(stay, go))
         repo.saveInk(to, listOf(old))
-        val keys = repo.moveToPage(from, blob(listOf(stay)), to, listOf(go))
+        val keys = repo.moveToPage(from, blob(listOf(stay)), to, listOf(go)).keys
         assertEquals(1, keys.size)
         assertEquals(listOf(500f, 300f), stored(to.id).map { it.points[0].x })
         assertEquals(listOf(10f), stored(from.id).map { it.points[0].x })
@@ -786,19 +839,19 @@ class RepositoryTest {
         // the target already holds an identical stroke (same content, same key) and another one
         repo.saveInk(to, listOf(same, ink(700f)))
         repo.saveInk(from, listOf(same, same))
-        val keys = repo.moveToPage(from, null, to, listOf(same))
+        val keys = repo.moveToPage(from, null, to, listOf(same)).keys
         assertEquals(3, stored(to.id).size)
         assertEquals(1, repo.takeBackFromPage(to.id, keys))
         // one of the two identical strokes stays: only as many as were moved go
         assertEquals(listOf(300f, 700f), stored(to.id).map { it.points[0].x })
         // two moved, two taken back
-        val keys2 = repo.moveToPage(from, null, to, listOf(same, same))
+        val keys2 = repo.moveToPage(from, null, to, listOf(same, same)).keys
         assertEquals(2, keys2.size)
         assertEquals(2, repo.takeBackFromPage(to.id, keys2))
         assertEquals(listOf(300f, 700f), stored(to.id).map { it.points[0].x })
         // taking back everything leaves no ink row
         val (a, b) = twoPages()
-        val k = repo.moveToPage(a, null, b, listOf(ink(10f)))
+        val k = repo.moveToPage(a, null, b, listOf(ink(10f))).keys
         repo.takeBackFromPage(b.id, k)
         assertNull(db.notebooks().ink(b.id))
     }

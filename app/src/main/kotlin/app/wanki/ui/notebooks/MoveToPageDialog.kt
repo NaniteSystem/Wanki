@@ -17,6 +17,8 @@ import app.wanki.data.NotebookEntity
 import app.wanki.data.PageEntity
 import app.wanki.ink.InkAffine
 import app.wanki.input.InkClip
+import app.wanki.input.toEntity
+import app.wanki.data.MovedInk
 import app.wanki.ui.common.Undo
 import app.wanki.ui.common.ui
 import kotlinx.coroutines.CancellationException
@@ -66,20 +68,22 @@ fun MoveToPageDialog(pages: List<PageEntity>, currentPageId: String, onPick: (Pa
 fun moveSelectionToPage(graph: AppGraph, undo: Undo, state: PageEditorState, notebook: NotebookEntity, target: PageEntity?) {
     val layer = state.layer
     val strokes = layer.inLayerOrder(layer.selection.toList())
+    val objects = layer.selectedObjectList().map { it.toEntity(state.page.id) }
     val bounds = layer.selectionBounds()
-    if (strokes.isEmpty() || bounds == null || !state.editable) return
+    if ((strokes.isEmpty() && objects.isEmpty()) || bounds == null || !state.editable) return
     val from = state.page
     state.saveHolds++
     val clip = layer.takeSelection()
     val take = layer.undoTop
     val encodeRest = layer.snapshotEncoder()
+    val restObjects = state.objectEntities()
     graph.appScope.launch {
         var to: PageEntity? = null
-        var keys: List<Long>? = null
+        var keys: MovedInk? = null
         try {
             val page = target ?: graph.repository.addPage(notebook)
             val rest = withContext(Dispatchers.Default) { encodeRest() }
-            keys = graph.repository.moveToPage(from, rest, page, strokes)
+            keys = graph.repository.moveToPage(from, rest, page, strokes, objects, restObjects)
             to = page
         } catch (e: CancellationException) {
             throw e
@@ -106,7 +110,7 @@ fun moveSelectionToPage(graph: AppGraph, undo: Undo, state: PageEditorState, not
 /** «Отменить» of a move: the strokes go back to [from] (saved), then leave [to]. */
 private suspend fun moveBack(
     graph: AppGraph, mover: PageEditorState, take: Any?, clip: InkClip, from: PageEntity, left: Float, top: Float,
-    to: PageEntity, keys: List<Long>,
+    to: PageEntity, moved: MovedInk,
 ) = ui {
     val source = PageEditorState.editorOf(from.id)
     if (source != null) {
@@ -119,8 +123,10 @@ private suspend fun moveBack(
     } else {
         // the editor that moved them has closed: wait for its last save, then add them to the stored page
         mover.saver.flush()
-        graph.repository.appendInk(from, clip.strokes.map(InkAffine.translate(left, top)::apply))
+        val back = InkAffine.translate(left, top)
+        graph.repository.appendInk(from, clip.strokes.map(back::apply), clip.objects.map { it.transformed(back) })
     }
     val target = PageEditorState.editorOf(to.id)
-    if (target != null) target.layer.removeByKeys(keys) else graph.repository.takeBackFromPage(to.id, keys)
+    if (target != null) target.layer.removeByKeys(moved.keys, moved.objectIds)
+    else graph.repository.takeBackFromPage(to.id, moved.keys, moved.objectIds)
 }

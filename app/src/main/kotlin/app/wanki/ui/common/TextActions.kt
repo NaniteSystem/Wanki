@@ -50,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import app.wanki.data.AnswerMode
 import app.wanki.graph
 import app.wanki.input.InkLayer
+import app.wanki.data.PageObjectKind
 import app.wanki.recognition.TranslationService
 import app.wanki.review.WritingLayout
 import kotlinx.coroutines.launch
@@ -60,12 +61,20 @@ fun copyToClipboard(context: Context, text: String) {
 }
 
 /**
- * Bar shown while handwriting is selected with the lasso: the count, recognize → text actions (copy, translate, make a
- * card), delete, and «⋮» with copy, duplicate, colour, (notebooks only, [onMoveToPage]) «На другую страницу…» and
- * «Снять выделение». The count is a bare number so the bar fits a 360 dp phone at font scale 1.3.
+ * Bar shown while handwriting or page objects are selected with the lasso: the count, recognize → text actions (copy,
+ * translate, make a card; the text of selected text blocks when no strokes are selected), delete, and «⋮» with
+ * «Изменить текст» (exactly one text block selected, [onEditText]), copy, duplicate, colour, (notebooks only,
+ * [onMoveToPage]) «На другую страницу…» and «Снять выделение». The count is a bare number so the bar fits a 360 dp
+ * phone at font scale 1.3.
  */
 @Composable
-fun SelectionBar(layer: InkLayer, language: String, modifier: Modifier = Modifier, onMoveToPage: (() -> Unit)? = null) {
+fun SelectionBar(
+    layer: InkLayer,
+    language: String,
+    modifier: Modifier = Modifier,
+    onMoveToPage: (() -> Unit)? = null,
+    onEditText: ((String) -> Unit)? = null,
+) {
     val graph = LocalContext.current.graph
     var dialog by remember { mutableStateOf(false) }
     var text by remember { mutableStateOf<String?>(null) }
@@ -73,7 +82,8 @@ fun SelectionBar(layer: InkLayer, language: String, modifier: Modifier = Modifie
     var menu by remember { mutableStateOf(false) }
     var coloring by remember { mutableStateOf(false) }
     val scope = rememberUiScope()
-    val count = layer.selection.size
+    val count = layer.selection.size + layer.selectedObjects.size
+    val texts = layer.selectedObjectList().filter { it.kind == PageObjectKind.TEXT }
     Surface(tonalElevation = 3.dp, shape = MaterialTheme.shapes.large, modifier = modifier) {
         Row(Modifier.padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(
@@ -85,7 +95,8 @@ fun SelectionBar(layer: InkLayer, language: String, modifier: Modifier = Modifie
                 text = null
                 failed = false
                 val strokes = layer.selection.toList()
-                scope.launch {
+                if (strokes.isEmpty()) text = texts.joinToString("\n") { it.text }
+                else scope.launch {
                     val r = graph.textRecognition.recognize(strokes, language)
                     if (r == null) failed = true else text = r.text
                 }
@@ -98,6 +109,10 @@ fun SelectionBar(layer: InkLayer, language: String, modifier: Modifier = Modifie
                     Icon(painterResource(R.drawable.ic_more_vert), contentDescription = "Ещё")
                 }
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    if (onEditText != null && texts.size == 1) SelectionMenuItem("Изменить текст", R.drawable.ic_edit, "sel-edit-text") {
+                        menu = false
+                        onEditText(texts.single().id)
+                    }
                     SelectionMenuItem("Копировать", R.drawable.ic_content_copy, "sel-copy") {
                         menu = false
                         InkClipboard.clip = layer.copySelection()

@@ -6,9 +6,10 @@ import androidx.compose.runtime.setValue
 import app.wanki.ink.InkRect
 import app.wanki.ink.InkStroke
 
-/** Copied strokes, placed relative to the top-left corner of their bounds. */
-data class InkClip(val strokes: List<InkStroke>) {
-    fun bounds(): InkRect? = strokes.mapNotNull { it.bounds() }.reduceOrNull { a, b -> a.union(b) }
+/** Copied strokes and page objects, placed relative to the top-left corner of their bounds. */
+data class InkClip(val strokes: List<InkStroke>, val objects: List<PageObject> = emptyList()) {
+    fun bounds(): InkRect? = (strokes.mapNotNull { it.bounds() } + objects.map { it.bounds() }).reduceOrNull { a, b -> a.union(b) }
+    val isEmpty: Boolean get() = strokes.isEmpty() && objects.isEmpty()
 }
 
 /**

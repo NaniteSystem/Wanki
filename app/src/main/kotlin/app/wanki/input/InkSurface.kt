@@ -35,7 +35,8 @@ import androidx.ink.rendering.android.canvas.CanvasStrokeRenderer
  * A writing surface. Without a [viewport] it is a fixed canvas (screen = world); with one it
  * pans and zooms (boards, notebook pages).
  *
- * [background] and the strokes are drawn in world coordinates, [overlay] in screen coordinates.
+ * [background], the layer's page objects (under the ink) and the strokes are drawn in world coordinates, [overlay]
+ * in screen coordinates.
  * In-progress strokes are rendered by androidx.ink with low latency, finished ones by Compose: from
  * [InkTiles] when there is a viewport, stroke by stroke otherwise.
  */
@@ -77,6 +78,8 @@ fun InkSurface(
     val scaleIcon = painterResource(R.drawable.ic_open_in_full)
     val rotateIcon = painterResource(R.drawable.ic_rotate_right)
     val touchPx = with(LocalDensity.current) { 48.dp.toPx() }
+    val media = (androidx.compose.ui.platform.LocalContext.current.applicationContext as? app.wanki.WankiApp)?.graph?.media
+    val objectPainter = remember(media) { PageObjectPainter(media, scope) }
 
     // clip: page backgrounds are drawn far beyond the visible area
     Box(modifier.clipToBounds().onSizeChanged { viewport?.onScreenSize(it.width.toFloat(), it.height.toFloat()) }) {
@@ -91,6 +94,7 @@ fun InkSurface(
                 scale(scale, scale, pivot = androidx.compose.ui.geometry.Offset.Zero)
             }) {
                 background()
+                if (layer.objects.isNotEmpty()) drawObjects(layer, objectPainter, scale)
                 if (showInk) {
                     if (tiles != null && vp != null) tiles.draw(this, vp)
                     else drawStrokesDirect(layer, renderer, matrix)
@@ -167,6 +171,14 @@ private fun DrawScope.drawStrokesDirect(layer: InkLayer, renderer: CanvasStrokeR
             canvas.restore()
         }
     }
+}
+
+/** Text blocks and pictures in draw order, under the ink; objects being dragged are drawn where the drag puts them. */
+private fun DrawScope.drawObjects(layer: InkLayer, painter: PageObjectPainter, scale: Float) {
+    painter.rev // a picture that arrives draws again
+    val canvas = drawContext.canvas.nativeCanvas
+    val live = layer.liveTransform?.takeIf { !it.isIdentity }
+    for (o in layer.objects) painter.draw(canvas, if (live != null && layer.isTransforming(o.id)) o.transformed(live) else o, scale)
 }
 
 /** Lasso path while drawing it, then a dashed frame around the selection (world coordinates), turned with a running drag. */

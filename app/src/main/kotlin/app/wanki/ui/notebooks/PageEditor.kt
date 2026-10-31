@@ -59,6 +59,14 @@ import app.wanki.input.InkSection
 import app.wanki.input.ToolSelection
 import app.wanki.input.ToolKind
 import app.wanki.input.InkClipboard
+import app.wanki.input.InkClip
+import app.wanki.input.PageObject
+import app.wanki.input.textBlockHeight
+import app.wanki.input.toEntity
+import app.wanki.input.toModelOrNull
+import app.wanki.data.NotebookKind
+import app.wanki.data.PageObjectEntity
+import app.wanki.data.PageObjectKind
 import app.wanki.input.Viewport
 import app.wanki.recognition.ModelStatus
 import app.wanki.ui.common.InkToolbar
@@ -85,6 +93,23 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
+import android.content.ActivityNotFoundException
+import android.net.Uri
+import androidx.activity.compose.LocalActivityResultRegistryOwner
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.ActivityResultRegistry
+import androidx.activity.result.ActivityResultRegistryOwner
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.VisibleForTesting
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.res.painterResource
+import androidx.core.content.FileProvider
+import app.wanki.media.PictureImport
+import app.wanki.ui.common.Undo
+import java.io.File
 
 /**
  * Open panels of a page screen. Lives in the screen (not in the per-page [PageEditorState]), so turning a
@@ -341,7 +366,14 @@ class PageEditorState(
                 readOnly = true
             }
         }
+        // objects are shown on an unreadable page too (they cannot be edited there either)
+        val stored = withContext(Dispatchers.IO) { graph.repository.pageObjects(page.id) }
+        val known = stored.mapNotNull { e -> e.toModelOrNull() }
+        // a kind this version does not know is kept as it is and saved back with the others
+        foreignObjects = stored.filter { it.toModelOrNull() == null }
+        layer.resetObjects(known)
         recognizedText = graph.repository.recognizedText(page.id)
+        savedObjectsRev = layer.objectsRev
         savedRev = layer.strokesRev
         recognizedVersion = layer.version
         loaded = true
@@ -354,12 +386,78 @@ class PageEditorState(
      */
     var saveHolds = 0
 
+    /** Stored objects of kinds this version does not know: never shown, saved back unchanged. */
+    private var foreignObjects: List<PageObjectEntity> = emptyList()
+    private var savedObjectsRev = -1
+
+    /** Text blocks and pictures go on notebook and diary pages, not on boards (Decision 10). */
+    val objectsAllowed: Boolean get() = notebook.kind != NotebookKind.BOARD.name
+
+    /** The page's objects as stored rows, [foreignObjects] included. Main thread. */
+    fun objectEntities(): List<PageObjectEntity> = layer.objects.map { it.toEntity(page.id) } + foreignObjects
+
+    /** The ink when [InkLayer.strokesRev] moved, then the objects when [InkLayer.objectsRev] moved. */
     private suspend fun saveIfDirty() {
-        if (!loaded || readOnly || saveHolds > 0 || layer.strokesRev == savedRev) return
-        val rev = layer.strokesRev
-        val encode = layer.snapshotEncoder() // the stroke list is taken here, the joining runs on IO
-        withContext(Dispatchers.IO) { graph.repository.saveInkBlob(page, encode()) }
-        savedRev = rev
+        if (!loaded || readOnly || saveHolds > 0) return
+        if (layer.strokesRev != savedRev) {
+            val rev = layer.strokesRev
+            val encode = layer.snapshotEncoder() // the stroke list is taken here, the joining runs on IO
+            withContext(Dispatchers.IO) { graph.repository.saveInkBlob(page, encode()) }
+            savedRev = rev
+        }
+        if (layer.objectsRev != savedObjectsRev) {
+            val rev = layer.objectsRev
+            val list = objectEntities()
+            withContext(Dispatchers.IO) { graph.repository.savePageObjects(page, list) }
+            savedObjectsRev = rev
+        }
+    }
+
+    /** Whether objects may be added or changed now. */
+    private val objectsEditable: Boolean get() = loaded && !readOnly && objectsAllowed
+
+    /** Selects just [id] with the lasso ready to move it. */
+    private fun selectObject(id: String) {
+        layer.clearSelection()
+        layer.selectedObjects.add(id)
+        selectTool(tool.copy(kind = ToolKind.LASSO))
+    }
+
+    /** A text block [TEXT_BLOCK_WIDTH] wide at the centre of the view, in the pen's colour; selected. */
+    fun insertText(text: String, size: Float) {
+        if (!objectsEditable || text.isBlank()) return
+        val v = viewport.visibleWorld()
+        val w = TEXT_BLOCK_WIDTH
+        val h = textBlockHeight(text, w, size)
+        val o = PageObject(
+            PageObject.newId(), PageObjectKind.TEXT, (v.left + v.right) / 2 - w / 2, (v.top + v.bottom) / 2 - h / 2, w, h,
+            0f, layer.nextZ(), text, tool.color, size, null,
+        )
+        layer.addObject(o)
+        selectObject(o.id)
+    }
+
+    /** A new text and size for the text block [id] (one undo step); its height follows the text. */
+    fun editText(id: String, text: String, size: Float) {
+        if (!objectsEditable || text.isBlank()) return
+        val o = layer.objects.firstOrNull { it.id == id && it.kind == PageObjectKind.TEXT } ?: return
+        layer.updateObject(o.copy(text = text, textSize = size, h = textBlockHeight(text, o.w, size)))
+    }
+
+    /** The stored picture [media] ([width] × [height] px) fitted into 600 × 600 at the centre of the view; selected. */
+    fun insertPicture(media: String, width: Int, height: Int): Boolean {
+        if (!objectsEditable || width <= 0 || height <= 0) return false
+        val v = viewport.visibleWorld()
+        val k = PICTURE_BOX / maxOf(width, height)
+        val w = width * k
+        val h = height * k
+        val o = PageObject(
+            PageObject.newId(), PageObjectKind.IMAGE, (v.left + v.right) / 2 - w / 2, (v.top + v.bottom) / 2 - h / 2, w, h,
+            0f, layer.nextZ(), "", ToolSelection.DEFAULT_INK, 0f, media,
+        )
+        layer.addObject(o)
+        selectObject(o.id)
+        return true
     }
 
     suspend fun recognizeIfDirty() {
@@ -410,9 +508,12 @@ class PageEditorState(
         page = page.copy(template = t.name)
     }
 
+    /** What «Вставить» puts here: a board takes only the strokes of the clip. */
+    fun pastable(): InkClip? = InkClipboard.clip?.let { if (objectsAllowed) it else it.copy(objects = emptyList()) }?.takeIf { !it.isEmpty }
+
     /** Puts the ink clipboard at the centre of the view, selected, with the lasso ready to move it. */
     fun paste() {
-        val clip = InkClipboard.clip ?: return
+        val clip = pastable() ?: return
         if (!loaded || readOnly) return
         val v = viewport.visibleWorld()
         layer.paste(clip, (v.left + v.right) / 2, (v.top + v.bottom) / 2)
@@ -420,7 +521,7 @@ class PageEditorState(
     }
 
     /** Strokes mostly past the edge of the (portrait) sheet, e.g. after the page was turned. */
-    fun offPageCount(): Int = if (infinite) 0 else layer.outside(PageGeometry.bounds(page.landscape)).size
+    fun offPageCount(): Int = if (infinite) 0 else PageGeometry.bounds(page.landscape).let { layer.outside(it).size + layer.objectsOutside(it).size }
 
     /** Selects the strokes past the edge, with the lasso ready to move them back. */
     fun selectOffPage(): Int {
@@ -442,6 +543,9 @@ class PageEditorState(
 /** Header actions shared by every page screen. «Бумага…» only makes sense for sheets, not for boards. */
 fun PageEditorState.paperAction() = HeaderAction(R.drawable.ic_article, "Бумага…", "menu-template") { showPaper = true }
 fun PageEditorState.fitAction() = HeaderAction(R.drawable.ic_fit_screen, "Вписать", "fit") { viewport.fitWidth() }
+private const val TEXT_BLOCK_WIDTH = 600f
+private const val PICTURE_BOX = 600f
+
 fun PageEditorState.textAction() = HeaderAction(R.drawable.ic_notes, "Текст", "show-text") { showText = !showText }
 
 /**
@@ -469,6 +573,7 @@ fun PageEditor(
     val graph = context.graph
     var translateAll by remember { mutableStateOf(false) }
     val undo = LocalUndo.current
+    val insert = remember(state) { InsertUi() }
 
     LaunchedEffect(state) { ui { state.load() } }
     // version only changes when a gesture ends: save each one; recognize after a pause
@@ -501,13 +606,21 @@ fun PageEditor(
         val wide = maxWidth >= 600.dp
         val sheetMax = maxHeight / 2
         Column(Modifier.fillMaxSize()) {
-            val paste = if (InkClipboard.clip != null && state.loaded && !state.readOnly) {
+            val paste = if (state.pastable() != null && state.loaded && !state.readOnly) {
                 listOf(HeaderAction(R.drawable.ic_content_paste, "Вставить", "menu-paste") { state.paste() })
             } else emptyList()
-            ScreenHeader(title, onBack = back, subtitle = subtitle, subtitleMaxLines = 1, primary = primary, menu = paste + menu)
+            val inserts = if (state.objectsAllowed && state.loaded && !state.readOnly) listOf(
+                HeaderAction(R.drawable.ic_text_fields, "Текстовый блок", "menu-insert-text") { insert.text = true },
+                HeaderAction(R.drawable.ic_image, "Картинка", "menu-insert-image") { insert.picture = true },
+            ) else emptyList()
+            ScreenHeader(title, onBack = back, subtitle = subtitle, subtitleMaxLines = 1, primary = primary, menu = paste + inserts + menu)
             InkToolbar(state.tool, state::selectTool, state.layer, state.eraser, state::selectEraser, Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
             if (state.layer.hasSelection && !state.readOnly) {
-                SelectionBar(state.layer, state.notebook.language, Modifier.padding(horizontal = 8.dp, vertical = 2.dp), onMoveToPage = onMoveSelection)
+                SelectionBar(
+                    state.layer, state.notebook.language, Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                    onMoveToPage = onMoveSelection,
+                    onEditText = if (state.objectsAllowed) ({ id -> insert.editing = id }) else null,
+                )
             }
             if (state.readOnly) {
                 Surface(color = MaterialTheme.colorScheme.errorContainer, modifier = Modifier.fillMaxWidth()) {
@@ -610,6 +723,112 @@ fun PageEditor(
         )
     }
     if (translateAll) TextActionsDialog(initialText = state.recognizedText, onDismiss = { translateAll = false })
+    val owner = PicturePickers.registry?.let { r ->
+        remember(r) { object : ActivityResultRegistryOwner { override val activityResultRegistry = r } }
+    } ?: LocalActivityResultRegistryOwner.current
+    if (owner != null) CompositionLocalProvider(LocalActivityResultRegistryOwner provides owner) { InsertDialogs(state, insert) }
+}
+
+/** Which insert dialog is open. */
+private class InsertUi {
+    var text by mutableStateOf(false)
+    var picture by mutableStateOf(false)
+    /** The text block being edited ([SelectionBar]'s «Изменить текст»). */
+    var editing by mutableStateOf<String?>(null)
+}
+
+/** Lets a test answer the picture pickers ([ActivityResultRegistry]); null in the app. */
+object PicturePickers {
+    @VisibleForTesting
+    var registry: ActivityResultRegistry? = null
+}
+
+/** «Текстовый блок», the «Картинка» choice («Из галереи», «Снимок») and the text block editor. */
+@Composable
+private fun InsertDialogs(state: PageEditorState, insert: InsertUi) {
+    val context = LocalContext.current
+    val graph = context.graph
+    val undo = LocalUndo.current
+    val scope = rememberCoroutineScope()
+    // the camera's file, kept across recreation while the camera app is open
+    var shot by rememberSaveable { mutableStateOf<String?>(null) }
+    val gallery = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) importPicture(context.applicationContext, graph, undo, state, uri, null)
+    }
+    val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { taken ->
+        val file = shot?.let(::File)
+        shot = null
+        if (file == null) return@rememberLauncherForActivityResult
+        if (taken && file.length() > 0) importPicture(context.applicationContext, graph, undo, state, Uri.fromFile(file), file) else file.delete()
+    }
+    if (insert.text) {
+        TextBlockDialog(onDone = { t, size -> insert.text = false; state.insertText(t, size) }, onDismiss = { insert.text = false })
+    }
+    insert.editing?.let { id ->
+        val o = state.layer.objects.firstOrNull { it.id == id }
+        if (o == null) insert.editing = null
+        else TextBlockDialog(o.text, o.textSize, onDone = { t, size -> insert.editing = null; state.editText(id, t, size) }, onDismiss = { insert.editing = null })
+    }
+    if (insert.picture) {
+        AlertDialog(
+            onDismissRequest = { insert.picture = false },
+            title = { Text("Картинка") },
+            text = {
+                Column {
+                    PictureSource("Из галереи", R.drawable.ic_photo_library, "insert-gallery") {
+                        insert.picture = false
+                        gallery.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                    }
+                    PictureSource("Снимок", R.drawable.ic_photo_camera, "insert-camera") {
+                        insert.picture = false
+                        try {
+                            val file = File(context.cacheDir, "camera/shot-${java.util.UUID.randomUUID()}.jpg").apply { parentFile?.mkdirs() }
+                            val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", file)
+                            shot = file.path
+                            camera.launch(uri)
+                        } catch (e: ActivityNotFoundException) {
+                            shot = null
+                            scope.launch { undo.say("Нет приложения камеры") }
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { insert.picture = false }) { Text("Отмена") } },
+        )
+    }
+}
+
+@Composable
+private fun PictureSource(label: String, icon: Int, tag: String, onClick: () -> Unit) {
+    TextButton(onClick = onClick, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag(tag)) {
+        androidx.compose.material3.Icon(painterResource(icon), contentDescription = null)
+        Text(label, modifier = Modifier.padding(start = 12.dp).weight(1f))
+    }
+}
+
+/** Stores the picture at [uri] (on IO) and puts it on [state]'s page; a failure is said in the shell snackbar. [cleanup] is deleted after. */
+private fun importPicture(context: android.content.Context, graph: AppGraph, undo: Undo, state: PageEditorState, uri: Uri, cleanup: File?) {
+    graph.appScope.launch {
+        try {
+            val (name, size) = withContext(Dispatchers.IO) {
+                val n = PictureImport.prepare(context, uri, graph.media)
+                n to PictureImport.size(graph.media, n)
+            }
+            ui {
+                when {
+                    !state.editable -> undo.say("Картинка не вставлена: страница закрыта")
+                    size == null || !state.insertPicture(name, size.first, size.second) -> undo.say("Не удалось вставить картинку")
+                }
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e("Wanki", "page ${state.page.id}: picture not inserted", e)
+            ui { undo.say(if (e is java.io.IOException && e.message == "unreadable") "Это не картинка" else "Не удалось вставить картинку") }
+        } finally {
+            cleanup?.delete()
+        }
+    }
 }
 
 @Composable

@@ -475,6 +475,9 @@ interface NotebookDao {
     @Insert
     suspend fun insertObjects(objects: List<PageObjectEntity>)
 
+    @Query("DELETE FROM page_objects WHERE pageId = :pageId AND id IN (:ids)")
+    suspend fun deleteObjectsById(pageId: String, ids: List<String>): Int
+
     @Query("SELECT * FROM page_lines WHERE pageId = :pageId ORDER BY lineIndex")
     suspend fun lines(pageId: String): List<PageLineEntity>
 
