@@ -657,6 +657,17 @@ class RepositoryTest {
     }
 
     @Test
+    fun saveLinesKeepsGivenSearchText() = runBlocking {
+        val page = onePage()
+        inkOn(page)
+        repo.setRecognizedText(page.id, "old a\nold b")
+        repo.saveLines(page.id, listOf(line(page, 1, 0, "a")), searchText = "old a\nold b")
+        assertEquals("old a\nold b", repo.recognizedText(page.id))
+        repo.setLineCorrection(page.id, 1, "A", searchText = "A\nold b")
+        assertEquals("A\nold b", repo.recognizedText(page.id))
+    }
+
+    @Test
     fun setLineCorrectionNullResets() = runBlocking {
         val page = onePage()
         inkOn(page)

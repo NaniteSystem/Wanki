@@ -196,6 +196,8 @@ fun NotebookScreen(
     notebookId: String, initialPageId: String?, onBack: () -> Unit, onGrid: (currentPageId: String) -> Unit,
     /** Search query whose lines are marked on the opening page. */
     highlight: String? = null,
+    /** The highlight has been shown: the caller drops it from the route. */
+    onHighlightShown: () -> Unit = {},
 ) {
     val graph = LocalContext.current.graph
     val undo = LocalUndo.current
@@ -226,10 +228,10 @@ fun NotebookScreen(
     val page = pages.getOrNull(i) ?: return
     val pageUi = rememberPageUi()
     // the marks belong to the page the search hit opened; once the reader turns away they are not shown again
-    var highlightSpent by rememberSaveable(notebookId, initialPageId) { mutableStateOf(false) }
-    if (page.id != initialPageId && !highlightSpent) highlightSpent = true
-    val mark = highlight.takeIf { !highlightSpent && page.id == initialPageId }
-    val state = remember(page.id) { PageEditorState(graph, nb, page, infinite = false, ui = pageUi, preload = preload, highlightQuery = mark) }
+    val mark = highlight.takeIf { page.id == initialPageId }
+    val state = remember(page.id) {
+        PageEditorState(graph, nb, page, infinite = false, ui = pageUi, preload = preload, highlightQuery = mark, onHighlightShown = onHighlightShown)
+    }
     androidx.compose.runtime.SideEffect { state.notebook = nb }
     fun addPage() = adder.add(pages.size) { graph.repository.addPage(nb) }
     var moving by remember { mutableStateOf(false) }

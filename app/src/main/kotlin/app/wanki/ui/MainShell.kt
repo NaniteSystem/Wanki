@@ -278,6 +278,8 @@ private fun Content(nav: Navigator) {
         Route.Notebooks -> NotebooksScreen(onOpen = { id, page -> nav.open(Route.Notebook(id, page)) }, onOpenHit = { hit, q -> nav.openSearchHit(hit, q) })
         is Route.Notebook -> NotebookScreen(
             r.id, r.pageId, onBack = { nav.back() }, highlight = r.highlight,
+            // shown once: recreation or a restored route must not mark the lines again
+            onHighlightShown = { if (nav.current == r) nav.replaceTop(Route.Notebook(r.id, r.pageId)) },
             // the notebook screen is left while the grid is open: remember the page it shows
             onGrid = { page -> nav.replaceTop(Route.Notebook(r.id, page)); nav.open(Route.PageGrid(r.id)) },
         )

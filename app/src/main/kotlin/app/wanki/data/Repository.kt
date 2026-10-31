@@ -935,21 +935,21 @@ class Repository(private val db: WankiDatabase) {
 
     suspend fun pageLines(pageId: String): List<PageLineEntity> = notebooks.lines(pageId)
 
-    /** Replaces the page's lines (corrections come from the caller) and rewrites the searchable text from what is shown. */
-    suspend fun saveLines(pageId: String, lines: List<PageLineEntity>) = db.withTransaction {
+    /** Replaces the page's lines (corrections come from the caller) and rewrites the searchable text from what is shown, or [searchText] when the caller keeps old text for lines that failed. */
+    suspend fun saveLines(pageId: String, lines: List<PageLineEntity>, searchText: String? = null) = db.withTransaction {
         notebooks.deleteLines(pageId)
         if (lines.isNotEmpty()) notebooks.insertLines(lines.map { it.copy(pageId = pageId) })
-        notebooks.setRecognizedText(pageId, joinedText(lines), System.currentTimeMillis())
+        notebooks.setRecognizedText(pageId, searchText ?: joinedText(lines), System.currentTimeMillis())
     }
 
     /** Sets (or with null resets) the user's correction of one line; the searchable text follows. */
-    suspend fun setLineCorrection(pageId: String, lineKey: Long, text: String?) = db.withTransaction {
+    suspend fun setLineCorrection(pageId: String, lineKey: Long, text: String?, searchText: String? = null) = db.withTransaction {
         val lines = notebooks.lines(pageId)
         val line = lines.firstOrNull { it.lineKey == lineKey } ?: return@withTransaction
         val now = System.currentTimeMillis()
         val updated = line.copy(corrected = text, updatedAt = now)
         notebooks.setLineCorrection(pageId, lineKey, text, now)
-        notebooks.setRecognizedText(pageId, joinedText(lines.map { if (it.lineKey == lineKey) updated else it }), now)
+        notebooks.setRecognizedText(pageId, searchText ?: joinedText(lines.map { if (it.lineKey == lineKey) updated else it }), now)
     }
 
     private fun joinedText(lines: List<PageLineEntity>) = lines.sortedBy { it.lineIndex }.joinToString("\n") { it.shown }

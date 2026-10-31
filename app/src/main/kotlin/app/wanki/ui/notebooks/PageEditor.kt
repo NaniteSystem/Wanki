@@ -48,6 +48,7 @@ import app.wanki.data.PageEntity
 import app.wanki.data.PageLineEntity
 import app.wanki.recognition.LineMatch
 import app.wanki.recognition.PageRecognizer
+import app.wanki.recognition.SearchText
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import app.wanki.data.PageTemplate
@@ -235,6 +236,8 @@ class PageEditorState(
     private val preload: InkPreloadSlot? = null,
     /** A search query: the lines of this page that contain it are marked for a few seconds after the page opens. */
     private val highlightQuery: String? = null,
+    /** Called once the highlight has been shown (or could not be): the route forgets the query. */
+    private val onHighlightShown: () -> Unit = {},
 ) {
     /** Current notebook settings; replaced when they change, so the state (and unsaved ink) stays. */
     var notebook by mutableStateOf(notebook)
@@ -403,9 +406,6 @@ class PageEditorState(
         lines = storedLines
         // pages recognised before lines existed only have the joined text
         recognizedText = if (storedLines.isEmpty()) graph.repository.recognizedText(page.id) else joined(storedLines)
-        highlightQuery?.takeIf { it.isNotBlank() }?.let { q ->
-            highlight = storedLines.filter { LineMatch.matches(it.shown, q) }.map { InkRect(it.left, it.top, it.right, it.bottom) }
-        }
         savedObjectsRev = layer.objectsRev
         savedRev = layer.strokesRev
         // opening a page does not recognise it (a big page would cost the canvas): lines are checked after an edit
@@ -513,11 +513,28 @@ class PageEditorState(
 
     suspend fun recognizeIfDirty() {
         if (!loaded || readOnly || layer.version == recognizedVersion) return
+        recognizeNow()
+    }
+
+    /** Old search text kept for lines that failed (see [SearchText]); null once every line has been read. */
+    private var retained: Retained? = null
+
+    private class Retained(val failedIndexes: List<Int>, val dropped: List<PageLineEntity>, val oldText: String)
+
+    private fun searchTextFor(l: List<PageLineEntity>): String? =
+        retained?.let { SearchText.build(l, it.failedIndexes, it.dropped, it.oldText) }
+
+    /** Recognizes the lines whose strokes changed (none sent when nothing did) and stores the lines and the search text. */
+    private suspend fun recognizeNow() {
         val v = layer.version
         val strokes: List<InkStroke> = layer.strokes.toList()
+        val before = lines
         recognizing = true
         val result = try {
-            PageRecognizer(graph.lineRecognizer).recognize(strokes, layer::strokeKey, lines, notebook.language, page.id)
+            // segmentation and key hashing of a big page stay off the main thread
+            withContext(Dispatchers.Default) {
+                PageRecognizer(graph.lineRecognizer).recognize(strokes, layer::strokeKey, before, notebook.language, page.id)
+            }
         } finally {
             recognizing = false
         }
@@ -530,11 +547,20 @@ class PageEditorState(
             // a correction made while the recognizer worked wins over the row it was computed from
             val latest = graph.repository.pageLines(page.id).associateBy { it.lineKey }
             val merged = result.lines.map { l -> latest[l.lineKey]?.let { l.copy(corrected = it.corrected) } ?: l }
-            if (merged != lines || merged != latest.values.sortedBy { it.lineIndex }) {
-                graph.repository.saveLines(page.id, merged)
+            retained = if (result.failed == 0) null else {
+                val keys = merged.map { it.lineKey }.toSet()
+                Retained(
+                    result.failedIndexes, latest.values.filter { it.lineKey !in keys },
+                    retained?.oldText ?: graph.repository.recognizedText(page.id),
+                )
+            }
+            val text = searchTextFor(merged)
+            if (merged != lines || merged != latest.values.sortedBy { it.lineIndex } || (text != null && text != graph.repository.recognizedText(page.id))) {
+                graph.repository.saveLines(page.id, merged, text)
             }
             lines = merged
-            recognizedText = joined(merged)
+            // nothing read at all: the text shown stays what it was
+            if (!(merged.isEmpty() && result.failed > 0)) recognizedText = joined(merged)
             failedLines = result.failed
         }
         if (result.failed == 0) recognizedVersion = v
@@ -546,15 +572,31 @@ class PageEditorState(
         linesLock.withLock {
             val line = lines.firstOrNull { it.lineKey == lineKey } ?: return
             val fix = text.trim().takeIf { it.isNotEmpty() && it != line.recognized }
-            graph.repository.setLineCorrection(page.id, lineKey, fix)
             val next = lines.map { if (it.lineKey == lineKey) it.copy(corrected = fix) else it }
+            graph.repository.setLineCorrection(page.id, lineKey, fix, searchTextFor(next))
             lines = next
             recognizedText = joined(next)
         }
     }
 
-    /** Puts the viewport on the first highlighted line (not a gesture: the view is not saved for it). */
-    suspend fun scrollToHighlight() {
+    /**
+     * Marks the lines that match the search query and puts the viewport on the first one (not a gesture: the view is
+     * not saved for it). The lines are brought up to date first (a page from before lines existed, or edited since its
+     * last recognition, has none or old ones); when that fails the page opens without a mark.
+     */
+    suspend fun showHighlight() {
+        val q = highlightQuery?.takeIf { it.isNotBlank() } ?: return
+        if (!readOnly) {
+            try {
+                recognizeNow()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e("Wanki", "page ${page.id}: lines not read for the highlight", e)
+            }
+        }
+        highlight = lines.filter { LineMatch.matches(it.shown, q) }.map { InkRect(it.left, it.top, it.right, it.bottom) }
+        onHighlightShown()
         val first = highlight.firstOrNull() ?: return
         var waited = 0
         while (!viewport.hasLayout && waited < 2000) { delay(16); waited += 16 }
@@ -666,7 +708,7 @@ fun PageEditor(
     val insert = remember(state) { InsertUi() }
 
     LaunchedEffect(state) { ui { state.load() } }
-    LaunchedEffect(state, state.loaded) { if (state.loaded) ui { state.scrollToHighlight() } }
+    LaunchedEffect(state, state.loaded) { if (state.loaded) ui { state.showHighlight() } }
     // version only changes when a gesture ends: save each one; recognize after a pause
     LaunchedEffect(state.layer.version, state.loaded) {
         if (!state.loaded) return@LaunchedEffect

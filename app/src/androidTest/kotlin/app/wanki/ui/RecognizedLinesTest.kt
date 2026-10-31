@@ -34,12 +34,14 @@ import java.util.concurrent.CopyOnWriteArrayList
 private class FakeLines : LineRecognizer {
     val calls = CopyOnWriteArrayList<Int>()
     @Volatile var failAt: Int? = null
+    @Volatile var failAll = false
+    @Volatile var texts: Map<Int, String> = emptyMap()
     override fun candidateLanguages(language: String) = listOf("ru")
     override suspend fun recognizeLine(strokes: List<InkStroke>, w: Float, h: Float, pre: String, langs: List<String>, wait: Boolean): Pair<String, String?>? {
         val n = Math.round(strokes.first().bounds()!!.centerY / 200f)
         calls += n
-        if (n == failAt) return null
-        return "строка $n" to "ru"
+        if (failAll || n == failAt) return null
+        return (texts[n] ?: "строка $n") to "ru"
     }
 }
 
@@ -182,9 +184,61 @@ class RecognizedLinesTest {
     }
 
     @Test
+    fun legacyPageHitGetsHighlight() {
+        // a page from before lines existed: only the joined text, no page_lines rows
+        val word = "староеслово"
+        val title = "Lines legacy $stamp"
+        fake.texts = mapOf(2 to "вторая $word")
+        runBlocking {
+            val nb = repo.createNotebook(title, PageTemplate.BLANK, "ru")
+            val page = repo.pages(nb.id).first()
+            repo.saveInk(page, listOf(stroke(185f), stroke(385f), stroke(585f)))
+            repo.setRecognizedText(page.id, "первая\nвторая $word\nтретья")
+            assertTrue(repo.pageLines(page.id).isEmpty())
+        }
+        rule.waitUntilAtLeastOneExists(hasTestTag("tab-Тетради"), 15_000)
+        rule.onNodeWithTag("tab-Тетради").performClick()
+        rule.waitUntilAtLeastOneExists(hasSetTextAction(), 10_000)
+        rule.onNode(hasSetTextAction()).performTextInput(word)
+        rule.waitUntilAtLeastOneExists(hasText("$title · стр. 1"), 10_000)
+        rule.onNode(hasText("$title · стр. 1")).performClick()
+        rule.waitUntilAtLeastOneExists(hasTestTag("page-highlight"), 20_000)
+        assertEquals(3, fake.calls.size)
+    }
+
+    @Test
+    fun failedFirstRecognitionKeepsLegacyText() {
+        val word = "староеслово"
+        val title = "Lines legacy fail $stamp"
+        fake.failAll = true
+        val page = runBlocking {
+            val nb = repo.createNotebook(title, PageTemplate.BLANK, "ru")
+            val p = repo.pages(nb.id).first()
+            repo.saveInk(p, listOf(stroke(185f), stroke(385f), stroke(585f)))
+            repo.setRecognizedText(p.id, "первая $word")
+            p
+        }
+        open(title)
+        addStroke(800f, 3)
+        waitCalls(4)
+        rule.waitUntilAtLeastOneExists(hasText("Не удалось распознать строк: 4 — повторю позже"), 10_000)
+        assertTrue(runBlocking { repo.searchPages(word) }.any { it.pageId == page.id })
+        // one line is read now, the rest still fail: the old text stays for what failed
+        fake.calls.clear()
+        fake.failAll = false
+        fake.failAt = 2
+        addStroke(600f, 4)
+        waitCalls(4)
+        rule.waitUntilAtLeastOneExists(hasText("Не удалось распознать строк: 1 — повторю позже"), 10_000)
+        assertTrue(runBlocking { repo.searchPages(word) }.any { it.pageId == page.id })
+    }
+
+    @Test
     fun searchHitHighlightsLine() {
         val word = "найденноеслово"
         val title = "Lines search $stamp"
+        // the stored rows below have made-up keys, so the page counts as stale and is read again by the fake
+        fake.texts = mapOf(2 to "вторая $word")
         runBlocking {
             val nb = repo.createNotebook(title, PageTemplate.BLANK, "ru")
             val page = repo.pages(nb.id).first()

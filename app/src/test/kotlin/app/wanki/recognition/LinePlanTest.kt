@@ -59,4 +59,16 @@ class LinePlanTest {
         assertTrue(LineMatch.matches("Hello World", "WORLD"))
         assertTrue(!LineMatch.matches("abc", " "))
     }
+
+    @Test
+    fun searchTextKeepsOldContentWhileLinesFail() {
+        val ok = listOf(stored(1, 0, "a"))
+        // nothing failed: the lines
+        assertEquals("a", SearchText.build(ok, emptyList(), emptyList(), "old"))
+        // a legacy page: the failed line has no old row, so the old text stays whole
+        assertEquals("old text", SearchText.build(ok, listOf(1), emptyList(), "old text"))
+        assertEquals("old text", SearchText.build(emptyList(), listOf(0, 1), emptyList(), "old text"))
+        // a changed line failed: its old row fills the place
+        assertEquals("a\nb", SearchText.build(ok, listOf(1), listOf(stored(9, 1, "b")), "old"))
+    }
 }

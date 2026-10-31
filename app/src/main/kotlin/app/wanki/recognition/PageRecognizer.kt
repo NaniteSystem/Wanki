@@ -37,10 +37,26 @@ object LineMatch {
     fun matches(shown: String, query: String): Boolean = query.isNotBlank() && fold(shown).contains(fold(query.trim()))
 }
 
+/**
+ * The page's searchable text while some lines could not be recognised: what failed keeps its old content, so a
+ * failed recognition never takes text out of search.
+ */
+object SearchText {
+    /** Failed lines: where [dropped] (stored rows that no longer match any line) have a row at the same index, it fills the place. */
+    fun build(lines: List<PageLineEntity>, failedIndexes: List<Int>, dropped: List<PageLineEntity>, oldText: String): String {
+        fun join(l: List<PageLineEntity>) = l.sortedBy { it.lineIndex }.joinToString("\n") { it.shown }
+        if (failedIndexes.isEmpty()) return join(lines)
+        val fill = failedIndexes.map { i -> dropped.firstOrNull { it.lineIndex == i } }
+        // a failed line without an old row (a legacy page, or one that failed before): the old text stays as it was
+        if (fill.any { it == null }) return oldText
+        return join(lines + fill.filterNotNull())
+    }
+}
+
 /** Recognizes only the lines of a page whose strokes changed since [stored]; corrections of unchanged lines stay. */
 class PageRecognizer(private val text: LineRecognizer) {
     /** [lines] are the page's lines now (kept and recognized, by index); [failed] lines could not be recognized and are left out. */
-    data class Result(val lines: List<PageLineEntity>, val failed: Int)
+    data class Result(val lines: List<PageLineEntity>, val failed: Int, val failedIndexes: List<Int> = emptyList())
 
     suspend fun recognize(
         strokes: List<InkStroke>,
@@ -61,16 +77,16 @@ class PageRecognizer(private val text: LineRecognizer) {
         val shown = HashMap<Int, String>() // index -> shown text, the pre-context of the next line
         plan.keep.forEach { shown[it.lineIndex] = it.shown }
         val done = ArrayList<PageLineEntity>(plan.keep)
-        var failed = 0
+        val failedAt = ArrayList<Int>()
         val now = System.currentTimeMillis()
         for (l in plan.recognize.sortedBy { it.index }) {
             val b = l.bounds
             val pre = shown.entries.filter { it.key < l.index }.maxByOrNull { it.key }?.value.orEmpty()
             val got = text.recognizeLine(groupOf.getValue(l.index), b.width * 1.2f, b.height * 1.4f, pre, langs, true)
-            if (got == null) { failed++; continue }
+            if (got == null) { failedAt += l.index; continue }
             shown[l.index] = got.first
             done += PageLineEntity(pageId, l.key, l.index, b.left, b.top, b.right, b.bottom, got.first, null, now)
         }
-        return Result(done.sortedBy { it.lineIndex }, failed)
+        return Result(done.sortedBy { it.lineIndex }, failedAt.size, failedAt)
     }
 }
