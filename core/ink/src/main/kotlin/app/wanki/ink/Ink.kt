@@ -56,6 +56,7 @@ data class InkStroke(
 data class InkRect(val left: Float, val top: Float, val right: Float, val bottom: Float) {
     val width get() = right - left
     val height get() = bottom - top
+    val centerX get() = (left + right) / 2
     val centerY get() = (top + bottom) / 2
     fun union(o: InkRect) = InkRect(minOf(left, o.left), minOf(top, o.top), maxOf(right, o.right), maxOf(bottom, o.bottom))
     fun intersects(o: InkRect) = left <= o.right && o.left <= right && top <= o.bottom && o.top <= bottom

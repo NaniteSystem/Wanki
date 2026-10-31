@@ -6,6 +6,7 @@ import app.wanki.ui.common.LocalUndo
 import app.wanki.ui.common.listAction
 import app.wanki.ui.common.ui
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -44,6 +45,11 @@ import app.wanki.ui.common.HeaderAction
 import app.wanki.ui.common.ScreenHeader
 import app.wanki.data.NotebookEntity
 import app.wanki.data.PageEntity
+import app.wanki.data.PageLineEntity
+import app.wanki.recognition.LineMatch
+import app.wanki.recognition.PageRecognizer
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import app.wanki.data.PageTemplate
 import app.wanki.graph
 import app.wanki.ink.InkRect
@@ -115,6 +121,9 @@ import java.io.File
  * Open panels of a page screen. Lives in the screen (not in the per-page [PageEditorState]), so turning a
  * page keeps the text panel open; saved across recreation.
  */
+/** How long a search highlight stays on the page. */
+const val HIGHLIGHT_MS = 4000L
+
 class PageUiState {
     var showText by mutableStateOf(false)
     var showPaper by mutableStateOf(false)
@@ -224,6 +233,8 @@ class PageEditorState(
     val ui: PageUiState = PageUiState(),
     /** Ink read ahead while the screen was still starting ([preloadInk]); used by the first [load] if it is this page's. */
     private val preload: InkPreloadSlot? = null,
+    /** A search query: the lines of this page that contain it are marked for a few seconds after the page opens. */
+    private val highlightQuery: String? = null,
 ) {
     /** Current notebook settings; replaced when they change, so the state (and unsaved ink) stays. */
     var notebook by mutableStateOf(notebook)
@@ -270,7 +281,23 @@ class PageEditorState(
     var showPaper: Boolean
         get() = ui.showPaper
         set(v) { ui.showPaper = v }
+    /** The page's text as the lines show it (corrections included), one line per row. */
     var recognizedText by mutableStateOf("")
+        private set
+
+    /** The recognised lines, top to bottom. */
+    var lines by mutableStateOf<List<PageLineEntity>>(emptyList())
+        private set
+
+    /** Lines the last recognition could not read; they are tried again on the next recognition. */
+    var failedLines by mutableStateOf(0)
+        private set
+
+    /** Changed or left out as a whole by the correction/recognition writers; short sections only. */
+    private val linesLock = Mutex()
+
+    /** World boxes of the lines that matched the search query, shown for [HIGHLIGHT_MS]. */
+    var highlight by mutableStateOf<List<InkRect>>(emptyList())
         private set
     var recognizing by mutableStateOf(false)
         private set
@@ -372,10 +399,18 @@ class PageEditorState(
         // a kind this version does not know is kept as it is and saved back with the others
         foreignObjects = stored.filter { it.toModelOrNull() == null }
         layer.resetObjects(known)
-        recognizedText = graph.repository.recognizedText(page.id)
+        val storedLines = graph.repository.pageLines(page.id)
+        lines = storedLines
+        // pages recognised before lines existed only have the joined text
+        recognizedText = if (storedLines.isEmpty()) graph.repository.recognizedText(page.id) else joined(storedLines)
+        highlightQuery?.takeIf { it.isNotBlank() }?.let { q ->
+            highlight = storedLines.filter { LineMatch.matches(it.shown, q) }.map { InkRect(it.left, it.top, it.right, it.bottom) }
+        }
         savedObjectsRev = layer.objectsRev
         savedRev = layer.strokesRev
-        recognizedVersion = layer.version
+        // not marked as recognised: the first pause after opening re-checks the lines (cheap when none changed) and
+        // retries the ones that failed before
+        recognizedVersion = -1
         loaded = true
     }
 
@@ -475,21 +510,60 @@ class PageEditorState(
         return true
     }
 
+    private fun joined(l: List<PageLineEntity>) = l.sortedBy { it.lineIndex }.joinToString("\n") { it.shown }
+
     suspend fun recognizeIfDirty() {
         if (!loaded || readOnly || layer.version == recognizedVersion) return
         val v = layer.version
         val strokes: List<InkStroke> = layer.strokes.toList()
         recognizing = true
-        val text = graph.textRecognition.recognize(strokes, notebook.language)?.text
-        recognizing = false
-        if (text != null) {
-            // the recognized text lives in the ink row: the ink must be stored first
+        val result = try {
+            PageRecognizer(graph.lineRecognizer).recognize(strokes, layer::strokeKey, lines, notebook.language, page.id)
+        } finally {
+            recognizing = false
+        }
+        // the recognised text lives in the ink row: the ink must be stored first
+        if (strokes.isNotEmpty()) {
             saver.request()
             saver.flush()
-            graph.repository.setRecognizedText(page.id, text)
-            recognizedText = text
-            recognizedVersion = v
         }
+        linesLock.withLock {
+            // a correction made while the recognizer worked wins over the row it was computed from
+            val latest = graph.repository.pageLines(page.id).associateBy { it.lineKey }
+            val merged = result.lines.map { l -> latest[l.lineKey]?.let { l.copy(corrected = it.corrected) } ?: l }
+            if (merged != lines || merged != latest.values.sortedBy { it.lineIndex }) {
+                graph.repository.saveLines(page.id, merged)
+            }
+            lines = merged
+            recognizedText = joined(merged)
+            failedLines = result.failed
+        }
+        if (result.failed == 0) recognizedVersion = v
+    }
+
+    /** Sets the user's fix of one line; blank or equal to the recognised text resets it. Nothing on an unreadable page. */
+    suspend fun correctLine(lineKey: Long, text: String) {
+        if (!loaded || readOnly) return
+        linesLock.withLock {
+            val line = lines.firstOrNull { it.lineKey == lineKey } ?: return
+            val fix = text.trim().takeIf { it.isNotEmpty() && it != line.recognized }
+            graph.repository.setLineCorrection(page.id, lineKey, fix)
+            val next = lines.map { if (it.lineKey == lineKey) it.copy(corrected = fix) else it }
+            lines = next
+            recognizedText = joined(next)
+        }
+    }
+
+    /** Puts the viewport on the first highlighted line (not a gesture: the view is not saved for it). */
+    suspend fun scrollToHighlight() {
+        val first = highlight.firstOrNull() ?: return
+        var waited = 0
+        while (!viewport.hasLayout && waited < 2000) { delay(16); waited += 16 }
+        if (!viewport.hasLayout) return
+        viewport.centerOn(first)
+        savedView = Triple(viewport.scale, viewport.offsetX, viewport.offsetY)
+        delay(HIGHLIGHT_MS)
+        highlight = emptyList()
     }
 
     /** A pan or pinch ended: stores the view a second later (a following gesture restarts the wait). */
@@ -593,6 +667,7 @@ fun PageEditor(
     val insert = remember(state) { InsertUi() }
 
     LaunchedEffect(state) { ui { state.load() } }
+    LaunchedEffect(state, state.loaded) { if (state.loaded) ui { state.scrollToHighlight() } }
     // version only changes when a gesture ends: save each one; recognize after a pause
     LaunchedEffect(state.layer.version, state.loaded) {
         if (!state.loaded) return@LaunchedEffect
@@ -650,6 +725,7 @@ fun PageEditor(
                 }
             }
             Row(Modifier.weight(1f).fillMaxWidth()) {
+                Box(Modifier.weight(1f).fillMaxSize()) {
                 InkSurface(
                     layer = state.layer,
                     tool = state.tool,
@@ -660,15 +736,17 @@ fun PageEditor(
                     eraser = state.eraser,
                     onViewGestureEnd = state::onViewGestureEnd,
                     onPageSwipe = onPageSwipe,
-                    modifier = Modifier.weight(1f).fillMaxSize().testTag("page-canvas"),
+                    modifier = Modifier.fillMaxSize().testTag("page-canvas"),
                     background = {
                         if (state.infinite) drawBoard(state.viewport.visibleWorld(), state.viewport.scale)
                         else drawPage(state.template, state.page.landscape)
                     },
                 )
+                HighlightBoxes(state)
+                }
                 if (state.showText && wide) {
                     Surface(tonalElevation = 1.dp, modifier = Modifier.width(280.dp).fillMaxSize()) {
-                        RecognizedTextPanel(state, onTranslate = { translateAll = true })
+                        RecognizedLinesPanel(state, onTranslate = { translateAll = true })
                     }
                 }
             }
@@ -682,7 +760,7 @@ fun PageEditor(
                 sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
                 modifier = Modifier.heightIn(max = sheetMax),
             ) {
-                RecognizedTextPanel(state, onTranslate = { translateAll = true })
+                RecognizedLinesPanel(state, onTranslate = { translateAll = true })
             }
         }
     }
@@ -845,41 +923,5 @@ private fun importPicture(context: android.content.Context, graph: AppGraph, und
         } finally {
             cleanup?.delete()
         }
-    }
-}
-
-@Composable
-private fun RecognizedTextPanel(state: PageEditorState, onTranslate: () -> Unit) {
-    val context = LocalContext.current
-    Column(
-        Modifier.padding(12.dp).verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Text("Распознанный текст", style = MaterialTheme.typography.titleSmall)
-        val status = state.modelStatus
-        Text(
-            when {
-                state.recognizing -> "распознаю…"
-                status == ModelStatus.DOWNLOADING -> "загрузка модели распознавания…"
-                status == ModelStatus.UNAVAILABLE -> "распознавание недоступно (нет модели или сети)"
-                else -> "обновляется автоматически после паузы"
-            },
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        SelectionContainer {
-            Text(state.recognizedText.ifBlank { "—" }, modifier = Modifier.heightIn(min = 40.dp))
-        }
-        if (state.recognizedText.isNotBlank()) {
-            Row {
-                TextButton(onClick = { copyToClipboard(context, state.recognizedText) }) { Text("Копировать") }
-                TextButton(onClick = onTranslate) { Text("Перевести") }
-            }
-        }
-        Text(
-            "Чтобы взять часть текста — обведите её инструментом «Лассо».",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
     }
 }

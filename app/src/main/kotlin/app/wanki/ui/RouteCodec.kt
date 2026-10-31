@@ -22,7 +22,7 @@ object RouteCodec {
         is Route.CardEditor -> name("CardEditor", str(route.id))
         is Route.Practice -> name("Practice", opt(route.glyph), str(route.language))
         Route.Notebooks -> name("Notebooks")
-        is Route.Notebook -> name("Notebook", str(route.id), opt(route.pageId))
+        is Route.Notebook -> name("Notebook", str(route.id), opt(route.pageId), opt(route.highlight))
         is Route.PageGrid -> name("PageGrid", str(route.notebookId))
         Route.Notes -> name("Notes")
         is Route.Note -> name("Note", opt(route.id))
@@ -57,7 +57,7 @@ object RouteCodec {
             "CardEditor" -> Route.CardEditor(unStr(f[0]))
             "Practice" -> Route.Practice(unOpt(f[0]), unStr(f[1]))
             "Notebooks" -> Route.Notebooks
-            "Notebook" -> Route.Notebook(unStr(f[0]), unOpt(f[1]))
+            "Notebook" -> Route.Notebook(unStr(f[0]), unOpt(f[1]), f.getOrNull(2)?.let(::unOpt))
             "PageGrid" -> Route.PageGrid(unStr(f[0]))
             "Notes" -> Route.Notes
             "Note" -> Route.Note(unOpt(f[0]))

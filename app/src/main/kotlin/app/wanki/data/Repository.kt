@@ -801,7 +801,8 @@ class Repository(private val db: WankiDatabase) {
                 PageInkEntity(
                     pageId = page.id,
                     strokes = blob,
-                    recognizedText = old?.recognizedText.orEmpty(),
+                    // lines saved before the ink row existed could not store their text: it is written with the row
+                    recognizedText = old?.recognizedText ?: joinedText(notebooks.lines(page.id)),
                     recognizedAt = old?.recognizedAt ?: 0,
                     updatedAt = now,
                 ),

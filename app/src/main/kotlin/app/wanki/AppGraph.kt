@@ -13,6 +13,7 @@ import app.wanki.media.MediaStore
 import app.wanki.media.VoiceRecorder
 import app.wanki.recognition.RecognizerPool
 import app.wanki.recognition.Speaker
+import app.wanki.recognition.LineRecognizer
 import app.wanki.recognition.TextRecognition
 import app.wanki.recognition.TranslationService
 import app.wanki.refs.ReferenceRepository
@@ -38,6 +39,8 @@ class AppGraph(context: Context) {
     val texts = TextRepository(db, settings) { morphology }
     val grader = AnswerGrader(references, recognizers, settings)
     val textRecognition = TextRecognition(recognizers, settings)
+    /** What reads a page's lines; tests swap in a fake. */
+    @Volatile var lineRecognizer: LineRecognizer = textRecognition
     val translation = TranslationService(textRecognition)
     val speaker = Speaker(context)
     val backup = Backup(context, db, settings)

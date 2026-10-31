@@ -81,7 +81,8 @@ sealed interface Route {
     /** Handwriting practice: the weak-character queue, or one [glyph]. */
     data class Practice(val glyph: String? = null, val language: String = "ja") : Route
     data object Notebooks : Route
-    data class Notebook(val id: String, val pageId: String? = null) : Route
+    /** [highlight]: a search query; the lines of [pageId] that contain it are marked when the page opens. */
+    data class Notebook(val id: String, val pageId: String? = null, val highlight: String? = null) : Route
     data class PageGrid(val notebookId: String) : Route
     data object Trash : Route
     data object Notes : Route
@@ -125,13 +126,13 @@ class Navigator(initial: List<Route> = listOf(Route.Decks)) {
     fun replaceTop(route: Route) { stack[stack.lastIndex] = route }
 
     /** Opens the screen a search hit lives on: a diary day, a board or a notebook page. */
-    fun openSearchHit(hit: PageSearchHit) {
+    fun openSearchHit(hit: PageSearchHit, query: String? = null) {
         val day = hit.date
         open(
             when {
                 hit.kind == NotebookKind.DIARY.name && day != null -> Route.DiaryDay(day)
                 hit.kind == NotebookKind.BOARD.name -> Route.Board(hit.notebookId)
-                else -> Route.Notebook(hit.notebookId, hit.pageId)
+                else -> Route.Notebook(hit.notebookId, hit.pageId, query?.trim()?.takeIf { it.isNotEmpty() })
             },
         )
     }
@@ -274,9 +275,9 @@ private fun Content(nav: Navigator) {
         Route.Browser -> BrowserScreen(onBack = { nav.back() }, onOpenCard = { nav.open(Route.CardEditor(it)) })
         is Route.CardEditor -> CardEditorScreen(r.id, onBack = { nav.back() }, onPractice = { g, lang -> nav.open(Route.Practice(g, lang)) })
         is Route.Practice -> PracticeScreen(r.glyph, r.language, onBack = { nav.back() })
-        Route.Notebooks -> NotebooksScreen(onOpen = { id, page -> nav.open(Route.Notebook(id, page)) }, onOpenHit = nav::openSearchHit)
+        Route.Notebooks -> NotebooksScreen(onOpen = { id, page -> nav.open(Route.Notebook(id, page)) }, onOpenHit = { hit, q -> nav.openSearchHit(hit, q) })
         is Route.Notebook -> NotebookScreen(
-            r.id, r.pageId, onBack = { nav.back() },
+            r.id, r.pageId, onBack = { nav.back() }, highlight = r.highlight,
             // the notebook screen is left while the grid is open: remember the page it shows
             onGrid = { page -> nav.replaceTop(Route.Notebook(r.id, page)); nav.open(Route.PageGrid(r.id)) },
         )

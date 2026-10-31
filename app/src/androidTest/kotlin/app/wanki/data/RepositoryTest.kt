@@ -648,6 +648,15 @@ class RepositoryTest {
     }
 
     @Test
+    fun linesSavedBeforeInkAreSearchableOnceInkExists() = runBlocking {
+        val page = onePage()
+        repo.saveLines(page.id, listOf(line(page, 1, 0, "a"), line(page, 2, 1, "b", corrected = "B")))
+        assertEquals("", repo.recognizedText(page.id))
+        inkOn(page)
+        assertEquals("a\nB", repo.recognizedText(page.id))
+    }
+
+    @Test
     fun setLineCorrectionNullResets() = runBlocking {
         val page = onePage()
         inkOn(page)

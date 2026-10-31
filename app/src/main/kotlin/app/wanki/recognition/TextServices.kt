@@ -1,5 +1,6 @@
 package app.wanki.recognition
 
+import android.util.Log
 import app.wanki.data.Settings
 import app.wanki.ink.BrushKind
 import app.wanki.ink.InkStroke
@@ -11,6 +12,7 @@ import com.google.mlkit.nl.translate.TranslateLanguage
 import com.google.mlkit.nl.translate.Translation
 import com.google.mlkit.nl.translate.Translator
 import com.google.mlkit.nl.translate.TranslatorOptions
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.tasks.await
 
 /** "auto" = try the user's languages and keep the most plausible result. */
@@ -18,17 +20,27 @@ const val AUTO_LANGUAGE = "auto"
 
 data class RecognizedText(val text: String, val language: String?)
 
+/** Recognizes one line of strokes; [TextRecognition] is the real one, tests bring their own. */
+interface LineRecognizer {
+    fun candidateLanguages(language: String): List<String>
+
+    /** (text, language) of one line, or null when the line could not be recognized. */
+    suspend fun recognizeLine(
+        strokes: List<InkStroke>, w: Float, h: Float, pre: String, langs: List<String>, wait: Boolean = true,
+    ): Pair<String, String?>?
+}
+
 /**
  * Handwriting → text for any language. With a fixed language one model is used; with
  * [AUTO_LANGUAGE] each line is recognized by every candidate model and the result whose text the
  * language identifier finds most convincing in that model's language wins.
  */
-class TextRecognition(private val pool: RecognizerPool, private val settings: Settings) {
+class TextRecognition(private val pool: RecognizerPool, private val settings: Settings) : LineRecognizer {
     private val languageId = LanguageIdentification.getClient(
         LanguageIdentificationOptions.Builder().setConfidenceThreshold(0.01f).build(),
     )
 
-    fun candidateLanguages(language: String): List<String> =
+    override fun candidateLanguages(language: String): List<String> =
         if (language == AUTO_LANGUAGE) settings.autoLanguageList.ifEmpty { listOf("en") } else listOf(language)
 
     /** Recognizes strokes as lines of text. Highlighter strokes are ignored. Null if no model is usable yet. */
@@ -38,24 +50,39 @@ class TextRecognition(private val pool: RecognizerPool, private val settings: Se
         val langs = candidateLanguages(language)
         val out = StringBuilder()
         val votes = HashMap<String, Int>()
+        var failed = 0
+        var lines = 0
         for (line in LineSegmenter.segment(writing)) {
             val lineStrokes = line.map { writing[it] }
             val boxes = lineStrokes.mapNotNull { it.bounds() }
             val width = boxes.maxOf { it.right } - boxes.minOf { it.left }
             val height = boxes.maxOf { it.bottom } - boxes.minOf { it.top }
-            val (text, lang) = recognizeLine(lineStrokes, width * 1.2f, height * 1.4f, out.toString(), langs, wait) ?: return null
+            lines++
+            val got = recognizeLine(lineStrokes, width * 1.2f, height * 1.4f, out.toString(), langs, wait)
+            if (got == null) { failed++; continue }
+            val (text, lang) = got
             if (out.isNotEmpty()) out.append('\n')
             out.append(text)
             if (lang != null) votes.merge(lang, text.length, Int::plus)
         }
+        // null only when no model answered at all; a line that failed is just left out
+        if (lines > 0 && failed == lines) return null
         return RecognizedText(out.toString(), votes.maxByOrNull { it.value }?.key)
     }
 
-    private suspend fun recognizeLine(
+    /** One line of strokes → (text, language), or null when this line could not be recognized. */
+    override suspend fun recognizeLine(
         strokes: List<InkStroke>, w: Float, h: Float, pre: String, langs: List<String>, wait: Boolean,
     ): Pair<String, String?>? {
         val results = langs.mapNotNull { lang ->
-            pool.get(lang).recognize(strokes, w, h, pre, waitForModel = wait)?.firstOrNull()?.let { lang to it }
+            try {
+                pool.get(lang).recognize(strokes, w, h, pre, waitForModel = wait)?.firstOrNull()?.let { lang to it }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e("Wanki", "line recognition failed ($lang)", e)
+                null
+            }
         }
         if (results.isEmpty()) return null
         if (results.size == 1) return results[0].second to results[0].first

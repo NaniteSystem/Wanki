@@ -77,6 +77,12 @@ class Viewport(
         set(scale.coerceIn(minScale, maxScale), offsetX, offsetY)
     }
 
+    /** Moves the view so that world [r] is centred on screen at the current scale (clamped like a pan). Needs a layout. */
+    fun centerOn(r: InkRect) {
+        if (screenW == 0f) return
+        set(scale, screenW / 2 - r.centerX * scale, screenH / 2 - r.centerY * scale)
+    }
+
     /** Fit the page width (or reset an infinite board to 1:1). */
     fun fitWidth() {
         val b = bounds

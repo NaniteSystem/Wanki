@@ -73,7 +73,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun NotebooksScreen(
     onOpen: (notebookId: String, pageId: String?) -> Unit,
-    onOpenHit: (PageSearchHit) -> Unit,
+    onOpenHit: (PageSearchHit, query: String) -> Unit,
 ) {
     val graph = LocalContext.current.graph
     val notebooks by remember { graph.repository.observeNotebooks(NotebookKind.NOTEBOOK) }.collectAsState(null)
@@ -108,7 +108,7 @@ fun NotebooksScreen(
                 LazyColumn(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (hits.isEmpty()) item { Text("Ничего не найдено", color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     items(hits, key = { it.pageId }) { h ->
-                        Card(Modifier.fillMaxWidth().clickable { onOpenHit(h) }) {
+                        Card(Modifier.fillMaxWidth().clickable { onOpenHit(h, query) }) {
                             Column(Modifier.padding(12.dp)) {
                                 Text("${h.notebookTitle} · стр. ${h.pageIndex + 1}", style = MaterialTheme.typography.labelLarge)
                                 Text(snippet(h.recognizedText, query), maxLines = 3)
@@ -192,7 +192,11 @@ private fun snippet(text: String, query: String): String {
 
 /** A notebook: one page at a time with page navigation. */
 @Composable
-fun NotebookScreen(notebookId: String, initialPageId: String?, onBack: () -> Unit, onGrid: (currentPageId: String) -> Unit) {
+fun NotebookScreen(
+    notebookId: String, initialPageId: String?, onBack: () -> Unit, onGrid: (currentPageId: String) -> Unit,
+    /** Search query whose lines are marked on the opening page. */
+    highlight: String? = null,
+) {
     val graph = LocalContext.current.graph
     val undo = LocalUndo.current
     var settingsRev by remember { mutableStateOf(0) }
@@ -221,7 +225,11 @@ fun NotebookScreen(notebookId: String, initialPageId: String?, onBack: () -> Uni
     val i = index ?: return
     val page = pages.getOrNull(i) ?: return
     val pageUi = rememberPageUi()
-    val state = remember(page.id) { PageEditorState(graph, nb, page, infinite = false, ui = pageUi, preload = preload) }
+    // the marks belong to the page the search hit opened; once the reader turns away they are not shown again
+    var highlightSpent by rememberSaveable(notebookId, initialPageId) { mutableStateOf(false) }
+    if (page.id != initialPageId && !highlightSpent) highlightSpent = true
+    val mark = highlight.takeIf { !highlightSpent && page.id == initialPageId }
+    val state = remember(page.id) { PageEditorState(graph, nb, page, infinite = false, ui = pageUi, preload = preload, highlightQuery = mark) }
     androidx.compose.runtime.SideEffect { state.notebook = nb }
     fun addPage() = adder.add(pages.size) { graph.repository.addPage(nb) }
     var moving by remember { mutableStateOf(false) }
