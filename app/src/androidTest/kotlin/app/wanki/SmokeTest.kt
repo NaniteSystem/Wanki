@@ -1,6 +1,10 @@
 package app.wanki
 
+import android.accessibilityservice.AccessibilityService
 import android.graphics.Bitmap
+import android.os.SystemClock
+import android.view.InputDevice
+import android.view.MotionEvent
 import android.util.Log
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -14,6 +18,7 @@ import androidx.compose.ui.test.down
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.moveBy
 import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isRoot
@@ -29,6 +34,12 @@ import androidx.compose.ui.test.up
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import app.wanki.data.NotebookKind
+import app.wanki.data.PageTemplate
+import app.wanki.input.EraserSettings
+import app.wanki.input.InkLayer
+import app.wanki.input.InkSection
+import app.wanki.input.InkTiles
+import app.wanki.input.SelectionHandles
 import app.wanki.data.TrashKind
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -38,6 +49,8 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
+import kotlin.math.abs
+import kotlin.math.sin
 
 /**
  * Walks through every section, writes with synthetic finger strokes and saves screenshots to
@@ -94,6 +107,223 @@ class SmokeTest {
             }
         }
         rule.waitForIdle()
+    }
+
+    /** The whole screen into /sdcard/shots-task12 (kept after the app is uninstalled), for the person reviewing the stage. */
+    private fun review(name: String) {
+        rule.waitForIdle()
+        val ui = InstrumentationRegistry.getInstrumentation().uiAutomation
+        fun sh(cmd: String) = ui.executeShellCommand(cmd).use { fd -> android.os.ParcelFileDescriptor.AutoCloseInputStream(fd).readBytes() }
+        sh("mkdir -p /sdcard/shots-task12")
+        sh("screencap -p /sdcard/shots-task12/$name.png")
+    }
+
+    /** Tool popups are dropdown windows that test clicks pass by: real touches on the page header close them. */
+    private fun closePopups() {
+        fun open() = rule.onAllNodes(hasTestTag("tool-options")).fetchSemanticsNodes().isNotEmpty() ||
+            rule.onAllNodes(hasTestTag("eraser-options")).fetchSemanticsNodes().isNotEmpty()
+        val dm = rule.activity.resources.displayMetrics
+        val top = rule.activity.window.decorView.rootWindowInsets?.systemWindowInsetTop ?: 0
+        repeat(4) {
+            if (!open()) return
+            val t = SystemClock.uptimeMillis()
+            for ((i, act) in listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_UP).withIndex()) {
+                InstrumentationRegistry.getInstrumentation()
+                    .sendPointerSync(MotionEvent.obtain(t, t + i * 50L, act, dm.widthPixels * 0.5f, top + 40 * dm.density, 0))
+            }
+            SystemClock.sleep(300)
+            rule.waitForIdle()
+        }
+        assertTrue("tool popups closed", !open())
+    }
+
+    private fun strokes(layer: InkLayer) = rule.runOnUiThread { layer.strokes.toList() }
+
+    /** The ⋮ menu of the page header, then [item]. */
+    private fun menu(item: String) {
+        rule.onNode(hasTestTag("menu")).performClick()
+        rule.waitUntilAtLeastOneExists(hasTestTag(item), 5_000)
+        rule.onNode(hasTestTag(item)).performClick()
+    }
+
+    /** One event of a pen gesture, injected like the hardware would (the hold is real time). */
+    private fun pen(downTime: Long, action: Int, p: Offset) {
+        val props = arrayOf(MotionEvent.PointerProperties().apply { id = 0; toolType = MotionEvent.TOOL_TYPE_STYLUS })
+        val coords = arrayOf(MotionEvent.PointerCoords().apply { x = p.x; y = p.y; pressure = 0.5f; size = 0.05f })
+        val ev = MotionEvent.obtain(downTime, SystemClock.uptimeMillis(), action, 1, props, coords, 0, 0, 1f, 1f, 0, 0, InputDevice.SOURCE_STYLUS, 0)
+        try {
+            assertTrue(InstrumentationRegistry.getInstrumentation().uiAutomation.injectInputEvent(ev, true))
+        } finally {
+            ev.recycle()
+        }
+    }
+
+    /**
+     * Stage П3 on a new notebook page: partial eraser, lasso duplicate + rotate + undo, move to a new page and undo,
+     * a text block, the Cornell paper, a pen held still straightens its stroke, PDF export to the share chooser.
+     */
+    private fun canvasTools() {
+        val before = rule.runOnUiThread { InkTiles.live().toSet() }
+        clickNew("+ Тетрадь", "notebooks-empty-new")
+        rule.onNode(hasText("Создать")).performClick()
+        rule.waitUntilAtLeastOneExists(hasTestTag("page-canvas"), 10_000)
+        rule.waitUntil(10_000) { rule.runOnUiThread { InkTiles.live().any { it !in before } } }
+        val tiles = rule.runOnUiThread { InkTiles.live().first { it !in before } }
+        val layer = tiles.layer
+        val repo = rule.activity.graph.repository
+        val nb = runBlocking { repo.observeNotebooks(NotebookKind.NOTEBOOK).first().maxBy { it.notebook.createdAt }.notebook.id }
+
+        // 1. two strokes (rows at 30 % and 50 % of the canvas)
+        rule.onNode(hasTestTag("tool-LASSO")).performClick()
+        rule.onNode(hasTestTag("tool-PEN")).performClick()
+        closePopups()
+        write("page-canvas", 2)
+        rule.waitUntil(5_000) { strokes(layer).size == 2 }
+
+        // 2. the eraser «Частично» cuts the upper stroke in two
+        rule.onNode(hasTestTag("tool-ERASER")).performClick()
+        rule.onNode(hasTestTag("tool-ERASER")).performClick()
+        rule.waitUntilAtLeastOneExists(hasTestTag("eraser-options"), 5_000)
+        rule.onNode(hasText("Частично")).performClick()
+        rule.onNode(hasTestTag("eraser-size-S")).performClick()
+        shot("26-eraser-partial"); review("26-eraser-partial")
+        closePopups()
+        rule.onNode(hasTestTag("page-canvas")).performTouchInput {
+            swipe(Offset(width * 0.5f, height * 0.22f), Offset(width * 0.5f, height * 0.38f), 300)
+        }
+        rule.waitUntil(5_000) { strokes(layer).size == 3 }
+        shot("27-erased"); review("27-erased")
+
+        // 3. lasso the left piece → «Дублировать» → rotate the copy by its handle → one undo turns it back
+        rule.onNode(hasTestTag("tool-LASSO")).performClick()
+        rule.onNode(hasTestTag("page-canvas")).performTouchInput {
+            down(Offset(width * 0.05f, height * 0.2f))
+            moveTo(Offset(width * 0.5f, height * 0.2f))
+            moveTo(Offset(width * 0.5f, height * 0.4f))
+            moveTo(Offset(width * 0.05f, height * 0.4f))
+            moveTo(Offset(width * 0.05f, height * 0.21f))
+            up()
+        }
+        rule.waitUntilAtLeastOneExists(hasTestTag("sel-more"), 5_000)
+        assertEquals(1, rule.runOnUiThread { layer.selection.size })
+        rule.onNode(hasTestTag("sel-more")).performClick()
+        rule.waitUntilAtLeastOneExists(hasText("Дублировать"), 5_000)
+        rule.onNode(hasText("Дублировать")).performClick()
+        rule.waitUntil(5_000) { strokes(layer).size == 4 }
+        val copied = strokes(layer).map { it.bounds() }
+        val (from, to) = rule.runOnUiThread {
+            val vp = tiles.viewport!!
+            val touch = 48f * rule.activity.resources.displayMetrics.density
+            val h = SelectionHandles.rotateHandle(layer.selectionBounds()!!, vp.scale, touch)
+            val start = Offset(h.x * vp.scale + vp.offsetX, h.y * vp.scale + vp.offsetY)
+            start to start + Offset(200f, 160f)
+        }
+        rule.onNode(hasTestTag("page-canvas")).performTouchInput {
+            down(from)
+            moveTo(from + (to - from) / 3f)
+            moveTo(from + (to - from) * 2f / 3f)
+            moveTo(to)
+            up()
+        }
+        rule.waitUntil(5_000) { strokes(layer).map { it.bounds() } != copied }
+        val turned = strokes(layer).last().bounds()!!
+        assertTrue("the copy is turned", turned.height > copied.last()!!.height * 2)
+        shot("28-duplicate-rotated"); review("28-duplicate-rotated")
+        rule.onNode(hasTestTag("undo")).performClick()
+        rule.waitUntil(5_000) { strokes(layer).map { it.bounds() } == copied }
+
+        // 4. «На другую страницу…» → «Новая страница в конце», then «Отменить» brings the strokes back
+        if (rule.onAllNodes(hasTestTag("sel-more")).fetchSemanticsNodes().isEmpty()) {
+            rule.onNode(hasTestTag("page-canvas")).performTouchInput {
+                down(Offset(width * 0.05f, height * 0.2f))
+                moveTo(Offset(width * 0.5f, height * 0.2f))
+                moveTo(Offset(width * 0.5f, height * 0.4f))
+                moveTo(Offset(width * 0.05f, height * 0.4f))
+                moveTo(Offset(width * 0.05f, height * 0.21f))
+                up()
+            }
+            rule.waitUntilAtLeastOneExists(hasTestTag("sel-more"), 5_000)
+        }
+        val moving = rule.runOnUiThread { layer.selection.size }
+        rule.onNode(hasTestTag("sel-more")).performClick()
+        rule.waitUntilAtLeastOneExists(hasText("На другую страницу…"), 5_000)
+        rule.onNode(hasText("На другую страницу…")).performClick()
+        rule.waitUntilAtLeastOneExists(hasText("Новая страница в конце"), 5_000)
+        rule.onNode(hasText("Новая страница в конце")).performClick()
+        rule.waitUntilAtLeastOneExists(hasText("Перенесено на стр. 2"), 10_000)
+        assertEquals(4 - moving, strokes(layer).size)
+        shot("29-moved-to-page"); review("29-moved-to-page")
+        rule.onNode(hasText("Отменить")).performClick()
+        rule.waitUntil(5_000) { strokes(layer).size == 4 }
+        rule.onNode(hasTestTag("tool-PEN")).performClick()
+
+        // 5. a text block «Тест»
+        menu("menu-insert-text")
+        rule.waitUntilAtLeastOneExists(hasTestTag("text-block-field"), 5_000)
+        rule.onNode(hasTestTag("text-block-field")).performTextInput("Тест")
+        rule.onNode(hasTestTag("text-block-done")).performClick()
+        // drawn on the canvas (no text node): the block is on the page and in the database
+        rule.waitUntil(5_000) { rule.runOnUiThread { layer.objects.map { it.text } } == listOf("Тест") }
+        rule.waitUntil(10_000) { runBlocking { repo.pageObjects(repo.pages(nb).first().id) }.map { it.text } == listOf("Тест") }
+        shot("30-text-block"); review("30-text-block")
+
+        // 6. the paper «Корнелл»
+        menu("menu-template")
+        rule.waitUntilAtLeastOneExists(hasText("Корнелл", substring = true), 5_000)
+        rule.onNode(hasText("Корнелл", substring = true)).performScrollTo().performClick()
+        rule.waitUntil(10_000) { runBlocking { repo.pages(nb).first().template } == PageTemplate.CORNELL.name }
+        shot("31-cornell"); review("31-cornell")
+
+        // 7. a wavy pen stroke held still at its end turns into a straight line; the new block is still selected:
+        // switching tools drops the selection (a second tap on the current pen would open its popup instead)
+        rule.onNode(hasTestTag("tool-LASSO")).performClick()
+        rule.onNode(hasTestTag("tool-PEN")).performClick()
+        rule.waitForIdle()
+        closePopups()
+        val r = rule.onNode(hasTestTag("page-canvas")).fetchSemanticsNode().boundsInWindow
+        val loc = IntArray(2)
+        rule.runOnUiThread { rule.activity.window.decorView.getLocationOnScreen(loc) }
+        val box = r.translate(loc[0].toFloat(), loc[1].toFloat())
+        val t0 = SystemClock.uptimeMillis()
+        var last = Offset.Zero
+        for (i in 0..40) {
+            last = Offset(box.left + box.width * (0.2f + 0.5f * i / 40), box.top + box.height * 0.7f + 40f * sin(Math.PI.toFloat() * 4 * i / 40))
+            pen(t0, if (i == 0) MotionEvent.ACTION_DOWN else MotionEvent.ACTION_MOVE, last)
+            SystemClock.sleep(10)
+        }
+        SystemClock.sleep(700)
+        pen(t0, MotionEvent.ACTION_UP, last)
+        runCatching { rule.waitUntil(5_000) { strokes(layer).size == 5 } }
+            .onFailure { review("32-straight-line-missing"); throw AssertionError("the pen stroke was not added: ${strokes(layer).size} strokes", it) }
+        val line = strokes(layer).last().points
+        assertTrue("a straight line", line.all { abs(it.y - line.first().y) < 0.5f })
+        shot("32-straight-line"); review("32-straight-line")
+
+        // 8. «Экспорт в PDF» → «Эта страница» → the system share chooser
+        menu("menu-export-pdf")
+        rule.waitUntilAtLeastOneExists(hasText("Эта страница"), 5_000)
+        rule.onNode(hasText("Эта страница")).performClick()
+        val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
+        val app = rule.activity.packageName
+        var chooser: String? = null
+        val end = SystemClock.uptimeMillis() + 15_000
+        while (chooser == null && SystemClock.uptimeMillis() < end) {
+            chooser = automation.rootInActiveWindow?.packageName?.toString()?.takeIf { it != app }
+            if (chooser == null) SystemClock.sleep(100)
+        }
+        assertTrue("share chooser shown: $chooser", chooser == "android" || chooser == "com.android.intentresolver")
+        SystemClock.sleep(800)
+        InstrumentationRegistry.getInstrumentation().uiAutomation
+            .executeShellCommand("screencap -p /sdcard/shots-task12/33a-share-chooser.png").close()
+        SystemClock.sleep(1500)
+        automation.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
+        rule.waitUntil(10_000) { automation.rootInActiveWindow?.packageName?.toString() == app }
+        rule.waitUntilAtLeastOneExists(hasTestTag("page-canvas"), 10_000)
+        shot("33-after-export"); review("33-after-export")
+        // the export dialog may still be open over the page
+        repeat(3) { if (rule.onAllNodes(hasTestTag("notebook-$nb")).fetchSemanticsNodes().isEmpty()) back() }
+        rule.waitUntilAtLeastOneExists(hasTestTag("notebook-$nb"), 10_000)
+        rule.activity.graph.settings.setEraser(InkSection.NOTEBOOK, EraserSettings())
     }
 
     @Test
@@ -333,6 +563,8 @@ class SmokeTest {
         tab("Тетради")
         rule.waitUntilAtLeastOneExists(card, 10_000)
         shot("25b-notebook-restored")
+
+        canvasTools()
 
         // Boards: create one, draw on it
         tab("Доски")

@@ -13,6 +13,8 @@ import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.printToString
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.test.platform.app.InstrumentationRegistry
 import app.wanki.WankiTheme
@@ -63,7 +65,22 @@ class InkTilesTest {
                 CompositionLocalProvider(LocalUndo provides undo) { NotebookScreen(nb.id, null, onBack = {}, onGrid = {}) }
             }
         }
+        awaitCanvas()
         return awaitReady { InkTiles.live().firstOrNull { it.layer.strokes.size == strokes.size } }
+    }
+
+    /**
+     * A slow first frame is a setup delay, not a stuck tile: wait for the page canvas first (on wanki-phone the first
+     * frame of a fresh test activity sometimes stalls ~30 s, see CanvasPerfTest.awaitCanvas).
+     */
+    private fun awaitCanvas() {
+        val end = SystemClock.uptimeMillis() + 60_000
+        while (SystemClock.uptimeMillis() < end) {
+            if (onMain { InkTiles.live().isNotEmpty() }) return
+            SystemClock.sleep(10)
+        }
+        val screen = runCatching { rule.onRoot(useUnmergedTree = true).printToString() }.getOrElse { "no screen: $it" }
+        throw AssertionError("page canvas not composed within 60000 ms\n$screen")
     }
 
     private fun awaitReady(find: () -> InkTiles?): InkTiles {
@@ -72,7 +89,9 @@ class InkTilesTest {
             onMain { find()?.takeIf { it.allVisibleReady && it.pendingDirect.isEmpty() } }?.let { rule.waitForIdle(); return it }
             SystemClock.sleep(10)
         }
-        throw AssertionError("tiles not ready")
+        val state = onMain { InkTiles.live().joinToString("\n") { "${it.layer.strokes.size} strokes, pending ${it.pendingDirect.size}: ${it.describe()}" } }
+        Log.e("WankiTiles", "tiles not ready within 20000 ms\n$state")
+        throw AssertionError("tiles not ready within 20000 ms\n$state")
     }
 
     private fun InkTiles.awaitReady() = awaitReady { this }

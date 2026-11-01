@@ -6,7 +6,8 @@ Plan and decisions: `docs/PLAN.md` (Russian). The user writes in Russian.
 ## Modules
 - `core/scoring` (JVM) — handwriting scoring against KanjiVG: normalization, Hungarian stroke
   matching, style grouping (connected/broken strokes), metrics, look-alike check, beauty score.
-- `core/ink` (JVM) — stroke model, `InkCodec` binary format, `LineSegmenter`, pen `Gestures`.
+- `core/ink` (JVM) — stroke model, `InkCodec` binary format (v3), `SpatialGrid`, `InkAffine`, `StrokeEraser`, `StraightLine`, `LineKeys`,
+  `LineSegmenter`, pen `Gestures`.
 - `core/srs` (JVM) — FSRS-6 port of py-fsrs, verified against reference data in tests.
 - `core/texts` (JVM) — texts learned by heart: `PieceSplitter` (verse lines / prose sentences), `Words`,
   `VanishingCues`, `FirstLetters`, `Chain`, `TextRating` (recital → FSRS rating), `Portions`, `FsrsTextPlan`,
@@ -58,6 +59,21 @@ classpath (see build.gradle.kts) so AGP and KGP share a classloader.
 - Writing canvases stay paper-colored (`WritingPaper`) in the dark theme.
 - Navigation state is saveable (`RouteCodec`); MainActivity handles configuration changes itself.
 - Ink saves after every finished gesture through `SerialSaver`; errors are shown, never swallowed.
+- Ink format is `InkCodec` v3: one length-prefixed, self-contained chunk per stroke (`encodeStroke`/`assemble`,
+  `strokeKey` = content hash of the chunk); decode still reads v1 and v2. A save joins `InkLayer`'s cached chunks.
+  A blob that fails to decode opens the page read-only and is never overwritten.
+- `InkLayer.strokes`/`strokesIn`/the grid are main-thread only; render off main from a snapshot. Canvases with a
+  viewport (pages, boards) draw through `InkTiles` (512 px bitmaps per power-of-two zoom level, 64 MB budget or a
+  quarter of the heap); note blocks and review cells draw directly. Live lasso transforms use `InkTiles.exclude`.
+- Pages own `page_objects` (text blocks and pictures, drawn under the ink; `MASK` reserved for П4) and `page_lines`
+  (recognised text per line, keyed by an order-independent `lineKey` of its stroke chunks; corrections stay while
+  the key exists; `page_ink.recognizedText` stays the joined text for search). DB v10.
+- Page media are `page-<uuid>.jpg|png|pdf` in the media folder (pictures ≤ 2048 px, imported PDFs kept whole as
+  backgrounds). The daily purge deletes unreferenced `page-*` files older than 24 h; pages in the trash keep theirs.
+  Memory caches are bounded by bytes: tiles 64 MB, pictures min(32 MB, heap/8), PDF backgrounds 48 MB.
+- Files shared out (camera shots, PDF exports in `cache/exports/`) go through the FileProvider authority
+  `${applicationId}.files` (`res/xml/file_paths.xml`).
+- Eraser mode and size are remembered per ink section (`Settings.eraser(section)`), apart from the pen tool.
 - Trash: deleting a notebook, board, note, page or diary day only sets `deleted` + `deletedAt`; items stay 30 days
   (`Repository.delete(kind, id)` trashes, `trash()` lists the trash, `restore` brings an item back, `purge` removes it), `purgeExpired` removes the rest for good once a day (`trashPurgedDay`). Lists sort by
   modified/title/created with pinned first (choice remembered per list); page order is rewritten in one transaction
