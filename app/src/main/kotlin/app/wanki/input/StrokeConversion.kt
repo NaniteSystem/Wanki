@@ -27,6 +27,12 @@ object StrokeConversion {
         }
     }
 
+    /** Loads androidx.ink's native code and its first brush and renderer (a first page open need not). Any thread. */
+    fun warmUp() {
+        toInk(InkStroke(listOf(InkPoint(0f, 0f, 0), InkPoint(10f, 10f, 10)), InkTool.STYLUS, InkBrush()))
+        androidx.ink.rendering.android.canvas.CanvasStrokeRenderer.create()
+    }
+
     fun fromInk(stroke: Stroke, startOffsetMs: Long, brush: InkBrush): InkStroke {
         val input = StrokeInput()
         val batch = stroke.inputs

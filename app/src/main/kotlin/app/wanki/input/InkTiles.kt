@@ -63,7 +63,7 @@ class InkTiles(val layer: InkLayer, private val scope: CoroutineScope) {
 
     private val tiles = HashMap<TileKey, Tile>()
     private val budget = TileBudget(budgetBytes())
-    private val directRenderer = CanvasStrokeRenderer.create()
+    private val directRenderer by lazy { CanvasStrokeRenderer.create() }
     /** One renderer per render thread. */
     private val tileRenderer = ThreadLocal.withInitial { CanvasStrokeRenderer.create() }
     private val bitmapPaint = Paint(Paint.FILTER_BITMAP_FLAG)
@@ -107,6 +107,7 @@ class InkTiles(val layer: InkLayer, private val scope: CoroutineScope) {
 
     /** Draws the ink in world coordinates: [scope] is already transformed by [viewport]. */
     fun draw(scope: DrawScope, viewport: Viewport) {
+        OpenTrace.mark(if (layer.strokes.isEmpty()) "first tiles draw (empty layer)" else "first tiles draw with ink")
         this.viewport = viewport
         // state read by the frame: a ready tile, an edit, a pinch ending
         @Suppress("UNUSED_VARIABLE") val rev = readyRev + layer.strokesRev
@@ -136,11 +137,13 @@ class InkTiles(val layer: InkLayer, private val scope: CoroutineScope) {
             }
             if (drawFromPrevious(canvas, key, matrix, direct)) continue
             val rect = TileMath.rect(key)
-            val strokes = strokesFor(rect)
+            val all = strokesFor(rect)
             // a tile without a picture of ink yet (a full page just opened) may wait for its bitmap rather than
-            // stall the frame: until then it only lacks strokes. A dirty picture would be wrong: always draw those.
+            // stall the frame: until then it only lacks strokes, and shows those of a full one already converted for
+            // drawing (converting them here would hold back the renders). A dirty picture would be wrong: always draw those.
             val noInkYet = tile?.bitmap == null
             val failed = tile != null && tile.failedGen == tile.gen
+            val strokes = if (noInkYet && !failed && all.size > FEW_STROKES) all.filter(layer::isConverted) else all
             if (noInkYet && !failed && strokes.size > directLeft) continue
             directLeft -= strokes.size
             canvas.save()
@@ -149,6 +152,7 @@ class InkTiles(val layer: InkLayer, private val scope: CoroutineScope) {
             canvas.restore()
         }
         allVisibleReady = allReady
+        if (allReady && layer.strokes.isNotEmpty()) OpenTrace.mark("all visible tiles ready (frame)")
         drawExcluded(canvas, matrix, direct)
         pendingDirect = direct
         scheduleSoon(view, inner)
@@ -239,6 +243,7 @@ class InkTiles(val layer: InkLayer, private val scope: CoroutineScope) {
      * all) for the margin around it.
      */
     private fun schedule(view: InkRect, level: Int, inner: List<TileKey>) {
+        if (layer.strokes.isNotEmpty()) OpenTrace.mark("first schedule with ink")
         val all = TileMath.visible(view, level)
         val cx = (view.left + view.right) / 2
         val cy = (view.top + view.bottom) / 2
@@ -277,9 +282,12 @@ class InkTiles(val layer: InkLayer, private val scope: CoroutineScope) {
             try {
                 val bitmap = withContext(renderThread) {
                     if (tile.fullGen > gen) return@withContext null // changed again while queued
+                    val t0 = android.os.SystemClock.uptimeMillis()
                     Bitmap.createBitmap(TileMath.TILE_PX, TileMath.TILE_PX, Bitmap.Config.ARGB_8888).also {
+                        if (OpenTrace.enabled) OpenTrace.mark("tile ${tile.key} render start, ${strokes.size} strokes")
                         InkRaster.draw(Canvas(it), strokes, ppw, rect.left, rect.top, renderer = tileRenderer.get()!!, ink = layer::renderable)
                         it.prepareToDraw()
+                        if (OpenTrace.enabled) OpenTrace.mark("tile ${tile.key} rendered in ${android.os.SystemClock.uptimeMillis() - t0} ms")
                     }
                 }
                 // a later change other than a stroke on top makes this picture wrong; strokes on top are drawn over it
@@ -307,6 +315,7 @@ class InkTiles(val layer: InkLayer, private val scope: CoroutineScope) {
             return
         }
         for (k in budget.put(tile.key, TILE_BYTES)) tiles.remove(k)
+        if (OpenTrace.enabled) OpenTrace.mark("tile ${tile.key} installed")
     }
 
     /** Marks the tiles over [rect] (world units) dirty: they draw directly until rendered again. */
@@ -368,15 +377,17 @@ class InkTiles(val layer: InkLayer, private val scope: CoroutineScope) {
         private const val MAX_SCALED_TILES = 48
         /** How many strokes of tiles without a picture of ink yet one frame may draw directly. */
         private const val MAX_DIRECT_STROKES = 300
+        /** A tile without a picture with up to this many strokes draws them all directly, converting them if need be. */
+        private const val FEW_STROKES = 32
 
         /**
          * Tiles render in parallel on half the cores (at most [MAX_RENDER_THREADS]), so the UI and render threads keep theirs;
          * a tile converts its own strokes for the renderer there too (about as costly as drawing them).
          */
+        val renderThreads = (Runtime.getRuntime().availableProcessors() / 2).coerceIn(1, MAX_RENDER_THREADS)
+
         @OptIn(ExperimentalCoroutinesApi::class)
-        private val renderThread = Dispatchers.Default.limitedParallelism(
-            (Runtime.getRuntime().availableProcessors() / 2).coerceIn(1, MAX_RENDER_THREADS),
-        )
+        private val renderThread = Dispatchers.Default.limitedParallelism(renderThreads)
         private const val MAX_RENDER_THREADS = 3
 
         /** Live instances (main thread), weakly held. */

@@ -25,6 +25,7 @@ import app.wanki.ink.InkStroke
 import app.wanki.ink.InkTool
 import app.wanki.input.EraserMode
 import app.wanki.input.InkTiles
+import app.wanki.input.OpenTrace
 import app.wanki.ui.common.LocalUndo
 import app.wanki.ui.common.Undo
 import app.wanki.ui.common.rememberUiScope
@@ -116,8 +117,19 @@ class CanvasPerfTest {
     @Test
     fun openPageShowsInkQuickly() {
         val nb = seed("Perf open")
+        OpenTrace.enabled = true
+        OpenTrace.begin()
         val start = SystemClock.uptimeMillis()
+        try {
+            openAndMeasure(nb, start)
+        } finally {
+            OpenTrace.enabled = false
+        }
+    }
+
+    private fun openAndMeasure(nb: String, start: Long) {
         open(nb)
+        OpenTrace.mark("setContent returned (harness)")
         // the timeline of an open: canvas composed, strokes loaded into its layer, every visible tile ready
         val composed = run { awaitCanvas(); SystemClock.uptimeMillis() - start }
         var loaded = -1L
@@ -299,6 +311,30 @@ class CanvasPerfTest {
         val median = times[times.size / 2]
         log("eraser (whole): median %.2f ms, max %.2f ms".format(median, times.last()))
         assertTrue("eraser step median $median ms", median <= 4.0)
+    }
+
+    /**
+     * Undo and redo of one partial eraser drag across row 10 (on the main thread, like the toolbar's buttons). Logged
+     * only: the final review's I-3 asked for the number (incremental [app.wanki.input.InkLayer] reset above 50 ms).
+     */
+    @Test
+    fun undoAfterEraseIsLogged() {
+        open(seed("Perf undo"))
+        val tiles = awaitAllVisibleReady()
+        val (undoMs, redoMs) = onMain {
+            val layer = tiles.layer
+            layer.beginErase()
+            val y = 30f + 10 * 34f + 17f
+            for (i in 0 until 100) layer.eraseAlong(20f + (i - 1) * 9.6f, y, 20f + i * 9.6f, y, 6f, EraserMode.PARTIAL)
+            assertTrue("the drag erased nothing", layer.endErase())
+            val t0 = SystemClock.elapsedRealtimeNanos()
+            assertTrue(layer.undo())
+            val t1 = SystemClock.elapsedRealtimeNanos()
+            assertTrue(layer.redo())
+            val t2 = SystemClock.elapsedRealtimeNanos()
+            (t1 - t0) / 1_000_000.0 to (t2 - t1) / 1_000_000.0
+        }
+        log("undo after erase: undo %.1f ms, redo %.1f ms".format(undoMs, redoMs))
     }
 
     @Test

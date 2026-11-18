@@ -46,6 +46,45 @@ class RepositoryTest {
         assertEquals(1, (loaded as InkLoad.Ok).strokes.size)
     }
 
+    /**
+     * A page whose ink row is over the 2 MB a cursor window holds (3000 strokes × 120 points, about the size of a dense
+     * board) reads back in parts instead of throwing, and the writes that read the row first work on it too.
+     */
+    @Test
+    fun inkRowOverCursorWindowReadsBack() = runBlocking {
+        val page = repo.createNotebook("Big", app.wanki.data.PageTemplate.BLANK, "auto").let { repo.pages(it.id).single() }
+        val rnd = java.util.Random(7)
+        val strokes = (0 until 3000).map { i ->
+            app.wanki.ink.InkStroke(
+                (0 until 120).map { k ->
+                    app.wanki.ink.InkPoint(
+                        rnd.nextFloat() * 2000f, rnd.nextFloat() * 2800f, i * 1000L + k * 7L,
+                        rnd.nextFloat(), rnd.nextFloat(), rnd.nextFloat(),
+                    )
+                },
+                app.wanki.ink.InkTool.STYLUS,
+            )
+        }
+        val blob = app.wanki.ink.InkCodec.encode(app.wanki.ink.InkDrawing(strokes))
+        assertTrue("blob ${blob.size} bytes is not over 2 MB", blob.size > 2 * 1024 * 1024)
+        repo.saveInkBlob(page, blob)
+        db.notebooks().setRecognizedText(page.id, "текст", 1L)
+
+        val loaded = repo.loadInkResult(page.id)
+        assertTrue(loaded is InkLoad.Ok)
+        assertEquals(3000, (loaded as InkLoad.Ok).strokes.size)
+        assertEquals("текст", repo.recognizedText(page.id))
+
+        val extra = app.wanki.ink.InkStroke(listOf(app.wanki.ink.InkPoint(5f, 5f, 0), app.wanki.ink.InkPoint(40f, 30f, 20)))
+        repo.appendInk(page, listOf(extra))
+        assertEquals(3001, repo.loadInk(page.id).size)
+        assertEquals(1, repo.takeBackFromPage(page.id, listOf(app.wanki.ink.InkCodec.strokeKey(app.wanki.ink.InkCodec.encodeStroke(extra)))))
+        assertEquals(3000, repo.loadInk(page.id).size)
+        // saving again keeps the recognised text read from the big row
+        repo.saveInkBlob(page, blob)
+        assertEquals("текст", repo.recognizedText(page.id))
+    }
+
     @Test
     fun saveInkBlobNullDeletesRow() = runBlocking {
         val page = repo.createNotebook("Blob", app.wanki.data.PageTemplate.LINED, "auto").let { repo.pages(it.id).single() }

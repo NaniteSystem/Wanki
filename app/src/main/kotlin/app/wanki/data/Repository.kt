@@ -1,5 +1,6 @@
 package app.wanki.data
 
+import android.database.sqlite.SQLiteBlobTooBigException
 import androidx.room.withTransaction
 import androidx.sqlite.db.SimpleSQLiteQuery
 import app.wanki.anki.CardContent
@@ -506,7 +507,7 @@ class Repository(private val db: WankiDatabase) {
         val old = notebooks.pages(id)
         val pages = old.map { it.copy(id = newId(), notebookId = copy.id, updatedAt = now) }
         notebooks.insertPages(pages)
-        notebooks.upsertInks(old.indices.mapNotNull { i -> notebooks.ink(old[i].id)?.copy(pageId = pages[i].id, updatedAt = now) })
+        notebooks.upsertInks(old.indices.mapNotNull { i -> inkRow(old[i].id)?.copy(pageId = pages[i].id, updatedAt = now) })
         old.indices.forEach { i -> copyObjectsAndLines(old[i].id, pages[i].id, now) }
         copy
     }
@@ -529,7 +530,7 @@ class Repository(private val db: WankiDatabase) {
         val live = notebooks.pages(src.notebookId).toMutableList()
         live.add((live.indexOfFirst { it.id == pageId } + 1).coerceAtLeast(0), copy)
         notebooks.insertPages(listOf(copy))
-        notebooks.ink(pageId)?.let { notebooks.upsertInk(it.copy(pageId = copy.id, updatedAt = now)) }
+        inkRow(pageId)?.let { notebooks.upsertInk(it.copy(pageId = copy.id, updatedAt = now)) }
         copyObjectsAndLines(pageId, copy.id, now)
         renumber(live)
         notebooks.touch(src.notebookId, now)
@@ -641,7 +642,7 @@ class Repository(private val db: WankiDatabase) {
                     val taken = notebooks.pageForDate(nb.id, page.date)
                     if (taken != null) {
                         // written means ink or an object (a picture or text block alone counts too)
-                        if (notebooks.ink(taken.id) != null || notebooks.hasObjects(taken.id)) throw DayTakenException()
+                        if (notebooks.inkMeta(taken.id) != null || notebooks.hasObjects(taken.id)) throw DayTakenException()
                         removePage(taken.id)
                     }
                 }
@@ -751,12 +752,33 @@ class Repository(private val db: WankiDatabase) {
             n to page
         }
 
+    /**
+     * [pageId]'s ink row. A row over the 2 MB a cursor window holds (a dense board) cannot be read in one go: its blob
+     * is then read in parts, in one transaction.
+     */
+    private suspend fun inkRow(pageId: String): PageInkEntity? = try {
+        notebooks.ink(pageId)
+    } catch (e: SQLiteBlobTooBigException) {
+        db.withTransaction {
+            val meta = notebooks.inkMeta(pageId) ?: return@withTransaction null
+            val blob = ByteArray(meta.size)
+            var at = 0
+            while (at < blob.size) {
+                val part = notebooks.inkPart(pageId, at + 1, minOf(INK_PART, blob.size - at))
+                check(part != null && part.isNotEmpty() && at + part.size <= blob.size) { "ink of page $pageId changed while read" }
+                part.copyInto(blob, at)
+                at += part.size
+            }
+            PageInkEntity(pageId, blob, meta.recognizedText, meta.recognizedAt, meta.updatedAt)
+        }
+    }
+
     suspend fun loadInk(pageId: String): List<InkStroke> =
-        notebooks.ink(pageId)?.let { runCatching { InkCodec.decode(it.strokes).strokes }.getOrNull() }.orEmpty()
+        inkRow(pageId)?.let { runCatching { InkCodec.decode(it.strokes).strokes }.getOrNull() }.orEmpty()
 
     /** Like [loadInk], but a blob that fails to decode is reported, so the editor can refuse to overwrite it. */
     suspend fun loadInkResult(pageId: String): InkLoad {
-        val row = notebooks.ink(pageId) ?: return InkLoad.Ok(emptyList())
+        val row = inkRow(pageId) ?: return InkLoad.Ok(emptyList())
         return try {
             InkLoad.Ok(InkCodec.decode(row.strokes).strokes)
         } catch (e: Exception) {
@@ -771,13 +793,13 @@ class Repository(private val db: WankiDatabase) {
     suspend fun deleteEmptyInk(): Int {
         var deleted = 0
         for (id in notebooks.inkPageIds()) {
-            val strokes = notebooks.ink(id)?.let { runCatching { InkCodec.decode(it.strokes).strokes }.getOrNull() } ?: continue
+            val strokes = inkRow(id)?.let { runCatching { InkCodec.decode(it.strokes).strokes }.getOrNull() } ?: continue
             if (strokes.isEmpty()) { notebooks.deleteInk(id); deleted++ }
         }
         return deleted
     }
 
-    suspend fun recognizedText(pageId: String): String = notebooks.ink(pageId)?.recognizedText.orEmpty()
+    suspend fun recognizedText(pageId: String): String = notebooks.inkText(pageId).orEmpty()
 
     suspend fun saveInk(page: PageEntity, strokes: List<InkStroke>) =
         saveInkBlob(page, if (strokes.isEmpty()) null else InkCodec.encode(InkDrawing(strokes)))
@@ -796,7 +818,7 @@ class Repository(private val db: WankiDatabase) {
             // an emptied page keeps no ink row, so the diary stops marking its day
             notebooks.deleteInk(page.id)
         } else {
-            val old = notebooks.ink(page.id)
+            val old = notebooks.inkMeta(page.id)
             notebooks.upsertInk(
                 PageInkEntity(
                     pageId = page.id,
@@ -825,7 +847,7 @@ class Repository(private val db: WankiDatabase) {
         objects: List<PageObjectEntity> = emptyList(), fromObjects: List<PageObjectEntity>? = null,
     ): MovedInk = db.withTransaction {
         val target = notebooks.page(to.id)?.takeIf { !it.deleted } ?: throw IllegalStateException("page ${to.id} is missing")
-        val existing = notebooks.ink(to.id)?.let { InkCodec.decode(it.strokes).strokes }.orEmpty()
+        val existing = inkRow(to.id)?.let { InkCodec.decode(it.strokes).strokes }.orEmpty()
         val targetSize = notebooks.get(target.notebookId)?.let { runCatching { PageSize.valueOf(it.pageSize) }.getOrNull() } ?: PageSize.A4
         // an endless target grows to take what arrives: only the width limits it
         val lowest = (existing.mapNotNull { it.bounds()?.bottom } + strokes.mapNotNull { it.bounds()?.bottom } + objects.map { it.toModel().bounds().bottom }).maxOrNull() ?: 0f
@@ -859,7 +881,7 @@ class Repository(private val db: WankiDatabase) {
     suspend fun takeBackFromPage(toPageId: String, keys: List<Long>, objectIds: List<String> = emptyList()): Int = db.withTransaction {
         val page = notebooks.page(toPageId) ?: return@withTransaction 0
         var removed = if (objectIds.isEmpty()) 0 else notebooks.deleteObjectsById(toPageId, objectIds)
-        val row = notebooks.ink(toPageId)
+        val row = inkRow(toPageId)
         var strokesRemoved = 0
         if (row != null && keys.isNotEmpty()) {
             val strokes = InkCodec.decode(row.strokes).strokes
@@ -893,7 +915,7 @@ class Repository(private val db: WankiDatabase) {
         insertPageIfMissing(page)
         val now = System.currentTimeMillis()
         if (strokes.isNotEmpty()) {
-            val existing = notebooks.ink(page.id)?.let { InkCodec.decode(it.strokes).strokes }.orEmpty()
+            val existing = inkRow(page.id)?.let { InkCodec.decode(it.strokes).strokes }.orEmpty()
             writeInk(page, InkCodec.encode(InkDrawing(existing + strokes)), now)
         }
         if (objects.isNotEmpty()) {
@@ -1006,6 +1028,9 @@ class Repository(private val db: WankiDatabase) {
     companion object {
         /** Learning cards due within this window are shown now, like Anki's learn-ahead. */
         private const val COPY_SUFFIX = " (копия)"
+
+        /** Bytes of an ink blob read at once when the row is too big for one cursor window. */
+        private const val INK_PART = 1 shl 20
 
         const val LEARN_AHEAD_MS = 20 * 60_000L
 

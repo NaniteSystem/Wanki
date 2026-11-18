@@ -501,8 +501,20 @@ interface NotebookDao {
     @Query("UPDATE pages SET viewScale = :scale, viewX = :x, viewY = :y WHERE id = :id")
     suspend fun setPageView(id: String, scale: Float, x: Float, y: Float)
 
+    /** The whole row; throws `SQLiteBlobTooBigException` for a row over the cursor window (2 MB): see [inkMeta]. */
     @Query("SELECT * FROM page_ink WHERE pageId = :pageId")
     suspend fun ink(pageId: String): PageInkEntity?
+
+    /** The row without its blob, and the blob's size. */
+    @Query("SELECT pageId, recognizedText, recognizedAt, updatedAt, length(strokes) AS size FROM page_ink WHERE pageId = :pageId")
+    suspend fun inkMeta(pageId: String): PageInkMeta?
+
+    /** [length] bytes of the blob from byte [start] (1-based), for a blob too big to read at once. */
+    @Query("SELECT substr(strokes, :start, :length) FROM page_ink WHERE pageId = :pageId")
+    suspend fun inkPart(pageId: String, start: Int, length: Int): ByteArray?
+
+    @Query("SELECT recognizedText FROM page_ink WHERE pageId = :pageId")
+    suspend fun inkText(pageId: String): String?
 
     @Upsert
     suspend fun upsertInk(ink: PageInkEntity)

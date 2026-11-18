@@ -60,7 +60,8 @@ fun InkSurface(
     background: DrawScope.() -> Unit = {},
     overlay: DrawScope.() -> Unit = {},
 ) {
-    val renderer = remember { CanvasStrokeRenderer.create() }
+    // made at first use: canvases with tiles never draw strokes one by one
+    val renderer = remember { lazy { CanvasStrokeRenderer.create() } }
     val scope = rememberCoroutineScope()
     // finished ink of pages and boards comes from cached tiles; small fixed canvases draw it directly
     val tiles = if (viewport != null) remember(layer) { InkTiles(layer, scope) } else null
@@ -97,7 +98,7 @@ fun InkSurface(
                 if (layer.objects.isNotEmpty()) drawObjects(layer, objectPainter, scale)
                 if (showInk) {
                     if (tiles != null && vp != null) tiles.draw(this, vp)
-                    else drawStrokesDirect(layer, renderer, matrix)
+                    else drawStrokesDirect(layer, renderer.value, matrix)
                 }
                 drawSelection(layer, scale, touchPx)
                 line?.let { drawLinePreview(it) }
@@ -106,15 +107,21 @@ fun InkSurface(
             overlay()
             cursor?.let { drawCircle(cursorColor, it.radius, androidx.compose.ui.geometry.Offset(it.x, it.y), style = androidx.compose.ui.graphics.drawscope.Stroke(1.dp.toPx())) }
         }
-        AndroidView(
+        // the low-latency stroke view (a SurfaceView with a native renderer) is made once input is first enabled, so a
+        // page that is still loading shows its ink without waiting for it; nothing can be drawn before that anyway
+        var inputMade by remember { mutableStateOf(enabled) }
+        if (enabled) inputMade = true
+        if (inputMade) AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { context ->
+                OpenTrace.mark("InProgressStrokesView factory start")
                 InProgressStrokesView(context).also { view ->
                     val handler = InkInputHandler(view)
                     view.tag = handler
                     view.addFinishedStrokesListener(handler)
                     view.setOnTouchListener(handler)
                     view.setOnHoverListener(handler)
+                    OpenTrace.mark("InProgressStrokesView factory end")
                 }
             },
             onRelease = { view -> (view.tag as InkInputHandler).release() },

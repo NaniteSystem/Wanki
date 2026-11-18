@@ -83,7 +83,8 @@ fun moveSelectionToPage(graph: AppGraph, undo: Undo, state: PageEditorState, not
         try {
             val page = target ?: graph.repository.addPage(notebook)
             val rest = withContext(Dispatchers.Default) { encodeRest() }
-            keys = graph.repository.moveToPage(from, rest, page, strokes, objects, restObjects)
+            // an editor of either page opening meanwhile reads it again once this is stored
+            keys = PageWrites.around(from.id, page.id) { graph.repository.moveToPage(from, rest, page, strokes, objects, restObjects) }
             to = page
         } catch (e: CancellationException) {
             throw e
@@ -91,12 +92,15 @@ fun moveSelectionToPage(graph: AppGraph, undo: Undo, state: PageEditorState, not
             Log.e("Wanki", "page ${from.id}: strokes not moved", e)
         }
         ui {
-            // not moved: back on the canvas (saved below, also when the editor has closed meanwhile)
-            if (keys == null) layer.restoreTake(take, clip, bounds.left, bounds.top)
-            state.saveHolds--
-            // a closed editor's layer is saved too, unless the page was opened again meanwhile (its new editor read
-            // the page itself)
-            if (state.editable || PageEditorState.editorOf(from.id) == null) state.saver.request()
+            try {
+                // not moved: back on the canvas (saved below, also when the editor has closed meanwhile)
+                if (keys == null) layer.restoreTake(take, clip, bounds.left, bounds.top)
+            } finally {
+                state.saveHolds--
+            }
+            // a closed editor's layer is saved too, unless the page was opened again and has loaded meanwhile (its new
+            // editor holds the page now); one still loading reads the page again after this save
+            if (state.editable || PageEditorState.openEditorOf(from.id)?.loaded != true) state.saver.request()
             val k = keys
             val page = to
             if (k == null || page == null) undo.say("Не удалось перенести")
@@ -107,12 +111,18 @@ fun moveSelectionToPage(graph: AppGraph, undo: Undo, state: PageEditorState, not
     }
 }
 
-/** «Отменить» of a move: the strokes go back to [from] (saved), then leave [to]. */
+/**
+ * «Отменить» of a move: the strokes go back to [from] (saved), then leave [to]. Each page is changed through its open
+ * editor when it has one, waiting for one that is still loading (writing the stored page under it would be lost, or
+ * doubled, by its next save); only a page without an editor is changed in the database.
+ */
 private suspend fun moveBack(
     graph: AppGraph, mover: PageEditorState, take: Any?, clip: InkClip, from: PageEntity, left: Float, top: Float,
     to: PageEntity, moved: MovedInk,
 ) = ui {
-    val source = PageEditorState.editorOf(from.id)
+    // the editor that moved them may have closed: its last save comes first
+    mover.saver.flush()
+    val source = PageEditorState.awaitEditor(from.id)
     if (source != null) {
         // the take is undone only if it is still the top step and the undo ran (not during a drag): else a paste
         source.layer.restoreTake(if (source === mover) take else null, clip, left, top)
@@ -121,12 +131,11 @@ private suspend fun moveBack(
         // not stored on the source: the strokes stay on the target too rather than only in memory
         source.saver.error.value?.let { throw IllegalStateException("source page not saved", it) }
     } else {
-        // the editor that moved them has closed: wait for its last save, then add them to the stored page
-        mover.saver.flush()
+        // no editor on the source page: add them to the stored page (an editor opening meanwhile reads it after this)
         val back = InkAffine.translate(left, top)
-        graph.repository.appendInk(from, clip.strokes.map(back::apply), clip.objects.map { it.transformed(back) })
+        PageWrites.around(from.id) { graph.repository.appendInk(from, clip.strokes.map(back::apply), clip.objects.map { it.transformed(back) }) }
     }
-    val target = PageEditorState.editorOf(to.id)
+    val target = PageEditorState.awaitEditor(to.id)
     if (target != null) target.layer.removeByKeys(moved.keys, moved.objectIds)
-    else graph.repository.takeBackFromPage(to.id, moved.keys, moved.objectIds)
+    else PageWrites.around(to.id) { graph.repository.takeBackFromPage(to.id, moved.keys, moved.objectIds) }
 }

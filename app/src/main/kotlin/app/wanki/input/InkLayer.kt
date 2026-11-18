@@ -18,6 +18,14 @@ import app.wanki.ink.SpatialGrid
 import app.wanki.ink.StrokeEraser
 import java.util.IdentityHashMap
 
+/** A page's strokes with their bounds and grid, made by [InkLayer.prepare] off the main thread; adopt it once. */
+class LoadedInk internal constructor(
+    val strokes: List<InkStroke>,
+    internal val bounds: IdentityHashMap<InkStroke, InkRect?>,
+    internal val grid: SpatialGrid<InkStroke>,
+    internal val area: InkRect?,
+)
+
 /**
  * The strokes of one canvas (world coordinates) with undo/redo. Renderable androidx.ink strokes
  * and bounds are cached per stroke, a [SpatialGrid] answers [strokesIn], and encoded chunks are cached
@@ -45,7 +53,8 @@ class InkLayer(initial: List<InkStroke> = emptyList()) {
 
     private val render = IdentityHashMap<InkStroke, Stroke?>() // guarded by itself: tiles convert off main
     private val boundsCache = IdentityHashMap<InkStroke, InkRect?>()
-    private val grid = SpatialGrid<InkStroke>()
+    /** Replaced whole only by [adoptLoaded] (a grid built off the main thread). */
+    private var grid = SpatialGrid<InkStroke>()
     private val chunks = IdentityHashMap<InkStroke, ByteArray>()
 
     /** Hears every change to [strokes] on the main thread (the ink tiles). */
@@ -405,12 +414,13 @@ class InkLayer(initial: List<InkStroke> = emptyList()) {
 
     /** Removes the selected strokes and objects (one undo step). */
     fun deleteSelection() {
-        val hit = strokes.withIndex().filter { (_, s) -> selection.any { it === s } }
+        val hit = indicesOf(selection).map { it to plain[it] }
         val objs = selectedObjectList().map { ObjectChange(it, null) }
         if (hit.isEmpty() && objs.isEmpty()) return
-        hit.asReversed().forEach { removeIndex(it.index) }
+        hit.asReversed().forEach { removeIndex(it.first) }
+        dropFromErase(hit.map { it.second })
         applyObjects(objs, forward = true)
-        push(Edit.Removed(hit.map { it.index to it.value }, objs))
+        push(Edit.Removed(hit, objs))
         selection.clear()
         selectedObjects.clear()
     }
@@ -449,12 +459,13 @@ class InkLayer(initial: List<InkStroke> = emptyList()) {
 
     fun drawing() = InkDrawing(strokes.toList())
 
-    /** Strokes converted before the layer got them ([adoptConverted]); entries move to the cache when used. */
+    /** Strokes converted before the layer got them ([adoptConverted]), shared with the thread that converts them. */
     @Volatile private var convertedAhead: MutableMap<InkStroke, Stroke>? = null
 
     /**
      * Uses strokes converted elsewhere (a page's ink read ahead) instead of converting them again. [converted] may still
-     * be filling up on other threads: it must be a synchronized map. Dropped by the next [replaceAll].
+     * be filling up on other threads: it must be a synchronized map, and what this layer converts itself goes into it
+     * too, so that converter skips those. Dropped by the next [replaceAll] or [adoptLoaded].
      */
     fun adoptConverted(converted: MutableMap<InkStroke, Stroke>) {
         convertedAhead = converted
@@ -463,9 +474,14 @@ class InkLayer(initial: List<InkStroke> = emptyList()) {
     /** The androidx.ink stroke for [s], converted once per stroke instance. Thread-safe. */
     fun renderable(s: InkStroke): Stroke? {
         synchronized(render) { if (render.containsKey(s)) return render[s] }
-        val made = convertedAhead?.remove(s) ?: StrokeConversion.toInk(s)
+        val ahead = convertedAhead
+        val made = ahead?.get(s) ?: StrokeConversion.toInk(s)?.also { ahead?.putIfAbsent(s, it) }
         return synchronized(render) { if (render.containsKey(s)) render[s] else made.also { render[s] = it } }
     }
+
+    /** Whether [s] is converted for drawing already (drawing it now costs no conversion). Thread-safe. */
+    fun isConverted(s: InkStroke): Boolean =
+        synchronized(render) { render.containsKey(s) } || convertedAhead?.containsKey(s) == true
     fun bounds(s: InkStroke): InkRect? = boundsCache.getOrPut(s) { s.bounds() }
 
     /** Bounds computed off the main thread (a page's ink read ahead), so [replaceAll] need not compute them. Main thread. */
@@ -552,6 +568,7 @@ class InkLayer(initial: List<InkStroke> = emptyList()) {
         if (hit.isEmpty() && objs.isEmpty()) return 0
         val items = hit.sorted().map { it to plain[it] }
         items.asReversed().forEach { removeIndex(it.first) }
+        dropFromErase(items.map { it.second })
         applyObjects(objs, forward = true)
         push(Edit.Removed(items, objs))
         fixSelection()
@@ -611,6 +628,17 @@ class InkLayer(initial: List<InkStroke> = emptyList()) {
     private var eraseChanged = false
 
     /**
+     * Strokes taken away as their own undo step (a delete, a move to another page) while an eraser drag is open: a
+     * cancelled drag must not put them back, or they would be on the canvas and on the other page (or in the clip).
+     */
+    private fun dropFromErase(gone: List<InkStroke>) {
+        val before = eraseBefore ?: return
+        if (gone.isEmpty()) return
+        val set = java.util.Collections.newSetFromMap(IdentityHashMap<InkStroke, Boolean>()).apply { addAll(gone) }
+        eraseBefore = before.filter { it !in set }
+    }
+
+    /**
      * Starts an eraser drag: [eraseAlong] then removes or cuts strokes live without undo steps or [version]
      * changes, and [endErase] records the whole drag as one undo step.
      */
@@ -655,6 +683,38 @@ class InkLayer(initial: List<InkStroke> = emptyList()) {
         if (undoable) push(Edit.Replaced(before, newStrokes)) else {
             undoStack.clear(); redoStack.clear(); version++
         }
+    }
+
+    /**
+     * A page's stored ink becomes the layer's, like `replaceAll(ink.strokes, undoable = false)`, but the stroke list,
+     * the bounds and the grid were built off the main thread ([prepare]): only the hand-over runs here. Main thread.
+     */
+    fun adoptLoaded(ink: LoadedInk) {
+        eraseBefore = null
+        transforming = null
+        transformingObjects = emptyList()
+        liveTransform = null
+        convertedAhead = null
+        val old = if (plain.isEmpty()) emptyList() else plain.toList()
+        boundsCache.putAll(ink.bounds)
+        strokes.clear()
+        strokes.addAll(ink.strokes)
+        plain.clear()
+        plain.addAll(ink.strokes)
+        grid = ink.grid
+        strokesRev++
+        if (changeListeners.isNotEmpty()) {
+            if (old.isEmpty()) ink.area?.let { a -> changeListeners.toList().forEach { it.changed(a) } } else changedBetween(old, ink.strokes)
+        }
+        fixSelection()
+        if (old.isNotEmpty()) {
+            val live = java.util.Collections.newSetFromMap(IdentityHashMap<InkStroke, Boolean>()).apply { addAll(plain) }
+            synchronized(chunks) { chunks.keys.retainAll(live) }
+            synchronized(render) { render.keys.retainAll(live) }
+        }
+        undoStack.clear()
+        redoStack.clear()
+        version++
     }
 
     fun clear() {
@@ -724,11 +784,7 @@ class InkLayer(initial: List<InkStroke> = emptyList()) {
     }
 
     /** Where [s] may paint: its bounds widened by half the brush (and a little for antialiasing). */
-    fun paintedArea(s: InkStroke): InkRect? {
-        val b = bounds(s) ?: return null
-        val pad = s.brush.size / 2 + 2f
-        return InkRect(b.left - pad, b.top - pad, b.right + pad, b.bottom + pad)
-    }
+    fun paintedArea(s: InkStroke): InkRect? = painted(s, bounds(s))
 
     private fun insertAt(i: Int, s: InkStroke) {
         strokes.add(i, s)
@@ -793,8 +849,34 @@ class InkLayer(initial: List<InkStroke> = emptyList()) {
         for (i in keptOld.indices) if (keptOld[i] !== keptNew[i]) { changed(keptOld[i]); changed(keptNew[i]) }
     }
 
-    private companion object {
-        const val DUPLICATE_OFFSET = 24f
+    companion object {
+        private const val DUPLICATE_OFFSET = 24f
+
+        private fun painted(s: InkStroke, b: InkRect?): InkRect? {
+            b ?: return null
+            val pad = s.brush.size / 2 + 2f
+            return InkRect(b.left - pad, b.top - pad, b.right + pad, b.bottom + pad)
+        }
+
+        /**
+         * Builds what [adoptLoaded] needs for [strokes] — each stroke's bounds (taken from [bounds] when given), the
+         * grid of their painted areas and the union of those — on any thread, so a big page's ink reaches the canvas
+         * without that work on the main thread.
+         */
+        fun prepare(strokes: List<InkStroke>, bounds: Map<InkStroke, InkRect?>? = null): LoadedInk {
+            val b = IdentityHashMap<InkStroke, InkRect?>(strokes.size * 2)
+            val grid = SpatialGrid<InkStroke>()
+            var l = Float.POSITIVE_INFINITY; var t = Float.POSITIVE_INFINITY
+            var r = Float.NEGATIVE_INFINITY; var btm = Float.NEGATIVE_INFINITY
+            for (s in strokes) {
+                val sb = if (bounds != null && bounds.containsKey(s)) bounds[s] else s.bounds()
+                b[s] = sb
+                val p = painted(s, sb) ?: continue
+                grid.insert(s, p)
+                l = minOf(l, p.left); t = minOf(t, p.top); r = maxOf(r, p.right); btm = maxOf(btm, p.bottom)
+            }
+            return LoadedInk(ArrayList(strokes), b, grid, if (l <= r) InkRect(l, t, r, btm) else null)
+        }
     }
 
     private fun push(e: Edit) {

@@ -60,6 +60,14 @@ class WankiApp : Application() {
         super.onCreate()
         graph = AppGraph(this)
         Reminders.schedule(this)
+        // the first notebook after a cold start should not pay for opening the database or loading androidx.ink's
+        // native library on its critical path: both are done here, off the main thread
+        graph.appScope.launch(Dispatchers.IO) {
+            runCatching { graph.repository.pages("") }.onFailure { android.util.Log.e("Wanki", "database not warmed up", it) }
+        }
+        graph.appScope.launch(Dispatchers.Default) {
+            runCatching { app.wanki.input.StrokeConversion.warmUp() }.onFailure { android.util.Log.e("Wanki", "ink not warmed up", it) }
+        }
         graph.appScope.launch {
             if (!graph.settings.emptyInkCleaned) {
                 runCatching { graph.repository.deleteEmptyInk() }.onSuccess { graph.settings.emptyInkCleaned = true }

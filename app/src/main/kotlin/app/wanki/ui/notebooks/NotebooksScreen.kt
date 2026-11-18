@@ -231,37 +231,44 @@ fun NotebookScreen(
     onHighlightShown: () -> Unit = {},
 ) {
     val graph = LocalContext.current.graph
+    app.wanki.input.OpenTrace.mark("NotebookScreen composing")
     val undo = LocalUndo.current
     var settingsRev by remember { mutableStateOf(0) }
     var showSettings by remember { mutableStateOf(false) }
-    val notebook by produceState<NotebookEntity?>(null, notebookId, settingsRev) { value = ui { graph.repository.notebook(notebookId) } }
-    val pages by remember(notebookId) { graph.repository.observePages(notebookId) }.collectAsState(emptyList<PageEntity>())
-    var index by rememberSaveable(notebookId) { mutableStateOf<Int?>(null) }
-    // a page that was just added: the current page stays on screen until it arrives through the flow
+    // the opening page's ink is read now, with the notebook and its pages: the page composes from those, without
+    // waiting for the queries and the flow below
     val scope = rememberUiScope()
-    val adder = remember(notebookId) { PageAdder(scope) }
-    // the opening page's ink is read now, alongside the notebook and pages queries below
     val preload = remember(notebookId) {
         scope.preloadInk(graph, notebookId) { pages -> initialPageId?.let { id -> pages.firstOrNull { it.id == id } } ?: pages.firstOrNull() }
     }
+    val opening by produceState<Opening?>(null, preload) { value = preload.opening.await() }
+    val stored by produceState<NotebookEntity?>(null, notebookId, settingsRev) { value = ui { graph.repository.notebook(notebookId) } }
+    val notebook = stored ?: opening?.notebook
+    val flowPages by remember(notebookId) { graph.repository.observePages(notebookId) }.collectAsState<List<PageEntity>, List<PageEntity>?>(null)
+    val pages = flowPages ?: opening?.pages ?: emptyList()
+    var index by rememberSaveable(notebookId) { mutableStateOf<Int?>(null) }
+    // a page that was just added: the current page stays on screen until it arrives through the flow
+    val adder = remember(notebookId) { PageAdder(scope) }
     val addError by adder.error.collectAsState()
 
-    LaunchedEffect(pages, initialPageId) {
-        if (index == null && pages.isNotEmpty()) {
-            index = initialPageId?.let { id -> pages.indexOfFirst { it.id == id }.takeIf { it >= 0 } } ?: 0
-        }
-    }
+    if (notebook != null) app.wanki.input.OpenTrace.mark("notebook arrived")
+    if (pages.isNotEmpty()) app.wanki.input.OpenTrace.mark("pages arrived")
+    // the opening page is known as soon as the pages are: no frame waits for the index to be stored
+    val initialIndex = if (pages.isEmpty()) null else initialPageId?.let { id -> pages.indexOfFirst { it.id == id }.takeIf { it >= 0 } } ?: 0
+    androidx.compose.runtime.SideEffect { if (index == null && initialIndex != null) index = initialIndex }
     LaunchedEffect(pages, adder.pendingIndex) {
         adder.arrived(pages.size)?.let { index = it }
     }
     val nb = notebook ?: return
-    val i = index ?: return
+    val i = index ?: initialIndex ?: return
     val page = pages.getOrNull(i) ?: return
     val pageUi = rememberPageUi()
     // the marks belong to the page the search hit opened; once the reader turns away they are not shown again
     val mark = highlight.takeIf { page.id == initialPageId }
     val state = remember(page.id) {
+        app.wanki.input.OpenTrace.mark("editor state created")
         PageEditorState(graph, nb, page, infinite = false, ui = pageUi, preload = preload, highlightQuery = mark, onHighlightShown = onHighlightShown)
+            .also { it.startLoad(scope) }
     }
     androidx.compose.runtime.SideEffect { state.notebook = nb }
     fun addPage() = adder.add(pages.size) { graph.repository.addPage(nb) }

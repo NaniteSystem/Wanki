@@ -249,6 +249,15 @@ data class PageInkEntity(
     val updatedAt: Long = System.currentTimeMillis(),
 )
 
+/** A [PageInkEntity] without its blob, and the blob's size in bytes. */
+data class PageInkMeta(
+    val pageId: String,
+    val recognizedText: String,
+    val recognizedAt: Long,
+    val updatedAt: Long,
+    val size: Int,
+)
+
 @Entity(tableName = "text_notes")
 data class TextNoteEntity(
     @PrimaryKey val id: String = newId(),
