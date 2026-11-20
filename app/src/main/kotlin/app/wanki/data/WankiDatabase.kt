@@ -13,6 +13,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         NotebookEntity::class, PageEntity::class, PageInkEntity::class, TextNoteEntity::class, NoteBlockEntity::class,
         CharScoreEntity::class, NoteTypeEntity::class, TextEntity::class, TextPieceEntity::class, RecitationEntity::class,
         TextWordStatEntity::class, TypingDraftEntity::class, PageObjectEntity::class, PageLineEntity::class,
+        SourceRefEntity::class,
     ],
     version = WankiDatabase.VERSION,
     exportSchema = true,
@@ -27,10 +28,11 @@ abstract class WankiDatabase : RoomDatabase() {
     abstract fun notebooks(): NotebookDao
     abstract fun textNotes(): TextNoteDao
     abstract fun texts(): TextDao
+    abstract fun sourceRefs(): SourceRefDao
 
     companion object {
         const val NAME = "wanki.db"
-        const val VERSION = 10
+        const val VERSION = 11
 
         fun create(context: Context): WankiDatabase =
             Room.databaseBuilder(context, WankiDatabase::class.java, NAME)
@@ -200,9 +202,21 @@ abstract class WankiDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `source_refs` (`id` TEXT NOT NULL, `noteId` TEXT NOT NULL, `kind` TEXT NOT NULL, " +
+                        "`sourceId` TEXT NOT NULL, `objectId` TEXT, `x` REAL, `y` REAL, `w` REAL, `h` REAL, `linked` INTEGER NOT NULL, " +
+                        "`detached` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, `suspendedByDetach` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_source_refs_noteId` ON `source_refs` (`noteId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_source_refs_sourceId` ON `source_refs` (`sourceId`)")
+            }
+        }
+
         val MIGRATIONS = arrayOf(
             MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8,
-            MIGRATION_8_9, MIGRATION_9_10,
+            MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11,
         )
     }
 }

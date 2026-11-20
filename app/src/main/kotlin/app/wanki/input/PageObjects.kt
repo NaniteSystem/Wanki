@@ -156,6 +156,7 @@ fun drawPageObject(canvas: Canvas, o: PageObject, scale: Float, picture: Picture
             if (picture is PictureState.Ready) canvas.drawBitmap(picture.bitmap, null, box, BitmapPaint)
             else drawPicturePlaceholder(canvas, box, scale, missing = picture is PictureState.Missing)
         }
+        PageObjectKind.MASK -> Unit // drawn by the mask UI (П4a later tasks)
     }
     canvas.restore()
 }
@@ -276,6 +277,7 @@ class PageObjectPainter(private val media: MediaStore?, private val scope: Corou
                 drawPageObject(canvas, o, scale, layout = layout)
             }
             PageObjectKind.IMAGE -> drawPageObject(canvas, o, scale, picture(o.media, decodeSide(maxOf(o.w, o.h) * scale)))
+            PageObjectKind.MASK -> Unit
         }
     }
 

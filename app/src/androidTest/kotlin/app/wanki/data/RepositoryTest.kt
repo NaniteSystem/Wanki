@@ -950,4 +950,86 @@ class RepositoryTest {
         repo.moveToPage(a, null, b, listOf(ink(10f, 20f)))
         assertEquals(10f, stored(b.id).single().points[0].x, 0.01f)
     }
+
+    // --- П4a: source refs and mask cards -----------------------------------------------------------
+
+    private fun mask(id: String, page: String) = PageObjectEntity(id = id, pageId = page, kind = "MASK", x = 0f, y = 0f, w = 10f, h = 10f, updatedAt = 1)
+
+    private fun ref(page: String, mask: String?, linked: Boolean = true) =
+        SourceRefEntity(noteId = "", kind = SourceKind.PAGE.name, sourceId = page, objectId = mask, linked = linked, createdAt = 1)
+
+    private suspend fun maskCard(page: PageEntity, maskId: String, linked: Boolean = true): CardEntity {
+        repo.savePageObjects(page, listOf(mask(maskId, page.id)))
+        val deck = repo.createDeck("D", "ru", AnswerMode.CLASSIC)
+        return repo.addCardFromSource(deck.id, "q", "a", AnswerMode.CLASSIC, ref(page.id, maskId, linked))
+    }
+
+    private suspend fun newPage() = repo.createNotebook("N", PageTemplate.LINED, "auto").let { repo.pages(it.id).single() }
+
+    @Test
+    fun addCardFromSourceStoresRef() = runBlocking {
+        val page = newPage()
+        val card = maskCard(page, "m1")
+        val r = repo.sourceOf(card.noteId)!!
+        assertEquals(card.noteId, r.noteId)
+        assertEquals("m1", r.objectId)
+        assertEquals(listOf(card.id), repo.observeCardsFrom(SourceKind.PAGE, page.id).first().map { it.card.id })
+    }
+
+    @Test
+    fun maskDeleteSuspendsLinkedCard() = runBlocking {
+        val page = newPage()
+        val card = maskCard(page, "m1")
+        repo.savePageObjects(page, emptyList())
+        assertTrue(repo.card(card.id)!!.card.suspended)
+        assertTrue(repo.sourceOf(card.noteId)!!.detached)
+    }
+
+    @Test
+    fun maskBackUnsuspends() = runBlocking {
+        val page = newPage()
+        val card = maskCard(page, "m1")
+        repo.savePageObjects(page, emptyList())
+        repo.savePageObjects(page, listOf(mask("m1", page.id)))
+        assertFalse(repo.card(card.id)!!.card.suspended)
+        assertFalse(repo.sourceOf(card.noteId)!!.detached)
+        // a card the user suspended by hand stays suspended
+        repo.setSuspended(listOf(card.id), true)
+        repo.savePageObjects(page, emptyList())
+        repo.savePageObjects(page, listOf(mask("m1", page.id)))
+        assertTrue(repo.card(card.id)!!.card.suspended)
+    }
+
+    @Test
+    fun oneOffCardIsNotSuspended() = runBlocking {
+        val page = newPage()
+        val card = maskCard(page, "m1", linked = false)
+        repo.savePageObjects(page, emptyList())
+        assertFalse(repo.card(card.id)!!.card.suspended)
+    }
+
+    @Test
+    fun purgePageDetachesRefs() = runBlocking {
+        val nb = repo.createNotebook("N", PageTemplate.LINED, "auto")
+        val page = repo.pages(nb.id).single()
+        val card = maskCard(page, "m1")
+        repo.insertPage(nb.id, 1) // the last page cannot be trashed
+        repo.delete(TrashKind.PAGE, page.id)
+        assertTrue(repo.purge(TrashKind.PAGE, page.id))
+        assertTrue(repo.sourceOf(card.noteId)!!.detached)
+        assertTrue(repo.card(card.id)!!.card.suspended)
+    }
+
+    @Test
+    fun duplicatePageDoesNotShareMaskRefs() = runBlocking {
+        val nb = repo.createNotebook("N", PageTemplate.LINED, "auto")
+        val page = repo.pages(nb.id).single()
+        val card = maskCard(page, "m1")
+        val copy = repo.duplicatePage(page.id)
+        val copied = repo.pageObjects(copy.id).single()
+        assertTrue(copied.id != "m1")
+        assertTrue(repo.observeCardsFrom(SourceKind.PAGE, copy.id).first().isEmpty())
+        assertEquals(1, repo.observeCardsFrom(SourceKind.PAGE, page.id).first().size)
+        assertEquals(card.id, repo.observeCardsFrom(SourceKind.PAGE, page.id).first().single().card.id)
+    }
 }

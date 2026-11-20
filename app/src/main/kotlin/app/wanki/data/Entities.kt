@@ -199,7 +199,7 @@ data class PageEntity(
     val backgroundPage: Int? = null,
 )
 
-enum class PageObjectKind { TEXT, IMAGE }
+enum class PageObjectKind { TEXT, IMAGE, MASK }
 
 /** A text box or picture placed on a page; coordinates are world units, [rotation] in degrees. */
 @Entity(tableName = "page_objects", indices = [Index("pageId")])
@@ -317,3 +317,28 @@ data class CardStateCount(val state: String, val isNew: Boolean, val suspended: 
 data class RetentionCount(val n: Int, val ok: Int?)
 
 data class DayBeauty(val day: Long, val beauty: Double, val n: Int)
+
+enum class SourceKind { PAGE, NOTE, BOARD_ITEM, DIARY, TEXT }
+
+/**
+ * Where a card was made from. [sourceId] is a page id for [SourceKind.PAGE]; [objectId] is the MASK page object of a
+ * mask card; the rect is the selection bounds in world units. [linked] cards follow their mask: [detached] is set when
+ * the source is gone, and [suspendedByDetach] remembers that the card was suspended by it (not by hand).
+ */
+@Entity(tableName = "source_refs", indices = [Index("noteId"), Index("sourceId")])
+data class SourceRefEntity(
+    @PrimaryKey val id: String = newId(),
+    val noteId: String,
+    /** A [SourceKind] name. */
+    val kind: String,
+    val sourceId: String,
+    val objectId: String? = null,
+    val x: Float? = null,
+    val y: Float? = null,
+    val w: Float? = null,
+    val h: Float? = null,
+    val linked: Boolean,
+    val detached: Boolean = false,
+    val createdAt: Long,
+    val suspendedByDetach: Boolean = false,
+)

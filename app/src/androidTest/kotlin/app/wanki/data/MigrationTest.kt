@@ -207,7 +207,25 @@ class MigrationTest {
         }
     }
 
+    @Test
+    fun migrate10To11AddsSourceRefs() {
+        helper.createDatabase(DB11, 10).apply {
+            execSQL("INSERT INTO page_objects (id, pageId, kind, x, y, w, h, rotation, z, text, color, textSize, media, updatedAt) VALUES ('o1', 'p1', 'TEXT', 1, 2, 3, 4, 0, 0, 'hi', 0, 32, NULL, 9)")
+            close()
+        }
+        val db = helper.runMigrationsAndValidate(DB11, 11, true, WankiDatabase.MIGRATION_10_11)
+        fun count(sql: String) = db.query(sql).use { it.moveToFirst(); it.getInt(0) }
+        assertEquals(0, count("SELECT COUNT(*) FROM source_refs"))
+        db.execSQL("INSERT INTO source_refs (id, noteId, kind, sourceId, linked, detached, createdAt, suspendedByDetach) VALUES ('r', 'n', 'PAGE', 'p1', 1, 0, 5, 0)")
+        assertEquals(1, count("SELECT COUNT(*) FROM source_refs"))
+        db.query("SELECT text FROM page_objects WHERE id = 'o1'").use { c ->
+            c.moveToFirst()
+            assertEquals("hi", c.getString(0))
+        }
+    }
+
     private companion object {
+        const val DB11 = "migration-test-11"
         const val DB10 = "migration-test-10"
         const val DB9 = "migration-test-9"
         const val DB8 = "migration-test-8"

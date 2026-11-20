@@ -585,3 +585,34 @@ interface TextNoteDao {
     @Query("DELETE FROM note_blocks WHERE noteId = :noteId AND id NOT IN (:keep)")
     suspend fun deleteBlocksExcept(noteId: String, keep: List<String>)
 }
+
+@Dao
+interface SourceRefDao {
+    @Insert
+    suspend fun insert(ref: SourceRefEntity)
+
+    @Query("SELECT * FROM source_refs WHERE noteId = :noteId LIMIT 1")
+    suspend fun ofNote(noteId: String): SourceRefEntity?
+
+    @Query(
+        "SELECT $CARD_WITH_NOTE_COLUMNS FROM source_refs r JOIN cards c ON c.noteId = r.noteId JOIN notes n ON n.id = c.noteId " +
+            "WHERE r.kind = :kind AND r.sourceId = :sourceId AND c.deleted = 0 ORDER BY r.createdAt, c.id",
+    )
+    fun observeCardsFrom(kind: String, sourceId: String): Flow<List<CardWithNote>>
+
+    @Query("SELECT * FROM source_refs WHERE kind = 'PAGE' AND sourceId = :pageId")
+    suspend fun ofPage(pageId: String): List<SourceRefEntity>
+
+    @Query("UPDATE source_refs SET detached = :detached, suspendedByDetach = :byDetach WHERE id = :id")
+    suspend fun setDetached(id: String, detached: Boolean, byDetach: Boolean)
+
+    @Query("UPDATE source_refs SET detached = 1 WHERE kind = 'PAGE' AND sourceId = :pageId")
+    suspend fun detachAllOfPage(pageId: String)
+
+    @Query("SELECT id FROM pages WHERE notebookId = :notebookId")
+    suspend fun pageIdsOf(notebookId: String): List<String>
+
+    /** Suspends or unsuspends the cards of [noteId] that are in the opposite state; returns how many changed. */
+    @Query("UPDATE cards SET suspended = :suspended, updatedAt = :now WHERE noteId = :noteId AND suspended = NOT :suspended")
+    suspend fun setCardsSuspended(noteId: String, suspended: Boolean, now: Long): Int
+}

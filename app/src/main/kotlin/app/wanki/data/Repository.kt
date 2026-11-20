@@ -41,6 +41,7 @@ class Repository(private val db: WankiDatabase) {
     private val notebooks = db.notebooks()
     private val textNotes = db.textNotes()
     private val charScores = db.charScores()
+    private val sourceRefs = db.sourceRefs()
 
     // --- decks & cards ---------------------------------------------------------------------
 
@@ -166,6 +167,46 @@ class Repository(private val db: WankiDatabase) {
             card
         }
     }
+
+    /** [addCard] plus the [ref] of where it was made from (its noteId is replaced by the new card's). */
+    suspend fun addCardFromSource(
+        deckId: String, front: String, back: String, mode: AnswerMode, ref: SourceRefEntity, tags: String = "",
+    ): CardEntity = db.withTransaction {
+        val card = addCard(deckId, front, back, mode, tags)
+        sourceRefs.insert(ref.copy(noteId = card.noteId))
+        card
+    }
+
+    suspend fun sourceOf(noteId: String): SourceRefEntity? = sourceRefs.ofNote(noteId)
+
+    fun observeCardsFrom(kind: SourceKind, sourceId: String): Flow<List<CardWithNote>> = sourceRefs.observeCardsFrom(kind.name, sourceId)
+
+    /**
+     * Mask refs on [pageId] whose mask is not in [liveMaskIds] become detached and their linked cards are suspended; refs
+     * whose mask is back (undo) are attached again and unsuspended only if the detach suspended them.
+     */
+    suspend fun detachMaskRefs(pageId: String, liveMaskIds: Set<String>) = db.withTransaction {
+        val now = System.currentTimeMillis()
+        for (r in sourceRefs.ofPage(pageId)) {
+            val id = r.objectId ?: continue
+            if (id !in liveMaskIds && !r.detached) {
+                val suspended = r.linked && sourceRefs.setCardsSuspended(r.noteId, true, now) > 0
+                sourceRefs.setDetached(r.id, true, suspended)
+            } else if (id in liveMaskIds && r.detached) {
+                if (r.suspendedByDetach) sourceRefs.setCardsSuspended(r.noteId, false, now)
+                sourceRefs.setDetached(r.id, false, false)
+            }
+        }
+    }
+
+    /** Inside a transaction: the page is gone for good, so every ref on it is detached. */
+    private suspend fun detachPageRefs(pageId: String) {
+        detachMaskRefs(pageId, emptySet())
+        sourceRefs.detachAllOfPage(pageId)
+    }
+
+    private suspend fun syncMaskRefs(pageId: String) =
+        detachMaskRefs(pageId, notebooks.objects(pageId).filter { it.kind == PageObjectKind.MASK.name }.mapTo(HashSet()) { it.id })
 
     data class NewCard(val front: String, val back: String, val mode: AnswerMode, val tags: String = "")
 
@@ -666,6 +707,7 @@ class Repository(private val db: WankiDatabase) {
         when (kind) {
             TrashKind.NOTEBOOK, TrashKind.BOARD -> {
                 if (notebooks.get(id)?.deleted != true) return@withTransaction false
+                sourceRefs.pageIdsOf(id).forEach { detachPageRefs(it) }
                 notebooks.deleteInkOfNotebook(id)
                 notebooks.deleteObjectsOfNotebook(id)
                 notebooks.deleteLinesOfNotebook(id)
@@ -686,6 +728,7 @@ class Repository(private val db: WankiDatabase) {
     }
 
     private suspend fun removePage(id: String) {
+        detachPageRefs(id)
         notebooks.deleteInk(id)
         notebooks.deleteObjects(id)
         notebooks.deleteLines(id)
@@ -868,6 +911,7 @@ class Repository(private val db: WankiDatabase) {
         if (fromObjects != null) {
             notebooks.deleteObjects(from.id)
             if (fromObjects.isNotEmpty()) notebooks.insertObjects(fromObjects.map { it.copy(pageId = from.id) })
+            syncMaskRefs(from.id)
         }
         // keys of the strokes as they read back, exactly as takeBackFromPage will see them
         MovedInk(if (placed.isEmpty()) emptyList() else InkCodec.decode(InkCodec.assemble(placed)).strokes.map(::keyOf), moved.map { it.id })
@@ -897,6 +941,7 @@ class Repository(private val db: WankiDatabase) {
                 writeInk(page, if (kept.isEmpty()) null else InkCodec.encode(InkDrawing(kept)), System.currentTimeMillis())
             }
         }
+        if (objectIds.isNotEmpty()) syncMaskRefs(toPageId)
         if (removed > 0 && strokesRemoved == 0) {
             val now = System.currentTimeMillis()
             notebooks.touchPage(page.id, now)
@@ -954,6 +999,7 @@ class Repository(private val db: WankiDatabase) {
         insertPageIfMissing(page)
         notebooks.deleteObjects(page.id)
         if (objects.isNotEmpty()) notebooks.insertObjects(objects.map { it.copy(pageId = page.id) })
+        syncMaskRefs(page.id)
         notebooks.touchPage(page.id, now)
         notebooks.touch(page.notebookId, now)
     }
