@@ -87,13 +87,13 @@ private fun PickRow(label: String, selected: Boolean, depth: Int, onClick: () ->
 
 /** A text button that opens a small menu of actions. */
 @Composable
-fun MenuButton(label: String, items: List<Pair<String, () -> Unit>>, modifier: Modifier = Modifier) {
+fun MenuButton(label: String, items: List<Pair<String, () -> Unit>>, modifier: Modifier = Modifier, enabled: (String) -> Boolean = { true }) {
     var open by remember { mutableStateOf(false) }
     Box(modifier) {
         TextButton(onClick = { open = true }) { Text(label) }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             items.forEach { (text, action) ->
-                DropdownMenuItem(text = { Text(text) }, onClick = { open = false; action() })
+                DropdownMenuItem(text = { Text(text) }, onClick = { open = false; action() }, enabled = enabled(text))
             }
         }
     }

@@ -140,6 +140,8 @@ import java.io.File
  */
 /** How long a search highlight stays on the page. */
 const val HIGHLIGHT_MS = 4000L
+/** How long a card's source area stays outlined. */
+const val AREA_MS = 3000L
 
 class PageUiState {
     var showText by mutableStateOf(false)
@@ -289,6 +291,8 @@ class PageEditorState(
     private val highlightQuery: String? = null,
     /** Called once the highlight has been shown (or could not be): the route forgets the query. */
     private val onHighlightShown: () -> Unit = {},
+    /** A card's source area: outlined for a few seconds after the page opens, with the view on it. */
+    private val sourceArea: InkRect? = null,
 ) {
     /** Current notebook settings; replaced when they change, so the state (and unsaved ink) stays. */
     var notebook by mutableStateOf(notebook)
@@ -354,6 +358,9 @@ class PageEditorState(
 
     /** World boxes of the lines that matched the search query, shown for [HIGHLIGHT_MS]. */
     var highlight by mutableStateOf<List<InkRect>>(emptyList())
+        private set
+    /** The source area shown now ([sourceArea] while it is outlined). */
+    var area by mutableStateOf<InkRect?>(null)
         private set
     var recognizing by mutableStateOf(false)
         private set
@@ -732,6 +739,7 @@ class PageEditorState(
      * last recognition, has none or old ones); when that fails the page opens without a mark.
      */
     suspend fun showHighlight() {
+        sourceArea?.let { showArea(it); return }
         val q = highlightQuery?.takeIf { it.isNotBlank() } ?: return
         if (!readOnly) {
             try {
@@ -752,6 +760,19 @@ class PageEditorState(
         savedView = Triple(viewport.scale, viewport.offsetX, viewport.offsetY)
         delay(HIGHLIGHT_MS)
         highlight = emptyList()
+    }
+
+    private suspend fun showArea(r: InkRect) {
+        area = r
+        onHighlightShown()
+        var waited = 0
+        while (!viewport.hasLayout && waited < 2000) { delay(16); waited += 16 }
+        if (viewport.hasLayout) {
+            viewport.centerOn(r)
+            savedView = Triple(viewport.scale, viewport.offsetX, viewport.offsetY)
+        }
+        delay(AREA_MS)
+        area = null
     }
 
     /** A pan or pinch ended: stores the view a second later (a following gesture restarts the wait). */
@@ -974,6 +995,7 @@ fun PageEditor(
                     },
                 )
                 HighlightBoxes(state)
+                SourceAreaOutline(state)
                 if (state.backgroundFailed) {
                     Surface(
                         color = MaterialTheme.colorScheme.errorContainer,

@@ -1,5 +1,7 @@
 package app.wanki.ui.notebooks
 
+import app.wanki.data.SourceKind
+import app.wanki.ink.InkRect
 import app.wanki.ui.common.ui
 import app.wanki.ui.common.ErrorSnackbar
 import app.wanki.ui.common.rememberUiScope
@@ -229,6 +231,9 @@ fun NotebookScreen(
     highlight: String? = null,
     /** The highlight has been shown: the caller drops it from the route. */
     onHighlightShown: () -> Unit = {},
+    /** A card's source area `"x,y,w,h"`, outlined on the opening page. */
+    area: String? = null,
+    onOpenCard: (cardId: String) -> Unit = {},
 ) {
     val graph = LocalContext.current.graph
     app.wanki.input.OpenTrace.mark("NotebookScreen composing")
@@ -265,14 +270,18 @@ fun NotebookScreen(
     val pageUi = rememberPageUi()
     // the marks belong to the page the search hit opened; once the reader turns away they are not shown again
     val mark = highlight.takeIf { page.id == initialPageId }
+    val areaRect = area.takeIf { page.id == initialPageId }?.split(',')?.mapNotNull { it.toFloatOrNull() }
+        ?.takeIf { it.size == 4 }?.let { (x, y, w, h) -> InkRect(x, y, x + w, y + h) }
     val state = remember(page.id) {
         app.wanki.input.OpenTrace.mark("editor state created")
-        PageEditorState(graph, nb, page, infinite = false, ui = pageUi, preload = preload, highlightQuery = mark, onHighlightShown = onHighlightShown)
+        PageEditorState(graph, nb, page, infinite = false, ui = pageUi, preload = preload, highlightQuery = mark, onHighlightShown = onHighlightShown, sourceArea = areaRect)
             .also { it.startLoad(scope) }
     }
     androidx.compose.runtime.SideEffect { state.notebook = nb }
     fun addPage() = adder.add(pages.size) { graph.repository.addPage(nb) }
     var moving by remember { mutableStateOf(false) }
+    var showCards by remember { mutableStateOf(false) }
+    val cardsHere by remember(page.id) { graph.repository.observeCardsFrom(SourceKind.PAGE, page.id) }.collectAsState(emptyList())
     var exporting by remember { mutableStateOf(false) }
     var importing by remember { mutableStateOf(false) }
     // the first imported page, shown once it arrives through the flow
@@ -316,7 +325,9 @@ fun NotebookScreen(
                 HeaderAction(R.drawable.ic_settings, "Настройки тетради", "menu-notebook-settings") { showSettings = true },
                 state.paperAction(), state.fitAction(),
                 HeaderAction(R.drawable.ic_picture_as_pdf, "Экспорт в PDF", "menu-export-pdf") { exporting = true },
-            ) + listOfNotNull(pick?.let { p ->
+            ) + listOfNotNull(cardsHere.takeIf { it.isNotEmpty() }?.let {
+                HeaderAction(R.drawable.ic_style, "Карточки отсюда (${it.size})", "menu-cards-here") { showCards = true }
+            }) + listOfNotNull(pick?.let { p ->
                 HeaderAction(R.drawable.ic_upload_file, "Импорт PDF или картинок", "menu-import") {
                     try {
                         p(arrayOf("application/pdf", "image/*"))
@@ -336,6 +347,7 @@ fun NotebookScreen(
             beforeExport = { state.saver.request(); state.saver.flush() },
             onDismiss = { exporting = false },
         )
+        if (showCards) CardsFromHereSheet(cardsHere, onOpen = { showCards = false; onOpenCard(it) }, onDismiss = { showCards = false })
         if (importing) ProgressDialog("Добавляю страницы…", "import-progress")
         if (moving) MoveToPageDialog(pages, page.id, onPick = { target ->
             moving = false

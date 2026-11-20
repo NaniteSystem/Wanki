@@ -1,5 +1,11 @@
 package app.wanki.ui.notebooks
 
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -54,6 +60,24 @@ internal fun HighlightBoxes(state: PageEditorState) {
             val y = b.top * vp.scale + vp.offsetY - pad
             drawRect(HighlightColor, Offset(x, y), Size(b.width * vp.scale + 2 * pad, b.height * vp.scale + 2 * pad))
         }
+    }
+}
+
+/** A pulsing outline around the area a card was made from. */
+@Composable
+internal fun SourceAreaOutline(state: PageEditorState) {
+    val r = state.area ?: return
+    val color = MaterialTheme.colorScheme.primary
+    val pulse by rememberInfiniteTransition(label = "source-area").animateFloat(
+        0.3f, 1f, infiniteRepeatable(tween(500), RepeatMode.Reverse), label = "alpha",
+    )
+    Canvas(Modifier.fillMaxSize().testTag("source-area")) {
+        val vp = state.viewport
+        val pad = 6f * vp.scale
+        drawRect(
+            color.copy(alpha = pulse), Offset(r.left * vp.scale + vp.offsetX - pad, r.top * vp.scale + vp.offsetY - pad),
+            Size(r.width * vp.scale + 2 * pad, r.height * vp.scale + 2 * pad), style = Stroke(3.dp.toPx()),
+        )
     }
 }
 

@@ -81,8 +81,11 @@ sealed interface Route {
     /** Handwriting practice: the weak-character queue, or one [glyph]. */
     data class Practice(val glyph: String? = null, val language: String = "ja") : Route
     data object Notebooks : Route
-    /** [highlight]: a search query; the lines of [pageId] that contain it are marked when the page opens. */
-    data class Notebook(val id: String, val pageId: String? = null, val highlight: String? = null) : Route
+    /**
+     * [highlight]: a search query; the lines of [pageId] that contain it are marked when the page opens.
+     * [area]: `"x,y,w,h"` in page units, outlined for a moment when the page opens (a card's source).
+     */
+    data class Notebook(val id: String, val pageId: String? = null, val highlight: String? = null, val area: String? = null) : Route
     data class PageGrid(val notebookId: String) : Route
     data object Trash : Route
     data object Notes : Route
@@ -228,7 +231,7 @@ fun MainShell() {
 }
 
 @Composable
-private fun Content(nav: Navigator) {
+internal fun Content(nav: Navigator) {
     when (val r = nav.current) {
         Route.Decks -> DecksScreen(
             onOpen = { nav.open(Route.Deck(it)) },
@@ -271,17 +274,18 @@ private fun Content(nav: Navigator) {
             onOpenCard = { nav.open(Route.CardEditor(it)) },
         )
         is Route.DeckOptions -> DeckOptionsScreen(r.id, onBack = { nav.back() }, onDeleted = { nav.back() })
-        is Route.Review -> ReviewScreen(r.deckId, onClose = { nav.back() })
+        is Route.Review -> ReviewScreen(r.deckId, onClose = { nav.back() }, onOpenSource = nav::open)
         Route.Browser -> BrowserScreen(onBack = { nav.back() }, onOpenCard = { nav.open(Route.CardEditor(it)) })
-        is Route.CardEditor -> CardEditorScreen(r.id, onBack = { nav.back() }, onPractice = { g, lang -> nav.open(Route.Practice(g, lang)) })
+        is Route.CardEditor -> CardEditorScreen(r.id, onBack = { nav.back() }, onPractice = { g, lang -> nav.open(Route.Practice(g, lang)) }, onOpenSource = nav::open)
         is Route.Practice -> PracticeScreen(r.glyph, r.language, onBack = { nav.back() })
         Route.Notebooks -> NotebooksScreen(onOpen = { id, page -> nav.open(Route.Notebook(id, page)) }, onOpenHit = { hit, q -> nav.openSearchHit(hit, q) })
         is Route.Notebook -> NotebookScreen(
-            r.id, r.pageId, onBack = { nav.back() }, highlight = r.highlight,
+            r.id, r.pageId, onBack = { nav.back() }, highlight = r.highlight, area = r.area,
             // shown once: recreation or a restored route must not mark the lines again
             onHighlightShown = { if (nav.current == r) nav.replaceTop(Route.Notebook(r.id, r.pageId)) },
             // the notebook screen is left while the grid is open: remember the page it shows
             onGrid = { page -> nav.replaceTop(Route.Notebook(r.id, page)); nav.open(Route.PageGrid(r.id)) },
+            onOpenCard = { nav.open(Route.CardEditor(it)) },
         )
         is Route.PageGrid -> PageGridScreen(
             r.notebookId, onBack = { nav.back() },

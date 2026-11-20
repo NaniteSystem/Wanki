@@ -30,6 +30,13 @@ class RouteCodecTest {
     }
 
     @Test
+    fun notebookAreaRoundTrips() {
+        val r = Route.Notebook("n1", "p2", null, "10.5,20,30,40")
+        assertEquals(r, RouteCodec.decode(RouteCodec.encode(r)))
+        assertEquals(Route.Notebook("n1", "p2", "q"), RouteCodec.decode("Notebook|n1|=p2|=q"))
+    }
+
+    @Test
     fun idsWithSeparatorsRoundTrip() {
         val r = Route.Note("a|b,c\\d")
         assertEquals(r, RouteCodec.decode(RouteCodec.encode(r)))

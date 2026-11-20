@@ -468,6 +468,9 @@ class Repository(private val db: WankiDatabase) {
 
     suspend fun pages(notebookId: String) = notebooks.pages(notebookId)
 
+    /** A page by id, trashed or not. */
+    suspend fun page(id: String) = notebooks.page(id)
+
     suspend fun addPage(notebook: NotebookEntity, template: PageTemplate? = null): PageEntity {
         val index = (notebooks.pages(notebook.id).maxOfOrNull { it.pageIndex } ?: -1) + 1
         val p = PageEntity(notebookId = notebook.id, pageIndex = index, template = (template?.name ?: notebook.template), landscape = notebook.landscape)

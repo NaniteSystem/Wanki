@@ -1,5 +1,7 @@
 package app.wanki.ui.review
 
+import app.wanki.ui.Route
+import app.wanki.ui.common.rememberSourceOpener
 import android.widget.Toast
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
@@ -321,13 +323,14 @@ class ReviewState(private val graph: AppGraph, private val deckId: String) {
 }
 
 @Composable
-fun ReviewScreen(deckId: String, onClose: () -> Unit) {
+fun ReviewScreen(deckId: String, onClose: () -> Unit, onOpenSource: (Route) -> Unit = {}) {
     val graph = LocalContext.current.graph
     val state = remember(deckId) { ReviewState(graph, deckId) }
     val scope = rememberUiScope()
     LaunchedEffect(deckId) { ui { state.load() } }
 
     val context = LocalContext.current
+    val source = rememberSourceOpener(state.current?.note?.id, onOpenSource)
     var editing by remember { mutableStateOf(false) }
     val focus = remember { FocusRequester() }
     LaunchedEffect(state.loaded) { runCatching { focus.requestFocus() } }
@@ -366,12 +369,13 @@ fun ReviewScreen(deckId: String, onClose: () -> Unit) {
                 if (state.current != null) {
                     MenuButton(
                         "⋮",
-                        listOf(
+                        listOf<Pair<String, () -> Unit>>(
                             "Изменить карточку" to { editing = true },
                             "Озвучить ответ" to ::speak,
                             "Отложить до завтра" to { scope.launch { state.buryCurrent() } },
                             "Приостановить карточку" to { scope.launch { state.suspendCurrent() } },
-                        ),
+                        ) + listOfNotNull(source.target?.let { source.label to { source.open() } }),
+                        enabled = { it != source.label || source.enabled },
                     )
                 }
             }

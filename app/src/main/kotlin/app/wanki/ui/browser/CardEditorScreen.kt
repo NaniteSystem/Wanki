@@ -1,5 +1,8 @@
 package app.wanki.ui.browser
 
+import app.wanki.ui.Route
+import app.wanki.ui.common.rememberSourceOpener
+import androidx.compose.ui.platform.testTag
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.horizontalScroll
@@ -71,7 +74,7 @@ private val date = DateTimeFormatter.ofPattern("d MMM yyyy", Locale.forLanguageT
 
 /** Edits a card; changes are saved when leaving. Shows its schedule and answer history. */
 @Composable
-fun CardEditorScreen(cardId: String, onBack: () -> Unit, onPractice: (String, String) -> Unit = { _, _ -> }) {
+fun CardEditorScreen(cardId: String, onBack: () -> Unit, onPractice: (String, String) -> Unit = { _, _ -> }, onOpenSource: (Route) -> Unit = {}) {
     val graph = LocalContext.current.graph
     val card by remember(cardId) { graph.repository.observeCard(cardId) }.collectAsState(null)
     val tree by remember { graph.repository.observeDeckTree() }.collectAsState(null)
@@ -80,12 +83,12 @@ fun CardEditorScreen(cardId: String, onBack: () -> Unit, onPractice: (String, St
     }
     val c = card ?: return
     val t = tree ?: return
-    CardEditor(c, type ?: return, t, onBack, onPractice)
+    CardEditor(c, type ?: return, t, onBack, onPractice, onOpenSource)
 }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun CardEditor(c: CardWithNote, type: NoteType, tree: DeckTree, onBack: () -> Unit, onPractice: (String, String) -> Unit) {
+private fun CardEditor(c: CardWithNote, type: NoteType, tree: DeckTree, onBack: () -> Unit, onPractice: (String, String) -> Unit, onOpenSource: (Route) -> Unit) {
     val graph = LocalContext.current.graph
     val original = remember(c.note.fields, type) {
         val v = c.note.fields.split(NoteEntity.FIELD_SEPARATOR)
@@ -117,6 +120,7 @@ private fun CardEditor(c: CardWithNote, type: NoteType, tree: DeckTree, onBack: 
         onBack()
     }
     BackHandler { saveAndClose() }
+    val source = rememberSourceOpener(c.note.id) { route -> saveAndClose(); onOpenSource(route) }
 
     Column(Modifier.fillMaxSize()) {
         ScreenHeader("Карточка", onBack = ::saveAndClose, subtitle = tree.title(deckId)) {
@@ -161,6 +165,9 @@ private fun CardEditor(c: CardWithNote, type: NoteType, tree: DeckTree, onBack: 
             HorizontalDivider()
             Schedule(c)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (source.target != null) {
+                    OutlinedButton(onClick = source::open, enabled = source.enabled, modifier = Modifier.testTag("open-source")) { Text(source.label) }
+                }
                 OutlinedButton(onClick = { graph.appScope.launch { graph.repository.setSuspended(listOf(c.card.id), !c.card.suspended) } }) {
                     Text(if (c.card.suspended) "Вернуть из приостановки" else "Приостановить")
                 }
