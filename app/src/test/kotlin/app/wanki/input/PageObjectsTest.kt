@@ -62,7 +62,7 @@ class PageObjectsTest {
         assertEquals("IMAGE", e.kind)
         assertEquals(42L, e.updatedAt)
         assertEquals(o, e.toModel())
-        assertEquals(null, e.copy(kind = "MASK").toModelOrNull())
+        assertEquals(null, e.copy(kind = "FUTURE").toModelOrNull())
     }
 
     @Test
