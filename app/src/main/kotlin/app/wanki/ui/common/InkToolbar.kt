@@ -63,6 +63,7 @@ private fun ToolKind.icon() = when (this) {
     ToolKind.HIGHLIGHTER -> R.drawable.ic_ink_highlighter
     ToolKind.ERASER -> R.drawable.ic_ink_eraser
     ToolKind.LASSO -> R.drawable.ic_lasso_select
+    ToolKind.MASK -> R.drawable.ic_tape
 }
 
 private fun ToolKind.label() = when (this) {
@@ -71,6 +72,7 @@ private fun ToolKind.label() = when (this) {
     ToolKind.HIGHLIGHTER -> "Выделитель"
     ToolKind.ERASER -> "Ластик"
     ToolKind.LASSO -> "Лассо"
+    ToolKind.MASK -> "Скотч"
 }
 
 private val ToolKind.hasColors get() = this == ToolKind.PEN || this == ToolKind.MARKER || this == ToolKind.HIGHLIGHTER

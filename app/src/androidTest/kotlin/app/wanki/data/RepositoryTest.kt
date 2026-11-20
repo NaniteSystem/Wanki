@@ -1032,4 +1032,25 @@ class RepositoryTest {
         assertEquals(1, repo.observeCardsFrom(SourceKind.PAGE, page.id).first().size)
         assertEquals(card.id, repo.observeCardsFrom(SourceKind.PAGE, page.id).first().single().card.id)
     }
+
+    @Test
+    fun movedMaskKeepsItsCard() = runBlocking {
+        val (from, to) = twoPages()
+        val card = maskCard(from, "m1")
+        val m = repo.pageObjects(from.id).single()
+        val moved = repo.moveToPage(from, null, to, emptyList(), objects = listOf(m), fromObjects = emptyList())
+        assertFalse(repo.card(card.id)!!.card.suspended)
+        val r = repo.sourceOf(card.noteId)!!
+        assertEquals(to.id, r.sourceId)
+        assertEquals(moved.objectIds.single(), r.objectId)
+        assertFalse(r.detached)
+        // undo: the target gives it back and the source gets the original again
+        repo.takeBackFromPage(to.id, moved.keys, moved.objectIds, from.id, moved.masks)
+        repo.savePageObjects(from, listOf(m))
+        val back = repo.sourceOf(card.noteId)!!
+        assertEquals(from.id, back.sourceId)
+        assertEquals("m1", back.objectId)
+        assertFalse(back.detached)
+        assertFalse(repo.card(card.id)!!.card.suspended)
+    }
 }

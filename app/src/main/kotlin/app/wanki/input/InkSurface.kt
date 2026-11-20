@@ -58,6 +58,10 @@ fun InkSurface(
     /** A two-finger fling at the page edge: +1 next page, -1 previous. Null where pages do not turn. */
     onPageSwipe: ((Int) -> Unit)? = null,
     background: DrawScope.() -> Unit = {},
+    /** Tape masks drawn open (outline only); the others are closed. */
+    openMasks: Set<String> = emptySet(),
+    /** A finished «Скотч» gesture; null where there is no tape. */
+    onMask: ((List<androidx.compose.ui.geometry.Offset>, MaskGesture) -> Unit)? = null,
     overlay: DrawScope.() -> Unit = {},
 ) {
     // made at first use: canvases with tiles never draw strokes one by one
@@ -75,6 +79,7 @@ fun InkSurface(
     var cursor by remember { mutableStateOf<EraserCursor?>(null) }
     var line by remember { mutableStateOf<LinePreview?>(null) }
     val swiped by rememberUpdatedState(onPageSwipe)
+    val masked by rememberUpdatedState(onMask)
     val cursorColor = MaterialTheme.colorScheme.onSurfaceVariant
     val scaleIcon = painterResource(R.drawable.ic_open_in_full)
     val rotateIcon = painterResource(R.drawable.ic_rotate_right)
@@ -95,11 +100,12 @@ fun InkSurface(
                 scale(scale, scale, pivot = androidx.compose.ui.geometry.Offset.Zero)
             }) {
                 background()
-                if (layer.objects.isNotEmpty()) drawObjects(layer, objectPainter, scale)
+                if (layer.objects.isNotEmpty()) drawObjects(layer, objectPainter, scale, masks = false, openMasks)
                 if (showInk) {
                     if (tiles != null && vp != null) tiles.draw(this, vp)
                     else drawStrokesDirect(layer, renderer.value, matrix)
                 }
+                if (layer.objects.isNotEmpty()) drawObjects(layer, objectPainter, scale, masks = true, openMasks)
                 drawSelection(layer, scale, touchPx)
                 line?.let { drawLinePreview(it) }
             }
@@ -139,6 +145,7 @@ fun InkSurface(
                     it.onStrokeFinished = { finished() }
                     it.onViewGestureEnd = { viewEnded() }
                     it.onLinePreview = { p -> line = p }
+                    it.onMask = if (onMask != null) ({ pts, g -> masked?.invoke(pts, g) }) else null
                     it.onPageSwipe = if (onPageSwipe != null) ({ dir -> swiped?.invoke(dir) }) else null
                 }
             },
@@ -180,12 +187,18 @@ private fun DrawScope.drawStrokesDirect(layer: InkLayer, renderer: CanvasStrokeR
     }
 }
 
-/** Text blocks and pictures in draw order, under the ink; objects being dragged are drawn where the drag puts them. */
-private fun DrawScope.drawObjects(layer: InkLayer, painter: PageObjectPainter, scale: Float) {
+/**
+ * Text blocks and pictures (under the ink), or tape masks ([masks], over it), in draw order; objects being dragged are
+ * drawn where the drag puts them.
+ */
+private fun DrawScope.drawObjects(layer: InkLayer, painter: PageObjectPainter, scale: Float, masks: Boolean, openMasks: Set<String>) {
     painter.rev // a picture that arrives draws again
     val canvas = drawContext.canvas.nativeCanvas
     val live = layer.liveTransform?.takeIf { !it.isIdentity }
-    for (o in layer.objects) painter.draw(canvas, if (live != null && layer.isTransforming(o.id)) o.transformed(live) else o, scale)
+    for (o in layer.objects) {
+        if ((o.kind == app.wanki.data.PageObjectKind.MASK) != masks) continue
+        painter.draw(canvas, if (live != null && layer.isTransforming(o.id)) o.transformed(live) else o, scale, open = o.id in openMasks)
+    }
 }
 
 /** Lasso path while drawing it, then a dashed frame around the selection (world coordinates), turned with a running drag. */

@@ -663,6 +663,44 @@ class PageEditorState(
         return true
     }
 
+    /** Tape masks shown open; view state only, so every mask opens closed. */
+    var openMasks by mutableStateOf(emptySet<String>())
+
+    val hasMasks: Boolean get() = layer.objects.any { it.kind == PageObjectKind.MASK }
+
+    fun openAllMasks(open: Boolean) {
+        openMasks = if (open) layer.objects.filter { it.kind == PageObjectKind.MASK }.mapTo(HashSet()) { it.id } else emptySet()
+    }
+
+    /** A «Скотч» gesture: a tap opens or closes the topmost mask under it; a drag adds a rectangle or polygon mask. */
+    fun onMask(points: List<androidx.compose.ui.geometry.Offset>, gesture: app.wanki.input.MaskGesture) {
+        if (points.isEmpty()) return
+        if (gesture == app.wanki.input.MaskGesture.TAP) {
+            val p = points.first()
+            val hit = layer.objects.lastOrNull { it.kind == PageObjectKind.MASK && maskContains(it, p.x, p.y) } ?: return
+            openMasks = if (hit.id in openMasks) openMasks - hit.id else openMasks + hit.id
+            return
+        }
+        if (!objectsEditable) return
+        val l = points.minOf { it.x }
+        val t = points.minOf { it.y }
+        val w = points.maxOf { it.x } - l
+        val h = points.maxOf { it.y } - t
+        if (w < MIN_MASK || h < MIN_MASK) return
+        val text = if (gesture == app.wanki.input.MaskGesture.POLYGON && points.size >= 3) points.joinToString(" ") { "${it.x},${it.y}" } else ""
+        layer.addObject(PageObject(PageObject.newId(), PageObjectKind.MASK, l, t, w, h, 0f, layer.nextZ(), text, 0, 0f, null))
+    }
+
+    /** Whether ([x], [y]) is inside [o]'s turned box. */
+    private fun maskContains(o: PageObject, x: Float, y: Float): Boolean {
+        val r = Math.toRadians(-o.rotation.toDouble())
+        val dx = x - o.centerX
+        val dy = y - o.centerY
+        val ux = (kotlin.math.cos(r) * dx - kotlin.math.sin(r) * dy).toFloat()
+        val uy = (kotlin.math.sin(r) * dx + kotlin.math.cos(r) * dy).toFloat()
+        return kotlin.math.abs(ux) <= o.w / 2 && kotlin.math.abs(uy) <= o.h / 2
+    }
+
     private fun joined(l: List<PageLineEntity>) = l.sortedBy { it.lineIndex }.joinToString("\n") { it.shown }
 
     suspend fun recognizeIfDirty() {
@@ -871,6 +909,8 @@ fun PageEditorState.paperAction() = HeaderAction(R.drawable.ic_article, "Бум�
 fun PageEditorState.fitAction() = HeaderAction(R.drawable.ic_fit_screen, "Вписать", "fit") { viewport.fitWidth() }
 private const val TEXT_BLOCK_WIDTH = 600f
 private const val PICTURE_BOX = 600f
+/** A tape drag smaller than this (world units) on either side makes no mask. */
+private const val MIN_MASK = 8f
 private const val INSERT_TAKEN = 24f
 private const val INSERT_STEP = 48f
 
@@ -951,8 +991,15 @@ fun PageEditor(
                 HeaderAction(R.drawable.ic_text_fields, "Текстовый блок", "menu-insert-text") { insert.text = true },
                 HeaderAction(R.drawable.ic_image, "Картинка", "menu-insert-image") { insert.picture = true },
             ) else emptyList()
-            ScreenHeader(title, onBack = back, subtitle = subtitle, subtitleMaxLines = 1, primary = primary, menu = paste + inserts + menu)
-            InkToolbar(state.tool, state::selectTool, state.layer, state.eraser, state::selectEraser, Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+            val masks = if (state.hasMasks) listOf(
+                HeaderAction(R.drawable.ic_tape, "Открыть всё", "menu-masks-open") { state.openAllMasks(true) },
+                HeaderAction(R.drawable.ic_tape, "Закрыть всё", "menu-masks-close") { state.openAllMasks(false) },
+            ) else emptyList()
+            ScreenHeader(title, onBack = back, subtitle = subtitle, subtitleMaxLines = 1, primary = primary, menu = paste + inserts + masks + menu)
+            InkToolbar(
+                state.tool, state::selectTool, state.layer, state.eraser, state::selectEraser, Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                tools = if (state.objectsAllowed) ToolKind.entries else ToolKind.entries - ToolKind.MASK,
+            )
             if (state.layer.hasSelection && !state.readOnly) {
                 SelectionBar(
                     state.layer, state.notebook.language, Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
@@ -983,6 +1030,8 @@ fun PageEditor(
                     eraser = state.eraser,
                     onViewGestureEnd = state::onViewGestureEnd,
                     onPageSwipe = onPageSwipe,
+                    openMasks = state.openMasks,
+                    onMask = state::onMask,
                     modifier = Modifier.fillMaxSize().testTag("page-canvas"),
                     background = {
                         if (state.infinite) drawBoard(state.viewport.visibleWorld(), state.viewport.scale)

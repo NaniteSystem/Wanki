@@ -33,8 +33,8 @@ import kotlinx.coroutines.withContext
 
 /**
  * A text block or picture on a page (Decision 10), in world units: ([x], [y]) is the top-left corner of the unturned
- * box, [rotation] turns it about its centre (degrees, clockwise on screen). [z] orders objects among themselves; all of
- * them lie under the ink. [textSize] is in world units; [media] names a picture's file in the [MediaStore].
+ * box, [rotation] turns it about its centre (degrees, clockwise on screen). [z] orders objects among themselves; text blocks
+ * and pictures lie under the ink, tape masks over it. [textSize] is in world units; [media] names a picture's file in the [MediaStore].
  */
 data class PageObject(
     val id: String,
@@ -141,9 +141,12 @@ sealed interface PictureState {
 /**
  * Draws [o] onto [canvas], whose matrix maps world units to the target ([scale] = target pixels per world unit, for
  * hairlines). A text block uses [layout] when given (a cached [textLayout] of it); a picture draws [picture], or a
- * paper-coloured box with an image icon while it loads, crossed out when its file is missing.
+ * paper-coloured box with an image icon while it loads, crossed out when its file is missing. A mask is opaque tape, or
+ * only its outline when [open].
  */
-fun drawPageObject(canvas: Canvas, o: PageObject, scale: Float, picture: PictureState = PictureState.Loading, layout: StaticLayout? = null) {
+fun drawPageObject(
+    canvas: Canvas, o: PageObject, scale: Float, picture: PictureState = PictureState.Loading, layout: StaticLayout? = null, open: Boolean = false,
+) {
     canvas.save()
     if (o.rotation != 0f) canvas.rotate(o.rotation, o.centerX, o.centerY)
     when (o.kind) {
@@ -156,9 +159,45 @@ fun drawPageObject(canvas: Canvas, o: PageObject, scale: Float, picture: Picture
             if (picture is PictureState.Ready) canvas.drawBitmap(picture.bitmap, null, box, BitmapPaint)
             else drawPicturePlaceholder(canvas, box, scale, missing = picture is PictureState.Missing)
         }
-        PageObjectKind.MASK -> Unit // drawn by the mask UI (П4a later tasks)
+        PageObjectKind.MASK -> {
+            val path = maskPath(o)
+            if (open) canvas.drawPath(path, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                style = Paint.Style.STROKE
+                strokeWidth = 2f / scale.coerceAtLeast(0.01f)
+                color = TAPE_OPEN
+            }) else canvas.drawPath(path, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = TAPE })
+        }
     }
     canvas.restore()
+}
+
+/** Tape colour: Material's baseline light tertiaryContainer, fixed (pages stay paper-coloured in the dark theme). */
+const val TAPE = 0xFFFFD8E4.toInt()
+/** An open mask's outline: the baseline tertiary at 25 %. */
+private const val TAPE_OPEN = 0x407D5260
+
+/**
+ * A mask's outline in world units, unturned: its box for a rectangle ([PageObject.text] empty), else the polygon stored
+ * as "x1,y1 x2,y2 …" fitted from its own bounds into the box (so a moved or scaled mask keeps its shape).
+ */
+fun maskPath(o: PageObject): Path {
+    val pts = o.text.split(' ').mapNotNull { p ->
+        val xy = p.split(',')
+        if (xy.size != 2) null else xy[0].toFloatOrNull()?.let { x -> xy[1].toFloatOrNull()?.let { y -> x to y } }
+    }
+    if (pts.size < 3) return Path().apply { addRect(o.x, o.y, o.x + o.w, o.y + o.h, Path.Direction.CW) }
+    val l = pts.minOf { it.first }
+    val t = pts.minOf { it.second }
+    val sx = o.w / (pts.maxOf { it.first } - l).coerceAtLeast(1e-3f)
+    val sy = o.h / (pts.maxOf { it.second } - t).coerceAtLeast(1e-3f)
+    return Path().apply {
+        pts.forEachIndexed { i, (x, y) ->
+            val px = o.x + (x - l) * sx
+            val py = o.y + (y - t) * sy
+            if (i == 0) moveTo(px, py) else lineTo(px, py)
+        }
+        close()
+    }
 }
 
 private val BitmapPaint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
@@ -269,7 +308,7 @@ class PageObjectPainter(private val media: MediaStore?, private val scope: Corou
 
     private data class LayoutKey(val text: String, val w: Float, val size: Float, val color: Int)
 
-    fun draw(canvas: Canvas, o: PageObject, scale: Float) {
+    fun draw(canvas: Canvas, o: PageObject, scale: Float, open: Boolean = false) {
         when (o.kind) {
             PageObjectKind.TEXT -> {
                 val key = LayoutKey(o.text, o.w, o.textSize, o.color)
@@ -277,7 +316,7 @@ class PageObjectPainter(private val media: MediaStore?, private val scope: Corou
                 drawPageObject(canvas, o, scale, layout = layout)
             }
             PageObjectKind.IMAGE -> drawPageObject(canvas, o, scale, picture(o.media, decodeSide(maxOf(o.w, o.h) * scale)))
-            PageObjectKind.MASK -> Unit
+            PageObjectKind.MASK -> drawPageObject(canvas, o, scale, open = open)
         }
     }
 

@@ -107,7 +107,7 @@ private const val MIN_STROKE_PX = 1.2f
 
 /**
  * Draws the page with [drawPage], its [background], [objects] (pictures from [pictures] by media name, a placeholder
- * where missing) and the strokes with the editor's stroke renderer into a bitmap, in the screen's order.
+ * where missing; tape masks closed, over the ink) and the strokes with the editor's stroke renderer into a bitmap, in the screen's order.
  */
 internal fun renderThumbnail(
     template: PageTemplate, landscape: Boolean, strokes: List<InkStroke>, pageSize: PageSize = PageSize.A4,
@@ -124,12 +124,18 @@ internal fun renderThumbnail(
             drawIntoCanvas { c ->
                 background?.let { PageBackgrounds.draw(c.nativeCanvas, it, PageBackgrounds.box(landscape, pageSize)) }
                 for (o in objects) {
+                    if (o.kind == PageObjectKind.MASK) continue
                     val picture = o.media?.let { pictures[it] }?.let { PictureState.Ready(it) } ?: PictureState.Missing
                     drawPageObject(c.nativeCanvas, o, scale, picture)
                 }
             }
         }
         if (strokes.isNotEmpty()) drawIntoCanvas { InkRaster.draw(it.nativeCanvas, strokes, scale, 0f, 0f, MIN_STROKE_PX) }
+        // tape masks lie over the ink, closed
+        val masks = objects.filter { it.kind == PageObjectKind.MASK }
+        if (masks.isNotEmpty()) withTransform({ scale(scale, scale, pivot = Offset.Zero) }) {
+            drawIntoCanvas { c -> for (o in masks) drawPageObject(c.nativeCanvas, o, scale) }
+        }
     }
     return image
 }

@@ -136,6 +136,9 @@ private suspend fun moveBack(
         PageWrites.around(from.id) { graph.repository.appendInk(from, clip.strokes.map(back::apply), clip.objects.map { it.transformed(back) }) }
     }
     val target = PageEditorState.awaitEditor(to.id)
-    if (target != null) target.layer.removeByKeys(moved.keys, moved.objectIds)
-    else PageWrites.around(to.id) { graph.repository.takeBackFromPage(to.id, moved.keys, moved.objectIds) }
+    if (target != null) {
+        // the masks' cards follow them back before the target's save would detach them
+        graph.repository.repointMasks(to.id, from.id, moved.masks.entries.associate { (old, new) -> new to old })
+        target.layer.removeByKeys(moved.keys, moved.objectIds)
+    } else PageWrites.around(to.id) { graph.repository.takeBackFromPage(to.id, moved.keys, moved.objectIds, from.id, moved.masks) }
 }

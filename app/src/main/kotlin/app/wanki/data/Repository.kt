@@ -205,6 +205,11 @@ class Repository(private val db: WankiDatabase) {
         sourceRefs.detachAllOfPage(pageId)
     }
 
+    /** Masks moved between pages keep their cards: refs to [fromPage]'s mask ids (keys of [ids]) go to [toPage]'s (values). */
+    suspend fun repointMasks(fromPage: String, toPage: String, ids: Map<String, String>) = db.withTransaction {
+        for ((old, new) in ids) sourceRefs.repoint(fromPage, old, toPage, new)
+    }
+
     private suspend fun syncMaskRefs(pageId: String) =
         detachMaskRefs(pageId, notebooks.objects(pageId).filter { it.kind == PageObjectKind.MASK.name }.mapTo(HashSet()) { it.id })
 
@@ -902,13 +907,17 @@ class Repository(private val db: WankiDatabase) {
         val now = System.currentTimeMillis()
         if (placed.isNotEmpty()) writeInk(target, InkCodec.assemble(existing.map(InkCodec::encodeStroke) + placed), now)
         val z = (notebooks.objects(to.id).maxOfOrNull { it.z } ?: -1) + 1
+        val masks = HashMap<String, String>() // old id → new id of moved masks
         val moved = objects.sortedWith(compareBy<PageObjectEntity> { it.z }.thenBy { it.id }).mapIndexed { i, e ->
             e.toModel().transformed(m).copy(id = PageObject.newId(), z = z + i).toEntity(target.id, now)
+                .also { if (e.kind == PageObjectKind.MASK.name) masks[e.id] = it.id }
         }
         if (moved.isNotEmpty()) {
             notebooks.insertObjects(moved)
             if (placed.isEmpty()) { notebooks.touchPage(target.id, now); notebooks.touch(target.notebookId, now) }
         }
+        // before the source's refs are synced: a moved mask keeps its cards on the target
+        for ((old, new) in masks) sourceRefs.repoint(from.id, old, target.id, new)
         insertPageIfMissing(from)
         writeInk(from, fromBlob, now)
         if (fromObjects != null) {
@@ -917,15 +926,18 @@ class Repository(private val db: WankiDatabase) {
             syncMaskRefs(from.id)
         }
         // keys of the strokes as they read back, exactly as takeBackFromPage will see them
-        MovedInk(if (placed.isEmpty()) emptyList() else InkCodec.decode(InkCodec.assemble(placed)).strokes.map(::keyOf), moved.map { it.id })
+        MovedInk(if (placed.isEmpty()) emptyList() else InkCodec.decode(InkCodec.assemble(placed)).strokes.map(::keyOf), moved.map { it.id }, masks)
     }
 
     /**
      * Undoes [moveToPage] on the target: removes one stored stroke per entry of [keys] (a multiset: identical strokes
      * share a key, and only as many as were moved go), the topmost matches first, and the objects [objectIds].
-     * Returns how many strokes and objects were removed.
+     * Moved masks' refs go back to [fromPageId] ([masks] as [MovedInk.masks]). Returns how many strokes and objects were removed.
      */
-    suspend fun takeBackFromPage(toPageId: String, keys: List<Long>, objectIds: List<String> = emptyList()): Int = db.withTransaction {
+    suspend fun takeBackFromPage(
+        toPageId: String, keys: List<Long>, objectIds: List<String> = emptyList(), fromPageId: String? = null, masks: Map<String, String> = emptyMap(),
+    ): Int = db.withTransaction {
+        if (fromPageId != null) for ((old, new) in masks) sourceRefs.repoint(toPageId, new, fromPageId, old)
         val page = notebooks.page(toPageId) ?: return@withTransaction 0
         var removed = if (objectIds.isEmpty()) 0 else notebooks.deleteObjectsById(toPageId, objectIds)
         val row = inkRow(toPageId)
@@ -1096,8 +1108,8 @@ class Repository(private val db: WankiDatabase) {
     }
 }
 
-/** What [Repository.moveToPage] put on the target: the moved strokes' keys (a multiset) and the new objects' ids. */
-data class MovedInk(val keys: List<Long>, val objectIds: List<String>)
+/** What [Repository.moveToPage] put on the target: the moved strokes' keys (a multiset), the new objects' ids and the moved masks (old id → new id). */
+data class MovedInk(val keys: List<Long>, val objectIds: List<String>, val masks: Map<String, String> = emptyMap())
 
 /** Result of reading a page's ink: strokes, or the error of a blob that cannot be decoded. */
 sealed interface InkLoad {

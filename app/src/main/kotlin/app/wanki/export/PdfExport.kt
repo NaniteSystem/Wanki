@@ -235,6 +235,7 @@ class PdfExporter(private val context: Context, private val repository: Reposito
             drawPaper(c, p.template, world.width, paperHeight)
             if (background != null) PageBackgrounds.draw(c, background, box)
             for (o in p.objects) {
+                if (o.kind == PageObjectKind.MASK) continue // tape is a study aid, not part of the exported notes
                 val picture = o.media?.let { pictures[it] }?.let { PictureState.Ready(it) } ?: PictureState.Missing
                 drawPageObject(c, o, k, picture)
             }

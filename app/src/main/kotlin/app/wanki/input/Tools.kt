@@ -3,7 +3,8 @@ package app.wanki.input
 import app.wanki.ink.BrushKind
 import app.wanki.ink.InkBrush
 
-enum class ToolKind { PEN, MARKER, HIGHLIGHTER, ERASER, LASSO }
+/** [MASK] = «Скотч»: draws tape masks (page objects) on notebook pages. */
+enum class ToolKind { PEN, MARKER, HIGHLIGHTER, ERASER, LASSO, MASK }
 
 /** What the toolbar has selected. The pen's eraser end and its side button always erase. */
 data class ToolSelection(
@@ -16,7 +17,7 @@ data class ToolSelection(
     val isLasso: Boolean get() = kind == ToolKind.LASSO
 
     fun brush(): InkBrush = when (kind) {
-        ToolKind.PEN, ToolKind.ERASER, ToolKind.LASSO -> InkBrush(BrushKind.PEN, color, size)
+        ToolKind.PEN, ToolKind.ERASER, ToolKind.LASSO, ToolKind.MASK -> InkBrush(BrushKind.PEN, color, size)
         ToolKind.MARKER -> InkBrush(BrushKind.MARKER, color, size * 1.6f)
         ToolKind.HIGHLIGHTER -> InkBrush(BrushKind.HIGHLIGHTER, (color and 0x00FFFFFF) or 0x66000000, size * 5f)
     }

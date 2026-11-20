@@ -603,6 +603,9 @@ interface SourceRefDao {
     @Query("SELECT * FROM source_refs WHERE kind = 'PAGE' AND sourceId = :pageId")
     suspend fun ofPage(pageId: String): List<SourceRefEntity>
 
+    @Query("UPDATE source_refs SET sourceId = :toPage, objectId = :toId WHERE kind = 'PAGE' AND sourceId = :fromPage AND objectId = :fromId")
+    suspend fun repoint(fromPage: String, fromId: String, toPage: String, toId: String)
+
     @Query("UPDATE source_refs SET detached = :detached, suspendedByDetach = :byDetach WHERE id = :id")
     suspend fun setDetached(id: String, detached: Boolean, byDetach: Boolean)
 

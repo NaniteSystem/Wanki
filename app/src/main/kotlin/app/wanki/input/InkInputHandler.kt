@@ -21,6 +21,9 @@ import app.wanki.ink.StraightLine
 import kotlin.math.abs
 import kotlin.math.hypot
 
+/** What a «Скотч» gesture was: a tap (on a mask), a drag (a rectangle) or a hold then drag (a polygon). */
+enum class MaskGesture { TAP, RECT, POLYGON }
+
 /** A straight line held with the pen, in world coordinates, drawn instead of the stroke while the pen is still down. */
 internal data class LinePreview(val from: androidx.compose.ui.geometry.Offset, val to: androidx.compose.ui.geometry.Offset, val brush: InkBrush)
 
@@ -63,6 +66,8 @@ internal class InkInputHandler(
     var onPageSwipe: ((Int) -> Unit)? = null
     /** The straight line being held (world coordinates and brush), null when no hold is active. */
     var onLinePreview: (LinePreview?) -> Unit = {}
+    /** A finished «Скотч» gesture: its outline in world coordinates (the rectangle for [MaskGesture.RECT]). */
+    var onMask: ((List<androidx.compose.ui.geometry.Offset>, MaskGesture) -> Unit)? = null
 
     /**
      * Points are captured here, straight from the touch events, so the stroke model does not
@@ -89,6 +94,12 @@ internal class InkInputHandler(
     private var eraseLastX = 0f
     private var eraseLastY = 0f
     private var lassoPointer = -1
+    // a «Скотч» gesture runs on the lasso path: when it went down, where, and how it turned out once it moved
+    private var masking = false
+    private var maskDownTime = 0L
+    private var maskDownX = 0f
+    private var maskDownY = 0f
+    private var maskGesture = MaskGesture.TAP
     // a drag of the lasso selection: which handle, where it started, and the selection's bounds then
     private var movePointer = -1
     private var moveHandle = Handle.NONE
@@ -193,6 +204,7 @@ internal class InkInputHandler(
             when {
                 erase -> startErase(id, e.getX(i), e.getY(i))
                 tool.isLasso -> startLasso(id, e.getX(i), e.getY(i))
+                tool.kind == ToolKind.MASK -> startMask(id, e, i)
                 else -> startDraw(v, e, id)
             }
             return
@@ -218,6 +230,7 @@ internal class InkInputHandler(
         when {
             tool.isEraser -> startErase(id, e.getX(i), e.getY(i))
             tool.isLasso -> startLasso(id, e.getX(i), e.getY(i))
+            tool.kind == ToolKind.MASK -> startMask(id, e, i)
             else -> startDraw(v, e, id)
         }
     }
@@ -236,7 +249,8 @@ internal class InkInputHandler(
         }
         if (lassoPointer >= 0) {
             val i = e.findPointerIndex(lassoPointer)
-            if (i >= 0) layer?.let { l -> l.lasso = l.lasso.orEmpty() + world(e.getX(i), e.getY(i)) }
+            if (i >= 0 && masking) moveMask(e.getX(i), e.getY(i), e.eventTime)
+            else if (i >= 0) layer?.let { l -> l.lasso = l.lasso.orEmpty() + world(e.getX(i), e.getY(i)) }
             return
         }
         if (erasePointer >= 0) {
@@ -290,7 +304,8 @@ internal class InkInputHandler(
         if (id == lassoPointer) {
             lassoPointer = -1
             layer?.let { l ->
-                l.selectInside(l.lasso.orEmpty())
+                if (masking) { if (!isCanceled(e)) onMask?.invoke(l.lasso.orEmpty(), maskGesture) }
+                else l.selectInside(l.lasso.orEmpty())
                 l.lasso = null
             }
         }
@@ -351,8 +366,37 @@ internal class InkInputHandler(
             l.beginTransform()
             return
         }
+        masking = false
         lassoPointer = pointerId
         layer?.let { it.clearSelection(); it.lasso = listOf(world(x, y)) }
+    }
+
+    private fun startMask(pointerId: Int, e: MotionEvent, i: Int) {
+        val l = layer ?: return
+        if (onMask == null) return
+        masking = true
+        maskGesture = MaskGesture.TAP
+        maskDownTime = e.eventTime
+        maskDownX = e.getX(i)
+        maskDownY = e.getY(i)
+        lassoPointer = pointerId
+        l.clearSelection()
+        l.lasso = listOf(world(maskDownX, maskDownY))
+    }
+
+    /** Out of the slop it becomes a rectangle, or a polygon when the finger or pen was held still first ([StraightLine.HOLD_MS]). */
+    private fun moveMask(x: Float, y: Float, time: Long) {
+        val l = layer ?: return
+        if (maskGesture == MaskGesture.TAP) {
+            if (hypot(x - maskDownX, y - maskDownY) <= SLOP_DP * density) return
+            maskGesture = if (time - maskDownTime >= StraightLine.HOLD_MS) MaskGesture.POLYGON else MaskGesture.RECT
+        }
+        val p = world(x, y)
+        if (maskGesture == MaskGesture.POLYGON) l.lasso = l.lasso.orEmpty() + p
+        else {
+            val a = world(maskDownX, maskDownY)
+            l.lasso = listOf(a, androidx.compose.ui.geometry.Offset(p.x, a.y), p, androidx.compose.ui.geometry.Offset(a.x, p.y), a)
+        }
     }
 
     private fun startDraw(v: View, e: MotionEvent, pointerId: Int) {
