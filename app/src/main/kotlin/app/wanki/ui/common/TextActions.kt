@@ -47,12 +47,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import app.wanki.data.AnswerMode
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import app.wanki.AppGraph
+import app.wanki.input.InkRaster
+import kotlin.math.roundToInt
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import app.wanki.graph
 import app.wanki.input.InkLayer
 import app.wanki.data.PageObjectKind
 import app.wanki.recognition.TranslationService
-import app.wanki.review.WritingLayout
 import kotlinx.coroutines.launch
 
 fun copyToClipboard(context: Context, text: String) {
@@ -74,6 +79,7 @@ fun SelectionBar(
     modifier: Modifier = Modifier,
     onMoveToPage: (() -> Unit)? = null,
     onEditText: ((String) -> Unit)? = null,
+    cardSource: CardSource? = null,
 ) {
     val graph = LocalContext.current.graph
     var dialog by remember { mutableStateOf(false) }
@@ -81,6 +87,7 @@ fun SelectionBar(
     var failed by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
     var coloring by remember { mutableStateOf(false) }
+    var carding by remember { mutableStateOf(false) }
     val scope = rememberUiScope()
     val count = layer.selection.size + layer.selectedObjects.size
     val texts = layer.selectedObjectList().filter { it.kind == PageObjectKind.TEXT }
@@ -109,6 +116,7 @@ fun SelectionBar(
                     Icon(painterResource(R.drawable.ic_more_vert), contentDescription = "Ещё")
                 }
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    if (cardSource != null) SelectionMenuItem("Карточка", R.drawable.ic_add, "sel-card") { menu = false; carding = true }
                     if (onEditText != null && texts.size == 1) SelectionMenuItem("Изменить текст", R.drawable.ic_edit, "sel-edit-text") {
                         menu = false
                         onEditText(texts.single().id)
@@ -133,7 +141,11 @@ fun SelectionBar(
             initialText = text,
             failed = failed,
             onDismiss = { dialog = false },
+            onMakeCard = cardSource?.let { { dialog = false; carding = true } },
         )
+    }
+    if (carding && cardSource != null) {
+        CardFromSelectionDialog(cardSource, read = { readSelection(graph, layer, cardSource.language) }, onDismiss = { carding = false })
     }
     if (coloring) ColorPickDialog(onPick = { c -> coloring = false; layer.recolorSelection(c) }, onDismiss = { coloring = false })
 }
@@ -148,10 +160,36 @@ private fun SelectionMenuItem(label: String, icon: Int?, tag: String, onClick: (
     )
 }
 
-/** Recognized (editable) text with copy, translate and "make a card". */
+/**
+ * The current lasso selection: text of its strokes (recognised without waiting for a model download; "" when no model
+ * is ready) or of its text blocks, its bounds, and the strokes drawn on white.
+ */
+suspend fun readSelection(graph: AppGraph, layer: InkLayer, language: String): SelectionContent? {
+    val strokes = layer.selection.toList()
+    val bounds = layer.selectionBounds() ?: return null
+    val text = if (strokes.isEmpty()) layer.selectedObjectList().filter { it.kind == PageObjectKind.TEXT }.joinToString("\n") { it.text }
+    else graph.textRecognition.recognize(strokes, language, wait = false)?.text.orEmpty()
+    val picture = if (strokes.isEmpty()) null else withContext(Dispatchers.Default) {
+        val b = strokes.mapNotNull { it.bounds() }.reduce { a, c -> a.union(c) }
+        val pad = 16f
+        val w = b.right - b.left + 2 * pad
+        val h = b.bottom - b.top + 2 * pad
+        val k = (PICTURE_MAX_PX / maxOf(w, h)).coerceAtMost(2f)
+        Bitmap.createBitmap((w * k).roundToInt().coerceAtLeast(1), (h * k).roundToInt().coerceAtLeast(1), Bitmap.Config.ARGB_8888).also {
+            val canvas = Canvas(it)
+            canvas.drawColor(android.graphics.Color.WHITE)
+            InkRaster.draw(canvas, strokes, k, b.left - pad, b.top - pad, minPixelWidth = 1.5f)
+        }
+    }
+    return SelectionContent(text, bounds, picture)
+}
+
+private const val PICTURE_MAX_PX = 800f
+
+/** Recognized (editable) text with copy, translate and, with [onMakeCard], "make a card". */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun TextActionsDialog(initialText: String?, failed: Boolean = false, onDismiss: () -> Unit) {
+fun TextActionsDialog(initialText: String?, failed: Boolean = false, onDismiss: () -> Unit, onMakeCard: (() -> Unit)? = null) {
     val context = LocalContext.current
     val graph = context.graph
     val scope = rememberUiScope()
@@ -159,7 +197,6 @@ fun TextActionsDialog(initialText: String?, failed: Boolean = false, onDismiss: 
     var target by remember { mutableStateOf(graph.settings.translateTo) }
     var translating by remember { mutableStateOf(false) }
     var translation by remember { mutableStateOf<TranslationService.Result?>(null) }
-    var makingCard by remember { mutableStateOf(false) }
 
     fun translate() {
         translating = true
@@ -209,54 +246,9 @@ fun TextActionsDialog(initialText: String?, failed: Boolean = false, onDismiss: 
         confirmButton = {
             Row {
                 TextButton(enabled = text.isNotBlank(), onClick = { copyToClipboard(context, text) }) { Text("Копировать") }
-                TextButton(enabled = text.isNotBlank(), onClick = { makingCard = true }) { Text("В карточку") }
+                if (onMakeCard != null) TextButton(onClick = onMakeCard) { Text("В карточку") }
                 TextButton(onClick = onDismiss) { Text("Закрыть") }
             }
         },
     )
-    if (makingCard) {
-        val translated = (translation as? TranslationService.Result.Ok)?.text
-        MakeCardDialog(front = translated ?: "", back = text, onDismiss = { makingCard = false })
-    }
-}
-
-/** Creates a card from a piece of handwriting: front = translation, back = the written text. */
-@Composable
-fun MakeCardDialog(front: String, back: String, onDismiss: () -> Unit) {
-    val graph = LocalContext.current.graph
-    val tree by remember { graph.repository.observeDeckTree() }.collectAsState(null)
-    var f by remember { mutableStateOf(front) }
-    var b by remember { mutableStateOf(back) }
-    var deckId by remember { mutableStateOf<String?>(null) }
-    var picking by remember { mutableStateOf(false) }
-    var done by remember { mutableStateOf(false) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Новая карточка") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedTextField(f, { f = it }, label = { Text("Вопрос") })
-                OutlinedTextField(b, { b = it }, label = { Text("Ответ") })
-                OutlinedButton(onClick = { picking = true }, enabled = tree != null) {
-                    Text("Колода: " + (deckId?.let { id -> tree?.title(id) } ?: "выбрать"))
-                }
-                if (done) Text("Карточка добавлена", color = MaterialTheme.colorScheme.primary)
-            }
-        },
-        confirmButton = {
-            TextButton(
-                enabled = f.isNotBlank() && b.isNotBlank() && deckId != null && !done,
-                onClick = {
-                    val mode = if (WritingLayout.forAnswer(b) is WritingLayout.Cells) AnswerMode.HANDWRITING else AnswerMode.CLASSIC
-                    graph.appScope.launch { graph.repository.addCard(deckId!!, f, b, mode) }
-                    done = true
-                },
-            ) { Text("Добавить") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Закрыть") } },
-    )
-    val t = tree
-    if (picking && t != null) {
-        DeckPickerDialog(t, "Колода", deckId, onPick = { d -> if (d != null) deckId = d.id; picking = false }, onDismiss = { picking = false })
-    }
 }

@@ -93,6 +93,10 @@ import app.wanki.ui.common.SaveErrorSnackbar
 import app.wanki.ui.common.SerialSaver
 import app.wanki.ui.common.SelectionBar
 import app.wanki.ui.common.TextActionsDialog
+import app.wanki.ui.common.CardFromSelectionDialog
+import app.wanki.ui.common.CardSource
+import app.wanki.ui.common.SelectionContent
+import app.wanki.data.SourceKind
 import app.wanki.ui.common.finalSave
 import app.wanki.ui.common.rememberGuardedBack
 import app.wanki.ui.common.copyToClipboard
@@ -291,6 +295,8 @@ class PageEditorState(
     var page by mutableStateOf(page)
         private set
     val layer = InkLayer()
+
+    fun cardSource() = CardSource(SourceKind.PAGE, page.id, notebook.id, notebook.language)
     val viewport = Viewport(minScale = if (infinite) 0.1f else 0.3f, bounds = if (infinite) null else PageGeometry.bounds(page.landscape, pageSizeOf(notebook)))
     private val section = InkSection.ofNotebookKind(notebook.kind)
 
@@ -931,6 +937,7 @@ fun PageEditor(
                     state.layer, state.notebook.language, Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                     onMoveToPage = onMoveSelection,
                     onEditText = if (state.objectsAllowed) ({ id -> insert.editing = id }) else null,
+                    cardSource = state.cardSource(),
                 )
             }
             if (state.readOnly) {
@@ -1056,7 +1063,15 @@ fun PageEditor(
             confirmButton = { TextButton(onClick = { state.showPaper = false }) { Text("Закрыть") } },
         )
     }
-    if (translateAll) TextActionsDialog(initialText = state.recognizedText, onDismiss = { translateAll = false })
+    var pageCard by remember { mutableStateOf(false) }
+    if (translateAll) TextActionsDialog(
+        initialText = state.recognizedText, onDismiss = { translateAll = false },
+        onMakeCard = { translateAll = false; pageCard = true },
+    )
+    // a card from the whole page: no selection, so no bounds and no picture
+    if (pageCard) CardFromSelectionDialog(
+        state.cardSource(), read = { SelectionContent(state.recognizedText, null, null) }, onDismiss = { pageCard = false },
+    )
     val owner = PicturePickers.registry?.let { r ->
         remember(r) { object : ActivityResultRegistryOwner { override val activityResultRegistry = r } }
     } ?: LocalActivityResultRegistryOwner.current

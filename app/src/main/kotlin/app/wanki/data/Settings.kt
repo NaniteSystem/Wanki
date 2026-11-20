@@ -88,6 +88,14 @@ class Settings(context: Context) {
 
     val autoLanguageList: List<String> get() = autoLanguages.split(',').map { it.trim() }.filter { it.isNotEmpty() }
 
+    /** The deck the last card made from this notebook (or source) went to; null = none yet. */
+    fun lastDeckFor(sourceId: String): String? = prefs.getString("lastDeck.$sourceId", null)
+    fun setLastDeckFor(sourceId: String, deckId: String) {
+        prefs.edit().putString("lastDeck.$sourceId", deckId).putString("lastDeck", deckId).apply()
+    }
+    /** The deck of the last card made from any selection. */
+    val lastDeck: String? get() = prefs.getString("lastDeck", null)
+
     fun scoringConfig() = ScoringConfig(
         passThreshold = passThreshold.toDouble(),
         orderStrictness = orderStrictness.toDouble(),
