@@ -88,6 +88,7 @@ fun SelectionBar(
     var menu by remember { mutableStateOf(false) }
     var coloring by remember { mutableStateOf(false) }
     var carding by remember { mutableStateOf(false) }
+    var cardSeed by remember { mutableStateOf<Pair<String, String?>?>(null) }
     val scope = rememberUiScope()
     val count = layer.selection.size + layer.selectedObjects.size
     val texts = layer.selectedObjectList().filter { it.kind == PageObjectKind.TEXT }
@@ -141,11 +142,11 @@ fun SelectionBar(
             initialText = text,
             failed = failed,
             onDismiss = { dialog = false },
-            onMakeCard = cardSource?.let { { dialog = false; carding = true } },
+            onMakeCard = cardSource?.let { { t, tr -> dialog = false; cardSeed = t to tr; carding = true } },
         )
     }
     if (carding && cardSource != null) {
-        CardFromSelectionDialog(cardSource, read = { readSelection(graph, layer, cardSource.language) }, onDismiss = { carding = false })
+        CardFromSelectionDialog(cardSource, read = { readSelection(graph, layer, cardSource.language) }, onDismiss = { carding = false; cardSeed = null }, initial = cardSeed)
     }
     if (coloring) ColorPickDialog(onPick = { c -> coloring = false; layer.recolorSelection(c) }, onDismiss = { coloring = false })
 }
@@ -167,10 +168,12 @@ private fun SelectionMenuItem(label: String, icon: Int?, tag: String, onClick: (
 suspend fun readSelection(graph: AppGraph, layer: InkLayer, language: String): SelectionContent? {
     val strokes = layer.selection.toList()
     val bounds = layer.selectionBounds() ?: return null
-    val text = if (strokes.isEmpty()) layer.selectedObjectList().filter { it.kind == PageObjectKind.TEXT }.joinToString("\n") { it.text }
-    else graph.textRecognition.recognize(strokes, language, wait = false)?.text.orEmpty()
-    val picture = if (strokes.isEmpty()) null else withContext(Dispatchers.Default) {
-        val b = strokes.mapNotNull { it.bounds() }.reduce { a, c -> a.union(c) }
+    val blocks = layer.selectedObjectList().filter { it.kind == PageObjectKind.TEXT }.map { it.text }
+    val written = if (strokes.isEmpty()) null else graph.textRecognition.recognize(strokes, language, wait = false)?.text
+    val text = (listOfNotNull(written) + blocks).filter { it.isNotBlank() }.joinToString("\n")
+    val inkBounds = strokes.mapNotNull { it.bounds() }.reduceOrNull { a, c -> a.union(c) }
+    val picture = if (inkBounds == null) null else withContext(Dispatchers.Default) {
+        val b = inkBounds
         val pad = 16f
         val w = b.right - b.left + 2 * pad
         val h = b.bottom - b.top + 2 * pad
@@ -189,7 +192,7 @@ private const val PICTURE_MAX_PX = 800f
 /** Recognized (editable) text with copy, translate and, with [onMakeCard], "make a card". */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun TextActionsDialog(initialText: String?, failed: Boolean = false, onDismiss: () -> Unit, onMakeCard: (() -> Unit)? = null) {
+fun TextActionsDialog(initialText: String?, failed: Boolean = false, onDismiss: () -> Unit, onMakeCard: ((text: String, translation: String?) -> Unit)? = null) {
     val context = LocalContext.current
     val graph = context.graph
     val scope = rememberUiScope()
@@ -246,7 +249,7 @@ fun TextActionsDialog(initialText: String?, failed: Boolean = false, onDismiss: 
         confirmButton = {
             Row {
                 TextButton(enabled = text.isNotBlank(), onClick = { copyToClipboard(context, text) }) { Text("Копировать") }
-                if (onMakeCard != null) TextButton(onClick = onMakeCard) { Text("В карточку") }
+                if (onMakeCard != null) TextButton(onClick = { onMakeCard(text, (translation as? TranslationService.Result.Ok)?.text) }) { Text("В карточку") }
                 TextButton(onClick = onDismiss) { Text("Закрыть") }
             }
         },

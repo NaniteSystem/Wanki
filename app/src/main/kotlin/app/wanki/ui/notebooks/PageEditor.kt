@@ -1063,15 +1063,17 @@ fun PageEditor(
             confirmButton = { TextButton(onClick = { state.showPaper = false }) { Text("Закрыть") } },
         )
     }
-    var pageCard by remember { mutableStateOf(false) }
+    var pageCard by remember { mutableStateOf<Pair<String, String?>?>(null) }
     if (translateAll) TextActionsDialog(
         initialText = state.recognizedText, onDismiss = { translateAll = false },
-        onMakeCard = { translateAll = false; pageCard = true },
+        onMakeCard = { t, tr -> translateAll = false; pageCard = t to tr },
     )
     // a card from the whole page: no selection, so no bounds and no picture
-    if (pageCard) CardFromSelectionDialog(
-        state.cardSource(), read = { SelectionContent(state.recognizedText, null, null) }, onDismiss = { pageCard = false },
-    )
+    pageCard?.let { seed ->
+        CardFromSelectionDialog(
+            state.cardSource(), read = { SelectionContent(state.recognizedText, null, null) }, onDismiss = { pageCard = null }, initial = seed,
+        )
+    }
     val owner = PicturePickers.registry?.let { r ->
         remember(r) { object : ActivityResultRegistryOwner { override val activityResultRegistry = r } }
     } ?: LocalActivityResultRegistryOwner.current

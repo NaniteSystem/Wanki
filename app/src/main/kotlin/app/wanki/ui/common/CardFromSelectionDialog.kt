@@ -69,7 +69,13 @@ fun chooseDeck(lastForSource: String?, decks: List<DeckEntity>, language: String
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun CardFromSelectionDialog(source: CardSource, read: suspend () -> SelectionContent?, onDismiss: () -> Unit) {
+fun CardFromSelectionDialog(
+    source: CardSource,
+    read: suspend () -> SelectionContent?,
+    onDismiss: () -> Unit,
+    /** Answer and question already edited elsewhere (text dialog): used for the first card instead of [read]'s text. */
+    initial: Pair<String, String?>? = null,
+) {
     val context = LocalContext.current
     val graph = context.graph
     val scope = rememberUiScope()
@@ -89,11 +95,12 @@ fun CardFromSelectionDialog(source: CardSource, read: suspend () -> SelectionCon
         loading = true
         val c = read()
         content = c
-        answer = c?.text.orEmpty()
-        question = ""
+        val seed = initial?.takeIf { generation == 0 }
+        answer = seed?.first ?: c?.text.orEmpty()
+        question = seed?.second.orEmpty()
         attach = c?.picture != null
         loading = false
-        if (answer.isNotBlank()) {
+        if (answer.isNotBlank() && question.isEmpty()) {
             val t = graph.translation.translate(answer, graph.settings.translateTo)
             if (t is TranslationService.Result.Ok && question.isEmpty()) question = t.text
         }
@@ -153,11 +160,11 @@ fun CardFromSelectionDialog(source: CardSource, read: suspend () -> SelectionCon
                     LinearProgressIndicator(Modifier.fillMaxWidth())
                 } else {
                     OutlinedTextField(
-                        answer, { answer = it }, label = { Text("Ответ") },
+                        answer, { answer = it; note = null }, label = { Text("Ответ") },
                         modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp).testTag("card-answer"),
                     )
                     OutlinedTextField(
-                        question, { question = it }, label = { Text("Вопрос") },
+                        question, { question = it; note = null }, label = { Text("Вопрос") },
                         modifier = Modifier.fillMaxWidth().testTag("card-question"),
                     )
                     if (content?.picture != null) Row(verticalAlignment = Alignment.CenterVertically) {

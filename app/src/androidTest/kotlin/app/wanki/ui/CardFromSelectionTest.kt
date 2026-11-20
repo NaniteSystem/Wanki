@@ -2,7 +2,11 @@ package app.wanki.ui
 
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.assertTextContains
+import app.wanki.data.PageObjectEntity
+import app.wanki.data.PageObjectKind
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -161,5 +165,26 @@ class CardFromSelectionTest {
         rule.onNodeWithTag("card-attach").performClick()
         rule.onNodeWithTag("card-add").performClick()
         assertEquals("без", cards(page, 1).single().note.field(1))
+    }
+
+    @Test
+    fun textDialogSeedsEditedText() {
+        val title = "Card seed $stamp"
+        val page = setUp(title, listOf(ink(900f, 900f)))
+        val block = PageObjectEntity(pageId = page.id, kind = PageObjectKind.TEXT.name, x = 100f, y = 100f, w = 300f, h = 80f, text = "исходный", updatedAt = System.currentTimeMillis())
+        runBlocking { repo.savePageObjects(page, listOf(block)) }
+        val layer = open(title)
+        rule.waitUntil(10_000) { rule.runOnUiThread { layer.objects.isNotEmpty() } }
+        rule.runOnUiThread { layer.selectedObjects.add(layer.objects.single().id) }
+        rule.waitUntilAtLeastOneExists(hasTestTag("sel-text"), 5_000)
+        rule.onNodeWithTag("sel-text").performClick()
+        rule.waitUntilAtLeastOneExists(hasSetTextAction(), 5_000)
+        rule.onNode(hasSetTextAction()).performTextReplacement("исправленный")
+        rule.onNode(hasText("В карточку")).performClick()
+        rule.waitUntilAtLeastOneExists(hasTestTag("card-answer"), 10_000)
+        rule.onNodeWithTag("card-answer").assertTextContains("исправленный")
+        rule.onNodeWithTag("card-question").performTextReplacement("q")
+        rule.onNodeWithTag("card-add").performClick()
+        assertEquals("исправленный", cards(page, 1).single().note.field(1))
     }
 }
