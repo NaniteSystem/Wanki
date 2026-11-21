@@ -130,8 +130,27 @@ fun rememberGuardedBack(saver: SerialSaver, onBack: () -> Unit): () -> Unit {
     val error by saver.error.collectAsState()
     val latestBack by rememberUpdatedState(onBack)
     var asking by remember { mutableStateOf(false) }
+    var waiting by remember { mutableStateOf(false) }
     val scope = rememberUiScope()
-    BackHandler(enabled = error != null) { asking = true }
+    // a later save that succeeded makes the question moot
+    LaunchedEffect(error) { if (error == null) asking = false }
+    // a save still running may yet fail: wait for it before leaving, then ask if it did
+    val guarded = remember(saver) {
+        {
+            if (!waiting) {
+                waiting = true
+                scope.launch {
+                    try {
+                        saver.flush()
+                        if (saver.error.value != null) asking = true else latestBack()
+                    } finally {
+                        waiting = false
+                    }
+                }
+            }
+        }
+    }
+    BackHandler { guarded() }
     if (asking) {
         AlertDialog(
             onDismissRequest = { asking = false },
@@ -150,7 +169,7 @@ fun rememberGuardedBack(saver: SerialSaver, onBack: () -> Unit): () -> Unit {
             dismissButton = { TextButton(onClick = { asking = false; latestBack() }) { Text("Выйти без сохранения") } },
         )
     }
-    return remember(saver) { { if (saver.error.value != null) asking = true else latestBack() } }
+    return guarded
 }
 
 /**
