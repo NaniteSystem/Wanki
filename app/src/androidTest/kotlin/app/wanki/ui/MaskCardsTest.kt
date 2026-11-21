@@ -82,7 +82,8 @@ class MaskCardsTest {
 
     private fun share(tag: String): Float {
         rule.waitUntilAtLeastOneExists(hasTestTag(tag), 10_000)
-        return tapeShare(rule.onNodeWithTag(tag).captureToImage())
+        val img = rule.onNodeWithTag(tag).captureToImage()
+        return tapeShare(img)
     }
 
     /** Share of the picture's centre third that is tape coloured. */

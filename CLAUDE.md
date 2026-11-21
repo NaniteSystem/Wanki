@@ -65,9 +65,14 @@ classpath (see build.gradle.kts) so AGP and KGP share a classloader.
 - `InkLayer.strokes`/`strokesIn`/the grid are main-thread only; render off main from a snapshot. Canvases with a
   viewport (pages, boards) draw through `InkTiles` (512 px bitmaps per power-of-two zoom level, 64 MB budget or a
   quarter of the heap); note blocks and review cells draw directly. Live lasso transforms use `InkTiles.exclude`.
-- Pages own `page_objects` (text blocks and pictures, drawn under the ink; `MASK` reserved for П4) and `page_lines`
-  (recognised text per line, keyed by an order-independent `lineKey` of its stroke chunks; corrections stay while
-  the key exists; `page_ink.recognizedText` stays the joined text for search). DB v10.
+- Pages own `page_objects` (text blocks and pictures, drawn under the ink; `MASK` = tape, drawn over the ink, open/closed
+  is view state only) and `page_lines` (recognised text per line, keyed by an order-independent `lineKey` of its stroke
+  chunks; corrections stay while the key exists; `page_ink.recognizedText` stays the joined text for search). DB v11.
+- Cards remember their source in `source_refs` (П4a wires `PAGE`): one-off cards (from a selection) are free copies,
+  the ref only navigates; linked cards (from tape) are owned by the page — read-only fields, mask deleted or page purged →
+  card suspended + ref `detached` (undo un-suspends only what the detach suspended), masks moved/copied repoint or get
+  new ids. A mask card's fields hold `[mask:<refId>]` (ref id, stable when the mask moves); `CardBlock.Mask` renders the
+  page live around the mask (`renderMaskCard`), «Источник удалён» when gone.
 - Page media are `page-<uuid>.jpg|png|pdf` in the media folder (pictures ≤ 2048 px, imported PDFs kept whole as
   backgrounds). The daily purge deletes unreferenced `page-*` files older than 24 h; pages in the trash keep theirs.
   Memory caches are bounded by bytes: tiles 64 MB, pictures min(32 MB, heap/8), PDF backgrounds 48 MB.

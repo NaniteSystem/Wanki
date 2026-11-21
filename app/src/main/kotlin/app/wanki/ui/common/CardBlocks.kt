@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -84,7 +86,9 @@ private fun MaskImage(block: CardBlock.Mask) {
     } else {
         Image(
             b, contentDescription = if (block.revealed) "Открытый скотч" else "Скотч", contentScale = ContentScale.Fit,
-            modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp).testTag(if (block.revealed) "mask-open" else "mask-closed"),
+            // scaled up to the width (a tablet is far wider than the bitmap), at most 360 dp tall
+            modifier = Modifier.widthIn(max = 360.dp * (b.width.toFloat() / b.height)).fillMaxWidth().aspectRatio(b.width.toFloat() / b.height)
+                .testTag(if (block.revealed) "mask-open" else "mask-closed"),
         )
     }
 }
