@@ -873,8 +873,12 @@ class Repository(private val db: WankiDatabase) {
     suspend fun deleteEmptyInk(): Int {
         var deleted = 0
         for (id in notebooks.inkPageIds()) {
-            val strokes = inkRow(id)?.let { runCatching { InkCodec.decode(it.strokes).strokes }.getOrNull() } ?: continue
-            if (strokes.isEmpty()) { notebooks.deleteInk(id); deleted++ }
+            // read and delete together: a page written meanwhile must not lose its new ink
+            val gone = db.withTransaction {
+                val strokes = inkRow(id)?.let { runCatching { InkCodec.decode(it.strokes).strokes }.getOrNull() }
+                if (strokes?.isEmpty() == true) { notebooks.deleteInk(id); true } else false
+            }
+            if (gone) deleted++
         }
         return deleted
     }
