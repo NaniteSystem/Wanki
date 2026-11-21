@@ -89,7 +89,7 @@ object CardRenderer {
         if (type.isBasic) {
             val answer = values.getOrElse(writeFieldOrd) { "" }
             val question = values.getOrElse(if (writeFieldOrd == 0) 1 else 0) { "" }
-            return CardContent(listOf(CardBlock.Text(question)), listOf(CardBlock.Text(answer)), answer)
+            return CardContent(CardHtml.withMasks(question, false), CardHtml.withMasks(answer, true), CardHtml.withoutMasks(answer))
         }
         val fields = type.fields.mapIndexed { i, name -> name to values.getOrElse(i) { "" } }.toMap()
         val template = type.templates.getOrNull(if (type.kind == NoteKind.CLOZE) 0 else ord) ?: type.templates.firstOrNull()

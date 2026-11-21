@@ -591,6 +591,9 @@ interface SourceRefDao {
     @Insert
     suspend fun insert(ref: SourceRefEntity)
 
+    @Query("SELECT * FROM source_refs WHERE id = :id")
+    suspend fun byId(id: String): SourceRefEntity?
+
     @Query("SELECT * FROM source_refs WHERE noteId = :noteId LIMIT 1")
     suspend fun ofNote(noteId: String): SourceRefEntity?
 

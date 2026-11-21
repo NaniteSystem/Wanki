@@ -18,6 +18,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
@@ -47,6 +48,7 @@ fun CardBlocks(blocks: List<CardBlock>, modifier: Modifier = Modifier, textSize:
                 }
                 is CardBlock.Image -> MediaImage(b.file)
                 is CardBlock.Sound -> SoundButton(b.file)
+                is CardBlock.Mask -> MaskImage(b)
             }
         }
     }
@@ -63,6 +65,27 @@ private fun MediaImage(file: String) {
         Text("[$file]", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     } else {
         Image(b, contentDescription = file, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxWidth().heightIn(max = 280.dp))
+    }
+}
+
+/** A mask card's picture, rendered from the page each time (page edits show); «Источник удалён» when it is gone. */
+@Composable
+private fun MaskImage(block: CardBlock.Mask) {
+    val graph = LocalContext.current.graph
+    // null = loading, Result.failure = gone or broken
+    val bitmap by produceState<Result<ImageBitmap>?>(null, block) {
+        value = runCatching { renderMaskCard(graph, block.refId, block.revealed) ?: error("gone") }
+            .onFailure { if (it.message != "gone") android.util.Log.e("Wanki", "mask card ${block.refId} not rendered", it) }
+    }
+    val r = bitmap ?: return
+    val b = r.getOrNull()
+    if (b == null) {
+        Text("Источник удалён", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.testTag("mask-gone"))
+    } else {
+        Image(
+            b, contentDescription = if (block.revealed) "Открытый скотч" else "Скотч", contentScale = ContentScale.Fit,
+            modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp).testTag(if (block.revealed) "mask-open" else "mask-closed"),
+        )
     }
 }
 

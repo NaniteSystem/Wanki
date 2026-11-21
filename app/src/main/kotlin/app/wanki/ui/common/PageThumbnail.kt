@@ -31,6 +31,7 @@ import app.wanki.data.PageEntity
 import app.wanki.data.PageSize
 import app.wanki.data.PageTemplate
 import app.wanki.graph
+import app.wanki.ink.InkRect
 import app.wanki.ink.InkStroke
 import app.wanki.input.InkRaster
 import app.wanki.input.PageBackgrounds
@@ -63,29 +64,13 @@ private val cache = ThumbnailCache<ImageBitmap>(maxEntries = 32)
 @Composable
 fun PageThumbnail(page: PageEntity, modifier: Modifier = Modifier, pageSize: PageSize = PageSize.A4) {
     val graph = LocalContext.current.graph
-    val repository = graph.repository
     val key = page.id + (if (pageSize == PageSize.ENDLESS) "/e" else if (page.landscape) "/l" else "")
     var bitmap by remember(key, page.updatedAt) { mutableStateOf(cache.get(key, page.updatedAt)) }
     LaunchedEffect(key, page.updatedAt) {
         if (bitmap != null) return@LaunchedEffect
         // a broken page keeps plain paper: one card must not take the list down
         try {
-            val rendered = withContext(Dispatchers.IO) {
-                val strokes = repository.loadInk(page.id)
-                val objects = repository.pageObjects(page.id).mapNotNull { it.toModelOrNull() }.sortedWith(PageObject.ORDER)
-                val background = page.backgroundMedia?.let { PageBackgrounds.render(graph.media, it, page.backgroundPage, THUMB_LONG_SIDE) }
-                val pictures = objects.mapNotNull { o -> o.media?.takeIf { o.kind == PageObjectKind.IMAGE } }.distinct()
-                    .associateWith { runCatching { graph.media.bitmap(it, THUMB_PICTURE_SIDE) }.getOrNull() }
-                try {
-                    withContext(Dispatchers.Default) {
-                        renderThumbnail(PageTemplate.valueOf(page.template), page.landscape, strokes, pageSize, objects, background, pictures)
-                    }
-                } finally {
-                    // drawn into the thumbnail: no longer needed
-                    background?.recycle()
-                    pictures.values.forEach { it?.recycle() }
-                }
-            }
+            val rendered = renderPage(graph, page, pageSize)
             cache.put(key, page.updatedAt, rendered)
             bitmap = rendered
         } catch (e: CancellationException) {
@@ -102,6 +87,46 @@ fun PageThumbnail(page: PageEntity, modifier: Modifier = Modifier, pageSize: Pag
     }
 }
 
+/** Loads [page] and renders it with [renderThumbnail] ([crop], [open], [longSide] as there). */
+internal suspend fun renderPage(
+    graph: app.wanki.AppGraph, page: PageEntity, pageSize: PageSize, crop: InkRect? = null, open: Set<String> = emptySet(),
+    longSide: Int = THUMB_LONG_SIDE,
+): ImageBitmap = withContext(Dispatchers.IO) {
+    val repository = graph.repository
+    val strokes = repository.loadInk(page.id)
+    val objects = repository.pageObjects(page.id).mapNotNull { it.toModelOrNull() }.sortedWith(PageObject.ORDER)
+    val background = page.backgroundMedia?.let { PageBackgrounds.render(graph.media, it, page.backgroundPage, longSide) }
+    val pictures = objects.mapNotNull { o -> o.media?.takeIf { o.kind == PageObjectKind.IMAGE } }.distinct()
+        .associateWith { runCatching { graph.media.bitmap(it, THUMB_PICTURE_SIDE) }.getOrNull() }
+    try {
+        withContext(Dispatchers.Default) {
+            renderThumbnail(PageTemplate.valueOf(page.template), page.landscape, strokes, pageSize, objects, background, pictures, crop, open, longSide)
+        }
+    } finally {
+        // drawn into the thumbnail: no longer needed
+        background?.recycle()
+        pictures.values.forEach { it?.recycle() }
+    }
+}
+
+/** What a mask card shows: the page around the mask, null when the ref, page or mask is gone (or the ref is detached). */
+internal suspend fun renderMaskCard(graph: app.wanki.AppGraph, refId: String, revealed: Boolean): ImageBitmap? {
+    val repository = graph.repository
+    val ref = repository.sourceRef(refId)?.takeIf { !it.detached } ?: return null
+    val page = repository.page(ref.sourceId) ?: return null
+    val mask = repository.pageObjects(page.id).firstOrNull { it.id == ref.objectId }?.toModelOrNull() ?: return null
+    val size = repository.notebook(page.notebookId)?.let { runCatching { PageSize.valueOf(it.pageSize) }.getOrNull() } ?: PageSize.A4
+    val b = mask.bounds()
+    // shortcut: the mask padded to 1.5× its size, at least 400 units a side; other masks drawn open so only this one asks
+    val w = maxOf(b.width * 1.5f, 400f)
+    val h = maxOf(b.height * 1.5f, 400f)
+    val crop = InkRect(b.centerX - w / 2, b.centerY - h / 2, b.centerX + w / 2, b.centerY + h / 2)
+    val others = repository.pageObjects(page.id).filter { it.kind == PageObjectKind.MASK.name && it.id != mask.id }.mapTo(HashSet()) { it.id }
+    return renderPage(graph, page, size, crop, if (revealed) others + mask.id else others, longSide = MASK_CARD_LONG_SIDE)
+}
+
+private const val MASK_CARD_LONG_SIDE = 720
+
 /** A hairline stroke would vanish at thumbnail scale: keep it at least about a pixel wide in the bitmap. */
 private const val MIN_STROKE_PX = 1.2f
 
@@ -112,14 +137,21 @@ private const val MIN_STROKE_PX = 1.2f
 internal fun renderThumbnail(
     template: PageTemplate, landscape: Boolean, strokes: List<InkStroke>, pageSize: PageSize = PageSize.A4,
     objects: List<PageObject> = emptyList(), background: Bitmap? = null, pictures: Map<String, Bitmap?> = emptyMap(),
+    /** The world area to draw (default the page; an endless page is cut at the top 1000 × 1414). */
+    crop: InkRect? = null,
+    /** Masks drawn open (outline only). */
+    open: Set<String> = emptySet(),
+    longSide: Int = THUMB_LONG_SIDE,
 ): ImageBitmap {
-    // an endless page is cut at the top 1000 × 1414 (contentBottom 0)
     val page = PageGeometry.size(landscape, pageSize)
-    val scale = THUMB_LONG_SIDE / maxOf(page.width, page.height)
-    val image = ImageBitmap((page.width * scale).roundToInt(), (page.height * scale).roundToInt())
+    val area = crop ?: InkRect(0f, 0f, page.width, page.height)
+    val scale = longSide / maxOf(area.width, area.height)
+    val image = ImageBitmap((area.width * scale).roundToInt().coerceAtLeast(1), (area.height * scale).roundToInt().coerceAtLeast(1))
     val canvas = ComposeCanvas(image)
     CanvasDrawScope().draw(Density(1f), LayoutDirection.Ltr, canvas, androidx.compose.ui.geometry.Size(image.width.toFloat(), image.height.toFloat())) {
-        withTransform({ scale(scale, scale, pivot = Offset.Zero) }) {
+        // a crop may reach past the drawn sheet (endless page below its cut, outside the page)
+        if (crop != null) drawRect(PaperColor)
+        withTransform({ scale(scale, scale, pivot = Offset.Zero); translate(-area.left, -area.top) }) {
             drawPage(template, landscape, pageSize)
             drawIntoCanvas { c ->
                 background?.let { PageBackgrounds.draw(c.nativeCanvas, it, PageBackgrounds.box(landscape, pageSize)) }
@@ -130,11 +162,11 @@ internal fun renderThumbnail(
                 }
             }
         }
-        if (strokes.isNotEmpty()) drawIntoCanvas { InkRaster.draw(it.nativeCanvas, strokes, scale, 0f, 0f, MIN_STROKE_PX) }
-        // tape masks lie over the ink, closed
+        if (strokes.isNotEmpty()) drawIntoCanvas { InkRaster.draw(it.nativeCanvas, strokes, scale, area.left, area.top, MIN_STROKE_PX) }
+        // tape masks lie over the ink, closed unless in [open]
         val masks = objects.filter { it.kind == PageObjectKind.MASK }
-        if (masks.isNotEmpty()) withTransform({ scale(scale, scale, pivot = Offset.Zero) }) {
-            drawIntoCanvas { c -> for (o in masks) drawPageObject(c.nativeCanvas, o, scale) }
+        if (masks.isNotEmpty()) withTransform({ scale(scale, scale, pivot = Offset.Zero); translate(-area.left, -area.top) }) {
+            drawIntoCanvas { c -> for (o in masks) drawPageObject(c.nativeCanvas, o, scale, open = o.id in open) }
         }
     }
     return image

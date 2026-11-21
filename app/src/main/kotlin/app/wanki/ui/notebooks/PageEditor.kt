@@ -940,6 +940,7 @@ fun PageEditor(
     val context = LocalContext.current
     val graph = context.graph
     var translateAll by remember { mutableStateOf(false) }
+    var maskCards by remember { mutableStateOf(false) }
     val undo = LocalUndo.current
     val insert = remember(state) { InsertUi() }
     androidx.compose.runtime.SideEffect { app.wanki.input.OpenTrace.mark("PageEditor composed") }
@@ -994,7 +995,8 @@ fun PageEditor(
             val masks = if (state.hasMasks) listOf(
                 HeaderAction(R.drawable.ic_tape, "Открыть всё", "menu-masks-open") { state.openAllMasks(true) },
                 HeaderAction(R.drawable.ic_tape, "Закрыть всё", "menu-masks-close") { state.openAllMasks(false) },
-            ) else emptyList()
+            ) + (if (!state.readOnly) listOf(HeaderAction(R.drawable.ic_tape, "Карточки из скотча", "menu-mask-cards") { maskCards = true }) else emptyList())
+            else emptyList()
             ScreenHeader(title, onBack = back, subtitle = subtitle, subtitleMaxLines = 1, primary = primary, menu = paste + inserts + masks + menu)
             InkToolbar(
                 state.tool, state::selectTool, state.layer, state.eraser, state::selectEraser, Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
@@ -1145,6 +1147,7 @@ fun PageEditor(
             state.cardSource(), read = { SelectionContent(state.recognizedText, null, null) }, onDismiss = { pageCard = null }, initial = seed,
         )
     }
+    if (maskCards) MaskCardsDialog(state.cardSource(), flush = { state.saver.flush() }, onDismiss = { maskCards = false })
     val owner = PicturePickers.registry?.let { r ->
         remember(r) { object : ActivityResultRegistryOwner { override val activityResultRegistry = r } }
     } ?: LocalActivityResultRegistryOwner.current

@@ -2,6 +2,7 @@ package app.wanki.ui.browser
 
 import app.wanki.ui.Route
 import app.wanki.ui.common.rememberSourceOpener
+import app.wanki.ui.common.SourceTarget
 import androidx.compose.ui.platform.testTag
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
@@ -121,6 +122,8 @@ private fun CardEditor(c: CardWithNote, type: NoteType, tree: DeckTree, onBack: 
     }
     BackHandler { saveAndClose() }
     val source = rememberSourceOpener(c.note.id) { route -> saveAndClose(); onOpenSource(route) }
+    // a linked card (from tape) belongs to its page: its fields change there
+    val linked by produceState(false, c.note.id) { value = ui { graph.repository.sourceOf(c.note.id)?.linked == true } }
 
     Column(Modifier.fillMaxSize()) {
         ScreenHeader("Карточка", onBack = ::saveAndClose, subtitle = tree.title(deckId)) {
@@ -135,7 +138,8 @@ private fun CardEditor(c: CardWithNote, type: NoteType, tree: DeckTree, onBack: 
                 OutlinedTextField(
                     values[i], { values[i] = it },
                     label = { Text(type.fields.getOrElse(i) { "Поле ${i + 1}" }) },
-                    modifier = Modifier.fillMaxWidth(),
+                    readOnly = linked,
+                    modifier = Modifier.fillMaxWidth().testTag("field-$i"),
                 )
             }
             OutlinedTextField(tags, { tags = it }, label = { Text("Теги через пробел") }, singleLine = true, modifier = Modifier.fillMaxWidth())
@@ -166,7 +170,9 @@ private fun CardEditor(c: CardWithNote, type: NoteType, tree: DeckTree, onBack: 
             Schedule(c)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (source.target != null) {
-                    OutlinedButton(onClick = source::open, enabled = source.enabled, modifier = Modifier.testTag("open-source")) { Text(source.label) }
+                    OutlinedButton(onClick = source::open, enabled = source.enabled, modifier = Modifier.testTag("open-source")) {
+                        Text(if (linked && source.target !is SourceTarget.Gone) "Изменить на странице" else source.label)
+                    }
                 }
                 OutlinedButton(onClick = { graph.appScope.launch { graph.repository.setSuspended(listOf(c.card.id), !c.card.suspended) } }) {
                     Text(if (c.card.suspended) "Вернуть из приостановки" else "Приостановить")

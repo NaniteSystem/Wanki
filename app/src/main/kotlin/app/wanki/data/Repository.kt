@@ -179,6 +179,35 @@ class Repository(private val db: WankiDatabase) {
 
     suspend fun sourceOf(noteId: String): SourceRefEntity? = sourceRefs.ofNote(noteId)
 
+    suspend fun sourceRef(id: String): SourceRefEntity? = sourceRefs.byId(id)
+
+    /** Masks on [pageId] without a live (not detached) ref: what «Карточки из скотча» would make cards from. */
+    suspend fun masksWithoutCards(pageId: String): List<PageObjectEntity> {
+        val live = sourceRefs.ofPage(pageId).filter { !it.detached }.mapNotNullTo(HashSet()) { it.objectId }
+        return notebooks.objects(pageId).filter { it.kind == PageObjectKind.MASK.name && it.id !in live }
+    }
+
+    /**
+     * «Карточки из скотча»: one linked CLASSIC card per [masksWithoutCards]; front = the mask token (by ref id, which stays
+     * when the mask moves), back = the token plus the recognised text of lines under the mask. Returns how many were made.
+     */
+    suspend fun addMaskCards(deckId: String, pageId: String): Int = db.withTransaction {
+        val masks = masksWithoutCards(pageId).map { it.toModel().bounds() to it.id }
+        val lines = notebooks.lines(pageId).sortedBy { it.lineIndex }
+        val now = System.currentTimeMillis()
+        for ((b, id) in masks) {
+            val hint = lines.filter { it.left < b.right && it.right > b.left && it.top < b.bottom && it.bottom > b.top }
+                .joinToString("\n") { it.shown }.trim()
+            val ref = SourceRefEntity(
+                noteId = "", kind = SourceKind.PAGE.name, sourceId = pageId, objectId = id,
+                x = b.left, y = b.top, w = b.right - b.left, h = b.bottom - b.top, linked = true, createdAt = now,
+            )
+            val token = app.wanki.anki.CardHtml.maskToken(ref.id)
+            addCardFromSource(deckId, token, if (hint.isEmpty()) token else "$token\n$hint", AnswerMode.CLASSIC, ref)
+        }
+        masks.size
+    }
+
     fun observeCardsFrom(kind: SourceKind, sourceId: String): Flow<List<CardWithNote>> = sourceRefs.observeCardsFrom(kind.name, sourceId)
 
     /**

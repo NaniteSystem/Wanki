@@ -33,4 +33,13 @@ class CardHtmlTest {
     fun plainFieldForWriting() {
         assertEquals("日本語", CardHtml.plain("<b>日本語[にほんご]</b>[sound:a.mp3]"))
     }
+
+    @Test
+    fun maskTokenBecomesBlock() {
+        val token = CardHtml.maskToken("r1")
+        assertEquals(listOf(CardBlock.Mask("r1", false)), CardHtml.withMasks(token, revealed = false))
+        assertEquals(listOf(CardBlock.Mask("r1", true), CardBlock.Text("東京")), CardHtml.withMasks("$token\n東京", revealed = true))
+        assertEquals(listOf(CardBlock.Text("no mask")), CardHtml.withMasks("no mask", revealed = true))
+        assertEquals("東京", CardHtml.withoutMasks("$token\n東京"))
+    }
 }

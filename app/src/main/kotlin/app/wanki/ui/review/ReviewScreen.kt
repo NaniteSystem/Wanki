@@ -160,6 +160,7 @@ class ReviewState(private val graph: AppGraph, private val deckId: String) {
 
     /** What is written (and checked, and read aloud). */
     val answer: String get() = content?.writeAnswer.orEmpty()
+    val answerHasMask: Boolean get() = content?.answer.orEmpty().any { it is CardBlock.Mask }
     val layout: WritingLayout get() = WritingLayout.forAnswer(answer)
     val language: String get() = current?.let { decks[it.card.deckId]?.language } ?: deck?.language ?: "ja"
 
@@ -413,7 +414,8 @@ fun ReviewScreen(deckId: String, onClose: () -> Unit, onOpenSource: (Route) -> U
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                CardBlocks(state.content?.question.orEmpty())
+                // a tape card's answer is the same picture opened: it replaces the closed one
+                if (!(state.phase == Phase.ANSWER && state.answerHasMask)) CardBlocks(state.content?.question.orEmpty())
                 if (state.mode == AnswerMode.HANDWRITING) WritingAnswer(state) else ClassicAnswer(state)
                 if (state.phase == Phase.ANSWER) RatingRow(state)
             }
@@ -479,7 +481,7 @@ private fun ClassicAnswer(state: ReviewState) {
     if (state.phase == Phase.QUESTION) {
         Button(onClick = state::reveal, modifier = Modifier.fillMaxWidth().height(56.dp)) { Text("Показать ответ") }
     } else {
-        if (state.noteType.isBasic) {
+        if (state.noteType.isBasic && !state.answerHasMask) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(state.answer, fontSize = 40.sp, textAlign = TextAlign.Center, fontWeight = FontWeight.Medium)
                 SpeakButton(state)
