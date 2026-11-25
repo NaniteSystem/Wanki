@@ -313,21 +313,45 @@ class InkLayerSelectionTest {
         layer.beginErase()
         layer.eraseAlong(50f, -5f, 50f, 5f, 5f, EraserMode.PARTIAL)
         layer.restoreTake(take, clip, 300f, 300f)
-        // the drag turns out to be a pinch: its erase is dropped, the restored strokes stay
+        // the drag turns out to be a pinch: only erasing after the restore is dropped; the restored strokes stay and
+        // the cut before it is its own undo step, under the restore
         layer.cancelErase()
-        assertEquals(2, layer.strokes.size)
-        assertSame(a, layer.strokes[0])
-        assertEquals(300f, layer.strokes[1].points[0].x, 1e-3f)
-        assertEquals(300f, layer.strokes[1].points[0].y, 1e-3f)
-        // an erase drag that ends keeps them too, and its undo step does not remove them
+        assertEquals(3, layer.strokes.size)
+        assertEquals(300f, layer.strokes[2].points[0].x, 1e-3f)
+        assertEquals(300f, layer.strokes[2].points[0].y, 1e-3f)
+        layer.undo() // the restore
+        layer.undo() // the cut
+        assertEquals(listOf(a), layer.strokes.toList())
+        // an erase drag with a paste in the middle: undo takes the paste first, then the erase
         val layer2 = InkLayer(listOf(a))
         layer2.beginErase()
         layer2.eraseAlong(50f, -5f, 50f, 5f, 5f, EraserMode.PARTIAL)
         layer2.paste(clip, 500f, 500f)
-        assertTrue(layer2.endErase())
-        layer2.undo() // the erase
-        assertEquals(2, layer2.strokes.size)
+        assertFalse(layer2.endErase()) // nothing erased after the paste
+        assertEquals(3, layer2.strokes.size)
         layer2.undo() // the paste
+        assertEquals(2, layer2.strokes.size)
+        layer2.undo() // the erase
         assertEquals(listOf(a), layer2.strokes.toList())
+    }
+
+    @Test
+    fun cutOfAnErasedPieceDuringTheDragIsNotDuplicatedByUndo() {
+        val c = InkStroke(listOf(InkPoint(0f, 0f, 0), InkPoint(100f, 0f, 10)))
+        val layer = InkLayer(listOf(c))
+        layer.beginErase()
+        layer.eraseAlong(50f, -5f, 50f, 5f, 5f, EraserMode.PARTIAL)
+        assertEquals(2, layer.strokes.size)
+        val c1 = layer.strokes[0]
+        val c2 = layer.strokes[1]
+        layer.selection.add(c1)
+        val clip = layer.takeSelection()
+        assertEquals(1, clip.strokes.size)
+        layer.endErase()
+        assertEquals(listOf(c2), layer.strokes.toList())
+        layer.undo() // the cut: c1 is back, c stays cut
+        assertEquals(listOf(c1, c2), layer.strokes.toList())
+        layer.undo() // the erase
+        assertEquals(listOf(c), layer.strokes.toList())
     }
 }

@@ -241,13 +241,13 @@ class InkLayer(initial: List<InkStroke> = emptyList()) {
     }
 
     /** Removes strokes by index (undoable), e.g. after a scratch-out gesture. */
-    fun removeAt(indices: List<Int>) {
+    fun removeAt(indices: List<Int>) { outsideErase {
         val hit = indices.sorted().filter { it in strokes.indices }.map { it to strokes[it] }
         if (hit.isEmpty()) return
         hit.asReversed().forEach { removeIndex(it.first) }
         push(Edit.Removed(hit))
         fixSelection()
-    }
+    } }
 
     // --- lasso transform: the strokes stay as they are while the drag runs, [liveTransform] shows where they go
 
@@ -383,12 +383,9 @@ class InkLayer(initial: List<InkStroke> = emptyList()) {
     }
 
     /** Adds [list] on top and [objs] (given new ids, on top of the other objects in their order), selected. */
-    private fun addSelected(list: List<InkStroke>, objs: List<PageObject> = emptyList()) {
+    private fun addSelected(list: List<InkStroke>, objs: List<PageObject> = emptyList()) { outsideErase {
         if (list.isEmpty() && objs.isEmpty()) return
         list.forEach { insertAt(strokes.size, it) }
-        // an eraser drag still open (a paste from the snackbar, the pen's eraser end) must not drop these if it is
-        // cancelled; it never touches objects, so they need nothing
-        eraseBefore = eraseBefore?.let { it + list }
         val z = nextZ()
         val added = objs.sortedWith(PageObject.ORDER).mapIndexed { i, o -> o.copy(id = PageObject.newId(), z = z + i) }
         val changes = added.map { ObjectChange(null, it) }
@@ -398,7 +395,7 @@ class InkLayer(initial: List<InkStroke> = emptyList()) {
         selection.addAll(list)
         selectedObjects.clear()
         selectedObjects.addAll(added.map { it.id })
-    }
+    } }
 
     /** Removes the selection as one undo step and returns it as a clip (see [copySelection]). */
     fun takeSelection(): InkClip {
@@ -413,17 +410,16 @@ class InkLayer(initial: List<InkStroke> = emptyList()) {
     private fun plainSelection(): List<InkStroke> = indicesOf(selection).map { plain[it] }
 
     /** Removes the selected strokes and objects (one undo step). */
-    fun deleteSelection() {
+    fun deleteSelection() { outsideErase {
         val hit = indicesOf(selection).map { it to plain[it] }
         val objs = selectedObjectList().map { ObjectChange(it, null) }
         if (hit.isEmpty() && objs.isEmpty()) return
         hit.asReversed().forEach { removeIndex(it.first) }
-        dropFromErase(hit.map { it.second })
         applyObjects(objs, forward = true)
         push(Edit.Removed(hit, objs))
         selection.clear()
         selectedObjects.clear()
-    }
+    } }
 
     /**
      * After an edit that may have replaced strokes (erase, undo, redo, reload): a selection may only hold strokes the
@@ -555,7 +551,9 @@ class InkLayer(initial: List<InkStroke> = emptyList()) {
      * topmost first, and the objects with [objectIds], as one undo step. Returns how many strokes and objects were
      * removed. Main thread.
      */
-    fun removeByKeys(keys: List<Long>, objectIds: Collection<String> = emptyList()): Int {
+    fun removeByKeys(keys: List<Long>, objectIds: Collection<String> = emptyList()): Int = outsideErase { removeByKeysNow(keys, objectIds) }
+
+    private fun removeByKeysNow(keys: List<Long>, objectIds: Collection<String>): Int {
         val left = HashMap<Long, Int>().apply { keys.forEach { merge(it, 1, Int::plus) } }
         val hit = ArrayList<Int>()
         for (i in plain.indices.reversed()) {
@@ -568,17 +566,16 @@ class InkLayer(initial: List<InkStroke> = emptyList()) {
         if (hit.isEmpty() && objs.isEmpty()) return 0
         val items = hit.sorted().map { it to plain[it] }
         items.asReversed().forEach { removeIndex(it.first) }
-        dropFromErase(items.map { it.second })
         applyObjects(objs, forward = true)
         push(Edit.Removed(items, objs))
         fixSelection()
         return items.size + objs.size
     }
 
-    fun add(s: InkStroke) {
+    fun add(s: InkStroke) { outsideErase {
         insertAt(strokes.size, s)
         push(Edit.Added(listOf(s)))
-    }
+    } }
 
     fun eraseAt(x: Float, y: Float, radius: Float): Boolean = eraseAlong(x, y, x, y, radius, EraserMode.WHOLE)
 
@@ -628,14 +625,18 @@ class InkLayer(initial: List<InkStroke> = emptyList()) {
     private var eraseChanged = false
 
     /**
-     * Strokes taken away as their own undo step (a delete, a move to another page) while an eraser drag is open: a
-     * cancelled drag must not put them back, or they would be on the canvas and on the other page (or in the clip).
+     * An edit with its own undo step (a delete, a cut, a paste, a move to another page) during an open eraser drag: the
+     * drag so far becomes its undo step first and then goes on, so undo order stays true and undoing the erase never
+     * brings back strokes the edit took away (or drops ones it added).
      */
-    private fun dropFromErase(gone: List<InkStroke>) {
-        val before = eraseBefore ?: return
-        if (gone.isEmpty()) return
-        val set = java.util.Collections.newSetFromMap(IdentityHashMap<InkStroke, Boolean>()).apply { addAll(gone) }
-        eraseBefore = before.filter { it !in set }
+    private inline fun <T> outsideErase(block: () -> T): T {
+        if (eraseBefore == null) return block()
+        endErase()
+        try {
+            return block()
+        } finally {
+            beginErase()
+        }
     }
 
     /**
