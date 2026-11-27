@@ -494,18 +494,24 @@ class PageEditorState(
         OpenTrace.mark("loaded")
     }
 
-    /** The page's ink as stored now: the one read ahead if no write of the page ran since, else read again. */
-    private suspend fun readInk(ahead: InkPreload?): Pair<InkLoad, LoadedInk?> {
-        if (ahead != null && PageWrites.unchangedSince(page.id, ahead.writeMark)) return ahead.ink to ahead.prepared
-        while (true) {
-            PageWrites.awaitIdle(page.id)
-            val mark = PageWrites.mark(page.id)
+    /** The page's ink and objects as stored at one moment (a write, e.g. a move, changes both at once). */
+    private class StoredPage(val ink: InkLoad, val prepared: LoadedInk?, val objects: List<PageObjectEntity>)
+
+    /**
+     * The page as stored now: the ink read ahead if no write of the page ran since (until its objects are read too),
+     * else read again once no write runs.
+     */
+    private suspend fun readStored(ahead: InkPreload?): StoredPage {
+        if (ahead != null && PageWrites.unchangedSince(page.id, ahead.writeMark)) {
+            val objects = withContext(Dispatchers.IO) { graph.repository.pageObjects(page.id) }
+            if (PageWrites.unchangedSince(page.id, ahead.writeMark)) return StoredPage(ahead.ink, ahead.prepared, objects)
+        }
+        return PageWrites.read(page.id) {
             // decoding thousands of strokes and indexing them is not main-thread work
-            val read = withContext(Dispatchers.IO) {
+            withContext(Dispatchers.IO) {
                 val r = graph.repository.loadInkResult(page.id)
-                r to (r as? InkLoad.Ok)?.let { InkLayer.prepare(it.strokes) }
+                StoredPage(r, (r as? InkLoad.Ok)?.let { InkLayer.prepare(it.strokes) }, graph.repository.pageObjects(page.id))
             }
-            if (PageWrites.unchangedSince(page.id, mark)) return read
         }
     }
 
@@ -523,7 +529,9 @@ class PageEditorState(
                 null
             }
         }
-        val (ink, prepared) = readInk(ahead)
+        val read = readStored(ahead)
+        val ink = read.ink
+        val prepared = read.prepared
         when (ink) {
             is InkLoad.Ok -> {
                 OpenTrace.mark("load: ink in hand")
@@ -549,7 +557,7 @@ class PageEditorState(
             }
         }
         // objects are shown on an unreadable page too (they cannot be edited there either)
-        val stored = withContext(Dispatchers.IO) { graph.repository.pageObjects(page.id) }
+        val stored = read.objects
         val known = stored.mapNotNull { e -> e.toModelOrNull() }
         // a kind this version does not know is kept as it is and saved back with the others
         foreignObjects = stored.filter { it.toModelOrNull() == null }

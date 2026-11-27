@@ -15,6 +15,7 @@ import androidx.compose.ui.unit.dp
 import app.wanki.AppGraph
 import app.wanki.data.NotebookEntity
 import app.wanki.data.PageEntity
+import app.wanki.data.newId
 import app.wanki.ink.InkAffine
 import app.wanki.input.InkClip
 import app.wanki.input.toEntity
@@ -23,7 +24,6 @@ import app.wanki.ui.common.Undo
 import app.wanki.ui.common.ui
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
@@ -77,14 +77,18 @@ fun moveSelectionToPage(graph: AppGraph, undo: Undo, state: PageEditorState, not
     val take = layer.undoTop
     val encodeRest = layer.snapshotEncoder()
     val restObjects = state.objectEntities()
-    graph.appScope.launch {
+    // both pages count as being written from here, not from when the coroutine starts: an editor of either opening
+    // before the write began (the page opened again right after the move) read it from before the move, and its next
+    // save stored the moved strokes on the source again (doubled) or dropped them from the target. A new page gets its
+    // id now, so an editor of it cannot read it empty between its insert and the move either.
+    val toId = target?.id ?: newId()
+    PageWrites.launchWrite(graph.appScope, from.id, toId) {
         var to: PageEntity? = null
         var keys: MovedInk? = null
         try {
-            val page = target ?: graph.repository.addPage(notebook)
+            val page = target ?: graph.repository.addPage(notebook, id = toId)
             val rest = withContext(Dispatchers.Default) { encodeRest() }
-            // an editor of either page opening meanwhile reads it again once this is stored
-            keys = PageWrites.around(from.id, page.id) { graph.repository.moveToPage(from, rest, page, strokes, objects, restObjects) }
+            keys = graph.repository.moveToPage(from, rest, page, strokes, objects, restObjects)
             to = page
         } catch (e: CancellationException) {
             throw e
