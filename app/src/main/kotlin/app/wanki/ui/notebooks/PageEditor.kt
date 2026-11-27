@@ -975,17 +975,23 @@ fun PageEditor(
         onDispose {
             state.closed()
             state.stopLoad()
+            val id = state.page.id
+            // a change from the last frame may not have reached the effect above yet; the page opened again meanwhile
+            // reads it once this is stored. The page counts as being written from here, not from when the coroutine
+            // starts: the undo of a move that finds no editor on the page waits for this save before it writes there
+            val finalWrite = PageWrites.begin(id)
             graph.appScope.launch {
-                // a change from the last frame may not have reached the effect above yet; the page opened again
-                // meanwhile reads it once this is stored
-                val id = state.page.id
-                PageWrites.around(id) { state.saver.finalSave(context.applicationContext, "page $id") }
+                try {
+                    state.saver.finalSave(context.applicationContext, "page $id")
+                } finally {
+                    finalWrite.end()
+                }
                 runCatching { state.saveView() }.onFailure {
                     Log.e("Wanki", "page $id: view not saved", it)
                     Toast.makeText(context.applicationContext, "Не удалось сохранить вид страницы", Toast.LENGTH_LONG).show()
                 }
                 runCatching { state.recognizeIfDirty() }.onFailure { Log.e("Wanki", "page $id: recognition failed", it) }
-            }
+            }.invokeOnCompletion { finalWrite.end() } // also when cancelled before it started
         }
     }
 

@@ -77,6 +77,62 @@ class PageWritesTest {
         assertTrue(PageWrites.mark(never) >= 0)
     }
 
+    /**
+     * «Отменить» of a move right after the source page's editor closed: the editor's last save (its copy without the
+     * moved strokes) is still to run. The strokes written back into the stored page must come after it, else that
+     * save drops them, and the undo then takes them off the target too: lost.
+     */
+    @Test
+    fun anUndoWithoutAnEditorWritesAfterTheLastSaveOfOneThatClosed() = runTest(StandardTestDispatcher()) {
+        val id = pageId()
+        var stored = listOf("a", "b") // the source page after the move
+        val editorCopy = stored
+        // the editor closes: its final save is launched, it has not started yet
+        PageWrites.launchWrite(this, id) {
+            delay(40) // encoding a big page
+            stored = editorCopy
+        }
+        val undo = async {
+            val editor = PageWrites.editorOrIdle(id, loading = { false }, editor = { null as String? })
+            if (editor == null) PageWrites.around(id) { stored = stored + "moved" }
+            editor
+        }
+        advanceUntilIdle()
+        assertEquals(null, undo.await())
+        assertEquals(listOf("a", "b", "moved"), stored)
+    }
+
+    /**
+     * The page is opened again while the undo waits for such a save: the new editor may read the page any moment, so
+     * the strokes go back through it once it has loaded, not into the stored page under it.
+     */
+    @Test
+    fun anEditorOpeningWhileTheUndoWaitsGetsTheChange() = runTest(StandardTestDispatcher()) {
+        val id = pageId()
+        var open = false
+        var loaded = false
+        PageWrites.launchWrite(this, id) { delay(40) } // the last save of the editor that closed
+        launch {
+            delay(20)
+            open = true // the page shown again, its editor reading it
+            delay(60)
+            loaded = true
+        }
+        val undo = async {
+            PageWrites.editorOrIdle(
+                id,
+                loading = { open && !loaded },
+                // like PageEditorState.awaitEditor: waits while the open editor loads, null when none is open
+                editor = {
+                    while (open && !loaded) delay(16)
+                    if (open) "new editor" else null
+                },
+            )
+        }
+        advanceUntilIdle()
+        assertEquals("new editor", undo.await())
+    }
+
     @Test
     fun aPageHeldTwiceStaysHeldUntilBothEnd() {
         val id = pageId()
