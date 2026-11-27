@@ -755,7 +755,9 @@ class PageEditorState(
                 )
             }
             val text = searchTextFor(merged)
-            if (merged != lines || merged != latest.values.sortedBy { it.lineIndex } || (text != null && text != graph.repository.recognizedText(page.id))) {
+            // the stored text is compared even with no lines at all: a page left without lines (only highlighter, or a
+            // legacy text) must not stay searchable by what it no longer shows
+            if (merged != lines || merged != latest.values.sortedBy { it.lineIndex } || (text ?: joined(merged)) != graph.repository.recognizedText(page.id)) {
                 graph.repository.saveLines(page.id, merged, text)
             }
             lines = merged

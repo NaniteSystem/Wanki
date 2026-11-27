@@ -1054,11 +1054,18 @@ class Repository(private val db: WankiDatabase) {
 
     suspend fun pageLines(pageId: String): List<PageLineEntity> = notebooks.lines(pageId)
 
-    /** Replaces the page's lines (corrections come from the caller) and rewrites the searchable text from what is shown, or [searchText] when the caller keeps old text for lines that failed. */
-    suspend fun saveLines(pageId: String, lines: List<PageLineEntity>, searchText: String? = null) = db.withTransaction {
+    /**
+     * Replaces the page's lines (corrections come from the caller) and rewrites the searchable text from what is shown,
+     * or [searchText] when the caller keeps old text for lines that failed. No lines and no [searchText] clear the text.
+     *
+     * Returns whether the text was stored. Without an ink row (a page whose ink save failed, or an emptied page) there is
+     * nowhere to put it: the row, once written, takes the text joined from these lines, but a [searchText] is lost, so
+     * the caller must save it again.
+     */
+    suspend fun saveLines(pageId: String, lines: List<PageLineEntity>, searchText: String? = null): Boolean = db.withTransaction {
         notebooks.deleteLines(pageId)
         if (lines.isNotEmpty()) notebooks.insertLines(lines.map { it.copy(pageId = pageId) })
-        notebooks.setRecognizedText(pageId, searchText ?: joinedText(lines), System.currentTimeMillis())
+        notebooks.setRecognizedText(pageId, searchText ?: joinedText(lines), System.currentTimeMillis()) > 0
     }
 
     /** Sets (or with null resets) the user's correction of one line; the searchable text follows. */
@@ -1069,6 +1076,7 @@ class Repository(private val db: WankiDatabase) {
         val updated = line.copy(corrected = text, updatedAt = now)
         notebooks.setLineCorrection(pageId, lineKey, text, now)
         notebooks.setRecognizedText(pageId, searchText ?: joinedText(lines.map { if (it.lineKey == lineKey) updated else it }), now)
+        Unit
     }
 
     private fun joinedText(lines: List<PageLineEntity>) = lines.sortedBy { it.lineIndex }.joinToString("\n") { it.shown }
@@ -1098,8 +1106,9 @@ class Repository(private val db: WankiDatabase) {
         return deleted
     }
 
-    suspend fun setRecognizedText(pageId: String, text: String) =
+    suspend fun setRecognizedText(pageId: String, text: String) {
         notebooks.setRecognizedText(pageId, text, System.currentTimeMillis())
+    }
 
     suspend fun searchPages(query: String, kind: NotebookKind? = null) =
         if (query.isBlank()) emptyList() else notebooks.search(query.trim(), kind?.name)
