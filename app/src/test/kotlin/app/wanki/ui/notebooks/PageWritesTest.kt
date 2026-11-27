@@ -93,7 +93,7 @@ class PageWritesTest {
             stored = editorCopy
         }
         val undo = async {
-            val editor = PageWrites.editorOrIdle(id, loading = { false }, editor = { null as String? })
+            val editor = PageWrites.editorOrIdle(id) { null as String? }
             if (editor == null) PageWrites.around(id) { stored = stored + "moved" }
             editor
         }
@@ -104,33 +104,32 @@ class PageWritesTest {
 
     /**
      * The page is opened again while the undo waits for such a save: the new editor may read the page any moment, so
-     * the strokes go back through it once it has loaded, not into the stored page under it.
+     * the strokes go back through it, not into the stored page under it, whether it is still loading or has already
+     * loaded when the save ends.
      */
     @Test
-    fun anEditorOpeningWhileTheUndoWaitsGetsTheChange() = runTest(StandardTestDispatcher()) {
-        val id = pageId()
-        var open = false
-        var loaded = false
-        PageWrites.launchWrite(this, id) { delay(40) } // the last save of the editor that closed
-        launch {
-            delay(20)
-            open = true // the page shown again, its editor reading it
-            delay(60)
-            loaded = true
-        }
-        val undo = async {
-            PageWrites.editorOrIdle(
-                id,
-                loading = { open && !loaded },
+    fun anEditorOpeningWhileTheUndoWaitsGetsTheChange() {
+        for (loadMs in listOf(0L, 60L)) runTest(StandardTestDispatcher()) {
+            val id = pageId()
+            var open = false
+            var loaded = false
+            PageWrites.launchWrite(this, id) { delay(40) } // the last save of the editor that closed
+            launch {
+                delay(20)
+                open = true // the page shown again, its editor reading it once that save is done
+                PageWrites.read(id) { delay(loadMs) }
+                loaded = true
+            }
+            val undo = async {
                 // like PageEditorState.awaitEditor: waits while the open editor loads, null when none is open
-                editor = {
+                PageWrites.editorOrIdle(id) {
                     while (open && !loaded) delay(16)
                     if (open) "new editor" else null
-                },
-            )
+                }
+            }
+            advanceUntilIdle()
+            assertEquals("new editor", undo.await(), "load of $loadMs ms")
         }
-        advanceUntilIdle()
-        assertEquals("new editor", undo.await())
     }
 
     @Test

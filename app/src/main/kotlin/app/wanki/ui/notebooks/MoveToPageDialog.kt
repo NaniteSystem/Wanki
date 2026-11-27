@@ -117,14 +117,11 @@ fun moveSelectionToPage(graph: AppGraph, undo: Undo, state: PageEditorState, not
 
 /**
  * Page [pageId]'s editor once it has loaded (waiting while one loads), or null once the stored page may be written:
- * no editor loads it and the last save of one that closed is done ([PageWrites.editorOrIdle]). The answer holds until
- * the caller next suspends. Main thread.
+ * no editor is open on it and the last save of one that closed is done ([PageWrites.editorOrIdle]). The answer holds
+ * until the caller next suspends. Main thread.
  */
-private suspend fun editorOrStored(pageId: String): PageEditorState? = PageWrites.editorOrIdle(
-    pageId,
-    loading = { PageEditorState.openEditorOf(pageId)?.loaded == false },
-    editor = { PageEditorState.awaitEditor(pageId) },
-)
+private suspend fun editorOrStored(pageId: String): PageEditorState? =
+    PageWrites.editorOrIdle(pageId) { PageEditorState.awaitEditor(pageId) }
 
 /**
  * «Отменить» of a move: the strokes go back to [from] (saved), then leave [to]. Each page is changed through its open
