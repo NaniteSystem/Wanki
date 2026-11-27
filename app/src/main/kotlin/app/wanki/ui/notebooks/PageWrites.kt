@@ -74,6 +74,22 @@ object PageWrites {
         while (running.containsKey(id)) delay(10)
     }
 
+    /**
+     * Where a change of page [id] goes (e.g. the undo of a move): the open editor [editor] gives (it waits for one still
+     * loading and is null when none is open or can edit), or null once there is none and no write of the page runs,
+     * e.g. the last save of an editor that has just closed, which would otherwise store its copy over the change. An
+     * editor opened while that write ran is asked again (loading or loaded, the change goes through it). Null holds
+     * until the caller next suspends: it writes the stored page inside [around] before that, so an editor opening later
+     * reads the page after the write. Main thread.
+     */
+    suspend fun <E : Any> editorOrIdle(id: String, editor: suspend () -> E?): E? {
+        while (true) {
+            editor()?.let { return it }
+            if (!running.containsKey(id)) return null
+            awaitIdle(id)
+        }
+    }
+
     /** Reads page [id] with [block] while no write of it runs, again until no write ran or ended during the read. */
     suspend fun <T> read(id: String, block: suspend () -> T): T {
         while (true) {

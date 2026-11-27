@@ -116,9 +116,18 @@ fun moveSelectionToPage(graph: AppGraph, undo: Undo, state: PageEditorState, not
 }
 
 /**
+ * Page [pageId]'s editor once it has loaded (waiting while one loads), or null once the stored page may be written:
+ * no editor is open on it and the last save of one that closed is done ([PageWrites.editorOrIdle]). The answer holds
+ * until the caller next suspends. Main thread.
+ */
+private suspend fun editorOrStored(pageId: String): PageEditorState? =
+    PageWrites.editorOrIdle(pageId) { PageEditorState.awaitEditor(pageId) }
+
+/**
  * «Отменить» of a move: the strokes go back to [from] (saved), then leave [to]. Each page is changed through its open
  * editor when it has one, waiting for one that is still loading (writing the stored page under it would be lost, or
- * doubled, by its next save); only a page without an editor is changed in the database.
+ * doubled, by its next save); only a page without an editor is changed in the database, after the last save of an
+ * editor that closed. Nothing suspends between finding the editor (or none) and changing the page.
  */
 private suspend fun moveBack(
     graph: AppGraph, mover: PageEditorState, take: Any?, clip: InkClip, from: PageEntity, left: Float, top: Float,
@@ -126,7 +135,7 @@ private suspend fun moveBack(
 ) = ui {
     // the editor that moved them may have closed: its last save comes first
     mover.saver.flush()
-    val source = PageEditorState.awaitEditor(from.id)
+    val source = editorOrStored(from.id)
     if (source != null) {
         // the take is undone only if it is still the top step and the undo ran (not during a drag): else a paste
         source.layer.restoreTake(if (source === mover) take else null, clip, left, top)
@@ -139,10 +148,14 @@ private suspend fun moveBack(
         val back = InkAffine.translate(left, top)
         PageWrites.around(from.id) { graph.repository.appendInk(from, clip.strokes.map(back::apply), clip.objects.map { it.transformed(back) }) }
     }
-    val target = PageEditorState.awaitEditor(to.id)
+    var target = editorOrStored(to.id)
     if (target != null) {
         // the masks' cards follow them back before the target's save would detach them
         graph.repository.repointMasks(to.id, from.id, moved.masks.entries.associate { (old, new) -> new to old })
-        target.layer.removeByKeys(moved.keys, moved.objectIds)
-    } else PageWrites.around(to.id) { graph.repository.takeBackFromPage(to.id, moved.keys, moved.objectIds, from.id, moved.masks) }
+        // that write suspended: the editor may have closed (its last save kept the strokes) or the page opened again
+        target = editorOrStored(to.id)
+    }
+    if (target != null) target.layer.removeByKeys(moved.keys, moved.objectIds)
+    // the masks repointed above are not repointed twice: their refs no longer name the target
+    else PageWrites.around(to.id) { graph.repository.takeBackFromPage(to.id, moved.keys, moved.objectIds, from.id, moved.masks) }
 }
