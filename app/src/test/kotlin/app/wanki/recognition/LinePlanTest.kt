@@ -71,4 +71,12 @@ class LinePlanTest {
         // a changed line failed: its old row fills the place
         assertEquals("a\nb", SearchText.build(ok, listOf(1), listOf(stored(9, 1, "b")), "old"))
     }
+
+    @Test
+    fun searchTextOfPageWithoutLines() {
+        // nothing left to read and nothing failed: the old text and dropped rows go, the page finds nothing
+        assertEquals("", SearchText.build(emptyList(), emptyList(), listOf(stored(9, 0, "b")), "old"))
+        // every line failed, each with its old row: the rows stand in for them
+        assertEquals("a\nb", SearchText.build(emptyList(), listOf(0, 1), listOf(stored(9, 1, "b"), stored(8, 0, "a")), "old"))
+    }
 }

@@ -519,8 +519,9 @@ interface NotebookDao {
     @Upsert
     suspend fun upsertInk(ink: PageInkEntity)
 
+    /** Returns the number of rows changed: 0 when the page has no ink row yet. */
     @Query("UPDATE page_ink SET recognizedText = :text, recognizedAt = :at WHERE pageId = :pageId")
-    suspend fun setRecognizedText(pageId: String, text: String, at: Long)
+    suspend fun setRecognizedText(pageId: String, text: String, at: Long): Int
 
     @Query(
         """

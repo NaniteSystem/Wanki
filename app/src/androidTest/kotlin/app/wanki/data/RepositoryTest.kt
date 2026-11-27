@@ -707,6 +707,33 @@ class RepositoryTest {
     }
 
     @Test
+    fun saveLinesWithNoLinesClearsText() = runBlocking {
+        val page = onePage()
+        inkOn(page)
+        repo.setRecognizedText(page.id, "stale")
+        assertTrue(repo.saveLines(page.id, emptyList()))
+        assertEquals("", repo.recognizedText(page.id))
+        assertTrue(repo.searchPages("stale").isEmpty())
+        assertTrue(repo.pageLines(page.id).isEmpty())
+        // every line failed: the old text the caller keeps stays searchable
+        assertTrue(repo.saveLines(page.id, emptyList(), searchText = "old"))
+        assertEquals("old", repo.recognizedText(page.id))
+    }
+
+    @Test
+    fun saveLinesWithoutInkRowReportsTextNotStored() = runBlocking {
+        val page = onePage()
+        assertFalse(repo.saveLines(page.id, emptyList()))
+        assertFalse(repo.saveLines(page.id, listOf(line(page, 1, 0, "a")), searchText = "a\nold b"))
+        assertEquals("", repo.recognizedText(page.id))
+        // the row takes the text of the stored lines; the caller saves its kept text again
+        inkOn(page)
+        assertEquals("a", repo.recognizedText(page.id))
+        assertTrue(repo.saveLines(page.id, listOf(line(page, 1, 0, "a")), searchText = "a\nold b"))
+        assertEquals("a\nold b", repo.recognizedText(page.id))
+    }
+
+    @Test
     fun setLineCorrectionNullResets() = runBlocking {
         val page = onePage()
         inkOn(page)
