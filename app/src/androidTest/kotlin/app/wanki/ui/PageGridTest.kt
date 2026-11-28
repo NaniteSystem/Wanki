@@ -149,4 +149,41 @@ class PageGridTest {
         rule.waitUntilAtLeastOneExists(hasTestTag("page-thumb-2"), 10_000)
         assertEquals(listOf(b, c, a), ids(nb))
     }
+
+    /** The system cancels the drag (ACTION_CANCEL): the order stays as stored, on screen and in the database. */
+    @Test
+    fun cancelledDragStoresNothing() {
+        val nb = notebook("Cancel", 3)
+        val (a, b, c) = ids(nb)
+        openGrid("Cancel", 3)
+        val target = rule.onNodeWithTag("page-thumb-2").fetchSemanticsNode().boundsInRoot.center
+        val start = rule.onNodeWithTag("page-thumb-0").fetchSemanticsNode().boundsInRoot.center
+        rule.onNodeWithTag("page-drag-0").performTouchInput {
+            down(center)
+            moveBy(Offset(1f, 1f))
+            val delta = target - start
+            val steps = 12
+            repeat(steps) { moveBy(delta / steps.toFloat()) }
+            moveBy(Offset(2f, 2f))
+            cancel()
+        }
+        rule.waitForIdle()
+        // the old code stored the move a moment after the cancel: give it time
+        Thread.sleep(1_000)
+        rule.waitForIdle()
+        assertEquals(listOf(a, b, c), ids(nb))
+        // the cancelled drag left nothing behind: the next real drag is stored as usual
+        val first = rule.onNodeWithTag("page-thumb-0").fetchSemanticsNode().boundsInRoot.center
+        val second = rule.onNodeWithTag("page-thumb-1").fetchSemanticsNode().boundsInRoot.center
+        rule.onNodeWithTag("page-drag-0").performTouchInput {
+            down(center)
+            moveBy(Offset(1f, 1f))
+            val delta = second - first
+            val steps = 8
+            repeat(steps) { moveBy(delta / steps.toFloat()) }
+            moveBy(Offset(2f, 2f))
+            up()
+        }
+        rule.waitUntil(10_000) { ids(nb) == listOf(b, a, c) }
+    }
 }

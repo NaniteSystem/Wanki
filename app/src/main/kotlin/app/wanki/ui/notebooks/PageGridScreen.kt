@@ -66,7 +66,7 @@ fun PageGridScreen(notebookId: String, onBack: () -> Unit, onOpen: (pageId: Stri
 
     // the order on screen while dragging; the database order replaces it once the move is stored
     val shown = remember(pages) { mutableStateListOf<PageEntity>().apply { addAll(pages.orEmpty()) } }
-    var dragFrom by remember { mutableStateOf<Int?>(null) }
+    var drag by remember { mutableStateOf<PageDrag?>(null) }
     var scrollToEnd by remember { mutableStateOf(false) }
 
     fun attempt(failure: String, work: suspend () -> Unit) {
@@ -142,23 +142,29 @@ fun PageGridScreen(notebookId: String, onBack: () -> Unit, onOpen: (pageId: Stri
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                             Text("${index + 1}", Modifier.weight(1f), style = MaterialTheme.typography.labelLarge)
                             Box(
-                                Modifier.size(48.dp).testTag("page-drag-$index").draggableHandle(
-                                    onDragStarted = { dragFrom = index },
-                                    onDragStopped = {
-                                        val from = dragFrom
-                                        val to = shown.indexOfFirst { it.id == page.id }
-                                        dragFrom = null
-                                        if (from != null && to >= 0 && from != to) attempt("Не удалось переместить страницу") {
-                                            try {
-                                                repository.movePage(notebookId, from, to)
-                                            } catch (e: Exception) {
-                                                // show the stored order again
-                                                shown.clear(); shown.addAll(repository.pages(notebookId))
-                                                throw e
+                                Modifier.size(48.dp).testTag("page-drag-$index")
+                                    .onPointersLifted { drag?.lift() }
+                                    .draggableHandle(
+                                        onDragStarted = { drag = PageDrag(index) },
+                                        onDragStopped = {
+                                            val end = drag?.end(shown.indexOfFirst { it.id == page.id })
+                                            drag = null
+                                            when (end) {
+                                                // a cancelled gesture (ACTION_CANCEL) stores nothing: back to the stored order
+                                                PageDragEnd.Restore -> { shown.clear(); shown.addAll(pages.orEmpty()) }
+                                                is PageDragEnd.Move -> attempt("Не удалось переместить страницу") {
+                                                    try {
+                                                        repository.movePage(notebookId, end.from, end.to)
+                                                    } catch (e: Exception) {
+                                                        // show the stored order again
+                                                        shown.clear(); shown.addAll(repository.pages(notebookId))
+                                                        throw e
+                                                    }
+                                                }
+                                                PageDragEnd.Stay, null -> {}
                                             }
-                                        }
-                                    },
-                                ),
+                                        },
+                                    ),
                                 contentAlignment = Alignment.Center,
                             ) {
                                 Icon(painterResource(R.drawable.ic_drag_indicator), contentDescription = "Перетащить страницу ${index + 1}")
