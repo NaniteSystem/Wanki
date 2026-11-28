@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -44,7 +45,13 @@ fun ListCard(
 ) {
     var open by remember { mutableStateOf(false) }
     Box(modifier.fillMaxWidth()) {
-        Card(Modifier.fillMaxWidth().testTag(tag).combinedClickable(onClick = onClick, onLongClick = { open = true })) {
+        // a paper sheet: a shade lighter than the page under it, with a soft shadow
+        Card(
+            Modifier.fillMaxWidth().testTag(tag).combinedClickable(onClick = onClick, onLongClick = { open = true }),
+            shape = MaterialTheme.shapes.medium,
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        ) {
             Box { content() }
         }
         if (pinned) {

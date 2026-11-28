@@ -136,7 +136,7 @@ private fun ToolButton(
                 Box(
                     Modifier.align(Alignment.BottomCenter).padding(bottom = 3.dp).size(7.dp)
                         .background(Color(tool.color), CircleShape)
-                        .border(1.dp, Color(0x55000000), CircleShape),
+                        .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape),
                 )
             }
         }
@@ -233,7 +233,7 @@ private fun Swatch(color: Int, selected: Boolean, description: String, tag: Stri
             Modifier.size(30.dp).background(Color(color), CircleShape)
                 .border(
                     if (selected) 3.dp else 1.dp,
-                    if (selected) MaterialTheme.colorScheme.primary else Color(0x33000000),
+                    if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
                     CircleShape,
                 ),
         )
@@ -287,7 +287,7 @@ fun CustomColorDialog(initial: Int, onPick: (Int) -> Unit, onDismiss: () -> Unit
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 Box(
                     Modifier.fillMaxWidth().size(40.dp).background(Color(color), MaterialTheme.shapes.small)
-                        .border(1.dp, Color(0x33000000), MaterialTheme.shapes.small),
+                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, MaterialTheme.shapes.small),
                 )
                 Text("Оттенок", style = MaterialTheme.typography.labelMedium)
                 // at full saturation and brightness, so the rainbow stays readable for a grey or dark current colour
@@ -319,7 +319,7 @@ private fun GradientSlider(
             Box(
                 Modifier.fillMaxWidth().height(14.dp)
                     .background(Brush.horizontalGradient(stops), CircleShape)
-                    .border(1.dp, Color(0x33000000), CircleShape),
+                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape),
             )
         },
     )

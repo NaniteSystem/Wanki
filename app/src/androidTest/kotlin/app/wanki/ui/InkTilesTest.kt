@@ -17,7 +17,7 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.printToString
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.test.platform.app.InstrumentationRegistry
-import app.wanki.WankiTheme
+import app.wanki.ui.theme.WankiTheme
 import app.wanki.data.PageTemplate
 import app.wanki.graph
 import app.wanki.ink.InkBrush

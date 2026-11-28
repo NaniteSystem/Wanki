@@ -1,7 +1,6 @@
 package app.wanki
 
 import android.graphics.Color
-import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
@@ -11,18 +10,14 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.safeDrawingPadding
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import app.wanki.input.InkTiles
 import app.wanki.ui.MainShell
+import app.wanki.ui.theme.WankiTheme
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -53,8 +48,9 @@ class MainActivity : ComponentActivity() {
     }
 
     private companion object {
-        val LIGHT_SCRIM = Color.argb(0xe6, 0xFF, 0xFF, 0xFF)
-        val DARK_SCRIM = Color.argb(0x80, 0x1b, 0x1b, 0x1b)
+        // the theme's paper and coffee backgrounds (ui/theme/Color.kt)
+        val LIGHT_SCRIM = Color.argb(0xe6, 0xFB, 0xF4, 0xE6)
+        val DARK_SCRIM = Color.argb(0x80, 0x23, 0x1D, 0x18)
     }
 }
 
@@ -64,16 +60,4 @@ fun isDarkTheme(): Boolean = when (LocalContext.current.graph.settings.theme) {
     "light" -> false
     "dark" -> true
     else -> isSystemInDarkTheme()
-}
-
-@Composable
-fun WankiTheme(content: @Composable () -> Unit) {
-    val context = LocalContext.current
-    val dark = isDarkTheme()
-    val colors = when {
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        dark -> darkColorScheme()
-        else -> lightColorScheme()
-    }
-    MaterialTheme(colorScheme = colors, content = content)
 }
