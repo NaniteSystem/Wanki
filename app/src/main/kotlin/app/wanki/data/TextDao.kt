@@ -3,7 +3,9 @@ package app.wanki.data
 import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.Query
+import androidx.room.RawQuery
 import androidx.room.Upsert
+import androidx.sqlite.db.SupportSQLiteQuery
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -28,6 +30,17 @@ interface TextDao {
 
     @Query("SELECT * FROM text_pieces WHERE textId = :textId ORDER BY pieceIndex")
     suspend fun pieces(textId: String): List<TextPieceEntity>
+
+    /** Title search, built by [TextSearch.titles]. */
+    @RawQuery
+    suspend fun findTexts(query: SupportSQLiteQuery): List<TextEntity>
+
+    /** Piece search, built by [TextSearch.pieces]. */
+    @RawQuery
+    suspend fun findPieces(query: SupportSQLiteQuery): List<TextPieceEntity>
+
+    @Query("SELECT * FROM texts WHERE id IN (:ids)")
+    suspend fun getTexts(ids: List<String>): List<TextEntity>
 
     @Query("SELECT * FROM text_pieces WHERE textId = :textId ORDER BY pieceIndex")
     fun observePieces(textId: String): Flow<List<TextPieceEntity>>

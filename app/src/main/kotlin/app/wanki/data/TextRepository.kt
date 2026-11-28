@@ -73,6 +73,18 @@ class TextRepository(
     suspend fun text(id: String): TextEntity? = dao.getText(id)
     suspend fun pieces(textId: String): List<TextPieceEntity> = dao.pieces(textId)
 
+    /** Texts whose title or a piece contains [query] ([TextSearch]); empty for a blank query. */
+    suspend fun search(query: String, limit: Int = 200): List<TextSearchHit> {
+        if (query.isBlank()) return emptyList()
+        val titles = dao.findTexts(TextSearch.titles(query, limit).room())
+        val pieces = dao.findPieces(TextSearch.pieces(query, limit).room())
+        val missing = pieces.map { it.textId }.distinct() - titles.map { it.id }.toSet()
+        val texts = (titles + missing.chunked(500).flatMap { dao.getTexts(it) }).associateBy { it.id }
+        return TextSearch.merge(titles, pieces, texts)
+    }
+
+    private fun CardQuery.Sql.room() = androidx.sqlite.db.SimpleSQLiteQuery(sql, args.toTypedArray())
+
     /** Pieces in the order of [ids]; unknown ids are skipped. */
     suspend fun piecesByIds(ids: List<String>): List<TextPieceEntity> {
         val byId = ids.distinct().chunked(500).flatMap { dao.getPieces(it) }.associateBy { it.id }

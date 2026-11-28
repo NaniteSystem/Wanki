@@ -374,8 +374,20 @@ class SmokeTest {
         shot("05b-stats")
         back()
 
-        // Card browser: search, open a card in the editor
+        // App-wide search: a card found by its question opens in the editor
         rule.onNode(hasTestTag("decks-search")).performClick()
+        rule.waitUntilAtLeastOneExists(hasTestTag("global-search"), 10_000)
+        rule.onNode(hasTestTag("global-search")).performTextInput("日")
+        rule.waitUntilAtLeastOneExists(hasTestTag("search-group-CARDS"), 10_000)
+        shot("05c0-global-search")
+        rule.onAllNodes(hasText("день; солнце", substring = true)).onFirst().performClick()
+        rule.waitUntilAtLeastOneExists(hasText("История ответов"), 10_000)
+        back()
+        back()
+
+        // Card browser (from the menu): search, open a card in the editor
+        rule.onNode(hasTestTag("menu")).performClick()
+        rule.onNode(hasTestTag("decks-browser")).performClick()
         rule.waitUntilAtLeastOneExists(hasTestTag("card-search"), 10_000)
         rule.onNode(hasTestTag("card-search")).performTextInput("日")
         rule.waitUntilAtLeastOneExists(hasText("день; солнце", substring = true), 10_000)
