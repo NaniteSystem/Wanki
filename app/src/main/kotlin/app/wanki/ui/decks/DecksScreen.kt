@@ -76,6 +76,7 @@ fun DecksScreen(
     onPractice: () -> Unit = {},
     onCatalog: () -> Unit = {},
     onTexts: () -> Unit = {},
+    onSearch: () -> Unit = {},
 ) {
     val graph = LocalContext.current.graph
     // "now" is refreshed on resume so due counts stay current
@@ -141,8 +142,10 @@ fun DecksScreen(
         Column(Modifier.fillMaxSize()) {
             ScreenHeader(
                 "Колоды", subtitle = "Сегодня повторено: $reviewedToday",
-                primary = listOf(HeaderAction(R.drawable.ic_search, "Поиск", tag = "decks-search", onClick = onBrowse)),
+                // the search covers the whole app; the card browser (filters, bulk actions) is in the menu
+                primary = listOf(HeaderAction(R.drawable.ic_search, "Поиск", tag = "decks-search", onClick = onSearch)),
                 menu = listOf(
+                    HeaderAction(0, "Браузер карточек", tag = "decks-browser", onClick = onBrowse),
                     HeaderAction(0, "Статистика", tag = "decks-stats", onClick = onStats),
                     HeaderAction(0, "Готовые колоды", onClick = onCatalog),
                     HeaderAction(0, "Импорт колоды Anki (.apkg)") { pickApkg.launch(arrayOf("*/*")) },

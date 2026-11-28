@@ -45,6 +45,7 @@ import androidx.compose.ui.unit.dp
 import app.wanki.data.NotebookKind
 import app.wanki.data.PageEntity
 import app.wanki.data.PageSearchHit
+import app.wanki.search.SearchMatch
 import app.wanki.data.PageTemplate
 import app.wanki.R
 import androidx.compose.ui.text.style.TextOverflow
@@ -125,7 +126,7 @@ fun NotebooksScreen(
                         Card(Modifier.fillMaxWidth().clickable { onOpenHit(h, query) }) {
                             Column(Modifier.padding(12.dp)) {
                                 Text("${h.notebookTitle} · стр. ${h.pageIndex + 1}", style = MaterialTheme.typography.labelLarge)
-                                Text(snippet(h.recognizedText, query), maxLines = 3)
+                                Text(SearchMatch.snippet(h.recognizedText, query), maxLines = 3)
                             }
                         }
                     }
@@ -216,12 +217,6 @@ private fun rememberDocumentsPicker(onPicked: (List<Uri>) -> Unit): ((Array<Stri
     return launch
 }
 
-private fun snippet(text: String, query: String): String {
-    val i = text.indexOf(query, ignoreCase = true)
-    if (i < 0) return text.take(120)
-    val start = (i - 40).coerceAtLeast(0)
-    return (if (start > 0) "…" else "") + text.substring(start, (i + query.length + 60).coerceAtMost(text.length))
-}
 
 /** A notebook: one page at a time with page navigation. */
 @Composable

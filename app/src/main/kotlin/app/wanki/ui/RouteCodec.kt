@@ -43,6 +43,7 @@ object RouteCodec {
         Route.Trash -> name("Trash")
         Route.Stats -> name("Stats")
         Route.WritingLab -> name("WritingLab")
+        is Route.Search -> name("Search", str(route.query))
     }
 
     /** The route for [s], or null when it is unknown or malformed. */
@@ -79,6 +80,7 @@ object RouteCodec {
             "Trash" -> Route.Trash
             "Stats" -> Route.Stats
             "WritingLab" -> Route.WritingLab
+            "Search" -> Route.Search(unStr(f[0]))
             else -> null
         }
     } catch (e: RuntimeException) {

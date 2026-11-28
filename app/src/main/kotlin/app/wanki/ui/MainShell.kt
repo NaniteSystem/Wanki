@@ -3,6 +3,8 @@ package app.wanki.ui
 import androidx.activity.compose.BackHandler
 import app.wanki.data.NotebookKind
 import app.wanki.data.PageSearchHit
+import app.wanki.search.SearchTarget
+import app.wanki.ui.search.SearchScreen
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -110,6 +112,8 @@ sealed interface Route {
     data object Settings : Route
     data object Stats : Route
     data object WritingLab : Route
+    /** The app-wide search; [query] is kept here so it is back after a result was opened. */
+    data class Search(val query: String = "") : Route
 }
 
 private data class Tab(val route: Route, @DrawableRes val icon: Int, val label: String)
@@ -145,6 +149,16 @@ class Navigator(initial: List<Route> = listOf(Route.Decks)) {
                 else -> Route.Notebook(hit.notebookId, hit.pageId, query?.trim()?.takeIf { it.isNotEmpty() })
             },
         )
+    }
+
+    /** Opens a result of the app-wide search; pages go where the notebooks' own search sends them. */
+    fun openSearchTarget(target: SearchTarget, query: String) {
+        when (target) {
+            is SearchTarget.Deck -> open(Route.Deck(target.id))
+            is SearchTarget.Card -> open(Route.CardEditor(target.id))
+            is SearchTarget.Text -> open(Route.TextDetail(target.id))
+            is SearchTarget.Page -> openSearchHit(target.hit, query)
+        }
     }
 
     companion object {
@@ -248,6 +262,7 @@ internal fun Content(nav: Navigator) {
             onPractice = { nav.open(Route.Practice()) },
             onCatalog = { nav.open(Route.Catalog) },
             onTexts = { nav.open(Route.Texts) },
+            onSearch = { nav.open(Route.Search()) },
         )
         Route.Texts -> TextsScreen(
             onBack = { nav.back() },
@@ -315,5 +330,11 @@ internal fun Content(nav: Navigator) {
         Route.Settings -> SettingsScreen(onOpenLab = { nav.open(Route.WritingLab) }, onOpenTrash = { nav.open(Route.Trash) })
         Route.Trash -> TrashScreen(onBack = { nav.back() })
         Route.WritingLab -> WritingTestScreen()
+        is Route.Search -> SearchScreen(
+            r.query,
+            onBack = { nav.back() },
+            onQuery = { q -> if (nav.current is Route.Search) nav.replaceTop(Route.Search(q)) },
+            onOpen = { hit, q -> nav.openSearchTarget(hit.target, q) },
+        )
     }
 }

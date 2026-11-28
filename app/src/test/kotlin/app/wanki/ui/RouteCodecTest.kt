@@ -20,6 +20,7 @@ class RouteCodecTest {
         Route.TextStudy(StudyRequest(StudyKind.MANZIL, null, listOf("a", "b"))),
         Route.TextStudy(StudyRequest(StudyKind.LEARN, "t1", emptyList())),
         Route.Settings, Route.Trash, Route.Stats, Route.WritingLab,
+        Route.Search(), Route.Search("кот"), Route.Search("a|b\\c"),
     )
 
     @Test
