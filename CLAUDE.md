@@ -14,7 +14,8 @@ Plan and decisions: `docs/PLAN.md` (Russian). The user writes in Russian.
   `HifzPlan` (sabaq/sabqi/manzil), `ScheduleSwitch`, `WeakPieces`, `TextLoad`; typing practice: `TypingText`
   (folding for comparison), `TypingMatcher` (incremental alignment of typed text to word units, rows banded to ±512
   reading chars), `PieceWords` (stored per-piece word lists, ja readings; number + counter tokens merged into one word),
-  `ReadingMarkup` (`{表記|よみ}`), `JapaneseNumbers`, `JapaneseReadings` (frequent words with two readings), `WordHistory`, `TypingScore`.
+  `ReadingMarkup` (`{表記|よみ}`), `JapaneseNumbers`, `JapaneseReadings` (frequent words with two readings), `WordHistory`, `TypingScore`;
+  `Copybook` (characters of a text/piece for «Прописи» and the run's tally).
 - `app` (Android, Compose, Room, androidx.ink, ML Kit Digital Ink / Language ID / Translate).
   Packages: `input` (canvas + touch handling), `data` (Room, `DeckTree` limits, `CardQuery` search,
   `Backup`), `recognition` (ML Kit, TTS `Speaker`), `review`, `practice` (weak-character queue and
@@ -47,7 +48,9 @@ classpath (see build.gradle.kts) so AGP and KGP share a classloader.
 - Daily limits follow Anki: a deck's limit caps its whole subtree, learning cards are unlimited; the
   card state before a review is logged (`cardState`) to count today's new/review cards.
 - Handwriting results are stored per character (`char_scores`); a character is "weak" when the
-  average beauty of its last 5 attempts is below 75. Practice never touches FSRS.
+  average beauty of its last 5 attempts is below 75. Practice never touches FSRS. «Прописи» of a text or piece
+  (`Route.Practice(textId, pieceId)`) run the same practice screen over its characters (unique, reading order, only
+  those with a stroke reference — Japanese for now); they feed `char_scores` like any practice, never the text's schedule.
 - Text practice (free recital, `StudyKind.PRACTICE`) never touches schedules: it is only logged.
 - A used hint (an opened cue word) means a recital is not clean: it cannot pass a cue level or count as
   a clean recall.

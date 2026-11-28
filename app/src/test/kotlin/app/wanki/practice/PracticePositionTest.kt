@@ -16,4 +16,12 @@ class PracticePositionTest {
         assertEquals(0 to 0, practicePosition(-1, 1, size = 3))
         assertEquals(0 to 0, practicePosition(4, 1, size = 0))
     }
+
+    @Test
+    fun copybookUsesTheBaseLanguageOfTheText() {
+        assertEquals("ja", copybookLanguage("ja"))
+        assertEquals("ja", copybookLanguage("ja-JP"))
+        assertEquals("zh", copybookLanguage("zh_Hant"))
+        assertEquals("ja", copybookLanguage("JA"))
+    }
 }
