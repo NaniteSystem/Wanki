@@ -6,7 +6,7 @@ Plan and decisions: `docs/PLAN.md` (Russian). The user writes in Russian.
 ## Modules
 - `core/scoring` (JVM) — handwriting scoring against KanjiVG: normalization, Hungarian stroke
   matching, style grouping (connected/broken strokes), metrics, look-alike check, beauty score.
-- `core/ink` (JVM) — stroke model, `InkCodec` binary format (v3), `SpatialGrid`, `InkAffine`, `StrokeEraser`, `StraightLine`, `LineKeys`,
+- `core/ink` (JVM) — stroke model, `InkCodec` binary format (v3), `SpatialGrid`, `LiveCache` (per-stroke cache that keeps only live strokes), `InkAffine`, `StrokeEraser`, `StraightLine`, `LineKeys`,
   `LineSegmenter`, pen `Gestures`.
 - `core/srs` (JVM) — FSRS-6 port of py-fsrs, verified against reference data in tests.
 - `core/texts` (JVM) — texts learned by heart: `PieceSplitter` (verse lines / prose sentences), `Words`,

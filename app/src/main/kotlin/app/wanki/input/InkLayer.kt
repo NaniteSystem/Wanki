@@ -14,17 +14,29 @@ import app.wanki.ink.InkCodec
 import app.wanki.ink.InkDrawing
 import app.wanki.ink.InkRect
 import app.wanki.ink.InkStroke
+import app.wanki.ink.LiveCache
 import app.wanki.ink.SpatialGrid
 import app.wanki.ink.StrokeEraser
 import java.util.IdentityHashMap
 
-/** A page's strokes with their bounds and grid, made by [InkLayer.prepare] off the main thread; adopt it once. */
+/**
+ * A page's strokes with their bounds and grid, made by [InkLayer.prepare] off the main thread; adopt it once. Its
+ * strokes may be converted for drawing ahead, on any thread ([offerConverted]); the layer that adopts it keeps those
+ * conversions only for strokes it still has.
+ */
 class LoadedInk internal constructor(
     val strokes: List<InkStroke>,
     internal val bounds: IdentityHashMap<InkStroke, InkRect?>,
     internal val grid: SpatialGrid<InkStroke>,
     internal val area: InkRect?,
-)
+    internal val render: LiveCache<InkStroke, Stroke?>,
+) {
+    /** Keeps [converted] for drawing [s], unless [s] is converted already or no longer in the layer (erased). Thread-safe. */
+    fun offerConverted(s: InkStroke, converted: Stroke): Boolean = render.offer(s, converted)
+
+    /** Whether converting [s] ahead is still of use: it is not converted yet and still in the layer. Thread-safe. */
+    fun wantsConversion(s: InkStroke): Boolean = !render.has(s) && render.isLive(s)
+}
 
 /**
  * The strokes of one canvas (world coordinates) with undo/redo. Renderable androidx.ink strokes
@@ -51,7 +63,11 @@ class InkLayer(initial: List<InkStroke> = emptyList()) {
     var strokesRev by mutableIntStateOf(0)
         private set
 
-    private val render = IdentityHashMap<InkStroke, Stroke?>() // guarded by itself: tiles convert off main
+    /**
+     * Strokes converted for drawing, kept only for strokes in [plain]: tiles and the page's read-ahead convert from older
+     * snapshots off main, and a conversion of a stroke erased meanwhile must not come back. Replaced by [adoptLoaded].
+     */
+    @Volatile private var render = LiveCache<InkStroke, Stroke?>().apply { reset(initial) }
     private val boundsCache = IdentityHashMap<InkStroke, InkRect?>()
     /** Replaced whole only by [adoptLoaded] (a grid built off the main thread). */
     private var grid = SpatialGrid<InkStroke>()
@@ -455,29 +471,14 @@ class InkLayer(initial: List<InkStroke> = emptyList()) {
 
     fun drawing() = InkDrawing(strokes.toList())
 
-    /** Strokes converted before the layer got them ([adoptConverted]), shared with the thread that converts them. */
-    @Volatile private var convertedAhead: MutableMap<InkStroke, Stroke>? = null
-
     /**
-     * Uses strokes converted elsewhere (a page's ink read ahead) instead of converting them again. [converted] may still
-     * be filling up on other threads: it must be a synchronized map, and what this layer converts itself goes into it
-     * too, so that converter skips those. Dropped by the next [replaceAll] or [adoptLoaded].
+     * The androidx.ink stroke for [s], converted once per stroke instance while [s] is in the layer (a stroke that is
+     * not, e.g. erased after a tile took its list, is converted but not kept). Thread-safe.
      */
-    fun adoptConverted(converted: MutableMap<InkStroke, Stroke>) {
-        convertedAhead = converted
-    }
-
-    /** The androidx.ink stroke for [s], converted once per stroke instance. Thread-safe. */
-    fun renderable(s: InkStroke): Stroke? {
-        synchronized(render) { if (render.containsKey(s)) return render[s] }
-        val ahead = convertedAhead
-        val made = ahead?.get(s) ?: StrokeConversion.toInk(s)?.also { ahead?.putIfAbsent(s, it) }
-        return synchronized(render) { if (render.containsKey(s)) render[s] else made.also { render[s] = it } }
-    }
+    fun renderable(s: InkStroke): Stroke? = render.getOrPut(s) { StrokeConversion.toInk(s) }
 
     /** Whether [s] is converted for drawing already (drawing it now costs no conversion). Thread-safe. */
-    fun isConverted(s: InkStroke): Boolean =
-        synchronized(render) { render.containsKey(s) } || convertedAhead?.containsKey(s) == true
+    fun isConverted(s: InkStroke): Boolean = render.has(s)
     fun bounds(s: InkStroke): InkRect? = boundsCache.getOrPut(s) { s.bounds() }
 
     /** Bounds computed off the main thread (a page's ink read ahead), so [replaceAll] need not compute them. Main thread. */
@@ -675,12 +676,10 @@ class InkLayer(initial: List<InkStroke> = emptyList()) {
         transforming = null
         transformingObjects = emptyList()
         liveTransform = null
-        convertedAhead = null
         resetStrokes(newStrokes)
         fixSelection()
         val live = java.util.Collections.newSetFromMap(IdentityHashMap<InkStroke, Boolean>()).apply { addAll(strokes) }
         synchronized(chunks) { chunks.keys.retainAll(live) }
-        synchronized(render) { render.keys.retainAll(live) }
         if (undoable) push(Edit.Replaced(before, newStrokes)) else {
             undoStack.clear(); redoStack.clear(); version++
         }
@@ -688,15 +687,16 @@ class InkLayer(initial: List<InkStroke> = emptyList()) {
 
     /**
      * A page's stored ink becomes the layer's, like `replaceAll(ink.strokes, undoable = false)`, but the stroke list,
-     * the bounds and the grid were built off the main thread ([prepare]): only the hand-over runs here. Main thread.
+     * the bounds and the grid were built off the main thread ([prepare]): only the hand-over runs here. The strokes
+     * converted ahead into [ink] ([LoadedInk.offerConverted]) are used from now on. Main thread.
      */
     fun adoptLoaded(ink: LoadedInk) {
         eraseBefore = null
         transforming = null
         transformingObjects = emptyList()
         liveTransform = null
-        convertedAhead = null
         val old = if (plain.isEmpty()) emptyList() else plain.toList()
+        render = ink.render
         boundsCache.putAll(ink.bounds)
         strokes.clear()
         strokes.addAll(ink.strokes)
@@ -711,7 +711,6 @@ class InkLayer(initial: List<InkStroke> = emptyList()) {
         if (old.isNotEmpty()) {
             val live = java.util.Collections.newSetFromMap(IdentityHashMap<InkStroke, Boolean>()).apply { addAll(plain) }
             synchronized(chunks) { chunks.keys.retainAll(live) }
-            synchronized(render) { render.keys.retainAll(live) }
         }
         undoStack.clear()
         redoStack.clear()
@@ -790,6 +789,7 @@ class InkLayer(initial: List<InkStroke> = emptyList()) {
     private fun insertAt(i: Int, s: InkStroke) {
         strokes.add(i, s)
         plain.add(i, s)
+        render.add(s)
         indexStroke(s)
         strokesRev++
         changed(s, appended = i == strokes.lastIndex)
@@ -799,6 +799,7 @@ class InkLayer(initial: List<InkStroke> = emptyList()) {
         if (i !in strokes.indices) return
         val s = strokes.removeAt(i)
         plain.removeAt(i)
+        render.remove(s)
         grid.remove(s)
         strokesRev++
         changed(s)
@@ -809,6 +810,8 @@ class InkLayer(initial: List<InkStroke> = emptyList()) {
         grid.remove(old)
         strokes[i] = s
         plain[i] = s
+        render.remove(old)
+        render.add(s)
         indexStroke(s)
         strokesRev++
         changed(old)
@@ -823,6 +826,7 @@ class InkLayer(initial: List<InkStroke> = emptyList()) {
         strokes.addAll(copy)
         plain.clear()
         plain.addAll(copy)
+        render.reset(copy)
         grid.clear()
         copy.forEach(::indexStroke)
         strokesRev++
@@ -876,7 +880,9 @@ class InkLayer(initial: List<InkStroke> = emptyList()) {
                 grid.insert(s, p)
                 l = minOf(l, p.left); t = minOf(t, p.top); r = maxOf(r, p.right); btm = maxOf(btm, p.bottom)
             }
-            return LoadedInk(ArrayList(strokes), b, grid, if (l <= r) InkRect(l, t, r, btm) else null)
+            // what the read-ahead converts goes in here, and the adopting layer drops the strokes it erases
+            val render = LiveCache<InkStroke, Stroke?>().apply { reset(strokes) }
+            return LoadedInk(ArrayList(strokes), b, grid, if (l <= r) InkRect(l, t, r, btm) else null, render)
         }
     }
 

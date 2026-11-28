@@ -58,8 +58,6 @@ import app.wanki.graph
 import app.wanki.ink.InkRect
 import app.wanki.ink.InkStroke
 import app.wanki.input.StrokeConversion
-import androidx.ink.strokes.Stroke
-import java.util.IdentityHashMap
 import kotlinx.coroutines.isActive
 import app.wanki.input.InkLayer
 import app.wanki.input.InkTiles
@@ -156,13 +154,12 @@ class PageUiState {
 }
 
 /**
- * A page's stored ink, read and decoded before its editor exists. [converted] fills up (on background threads) with
- * the strokes already converted for drawing, so the page's tiles need not convert them again.
+ * A page's stored ink, read and decoded before its editor exists. [prepared] fills up (on background threads) with
+ * the strokes already converted for drawing ([LoadedInk.offerConverted]), so the page's tiles need not convert them again.
  */
 class InkPreload(
     val pageId: String,
     val ink: InkLoad,
-    val converted: MutableMap<InkStroke, Stroke>,
     /** The strokes with their bounds and grid, built alongside the read (null when the ink is unreadable). */
     val prepared: LoadedInk?,
     /** [PageWrites.mark] taken before the read. */
@@ -225,11 +222,10 @@ fun CoroutineScope.preloadInk(graph: AppGraph, notebookId: String, pageOf: (List
             val mark = PageWrites.mark(page.id)
             val ink = graph.repository.loadInkResult(page.id)
             OpenTrace.mark("preload: ink decoded")
-            val converted = java.util.Collections.synchronizedMap(IdentityHashMap<InkStroke, Stroke>())
             // the strokes indexed first: the editor waits for that, not for the conversion
             val prepared = (ink as? InkLoad.Ok)?.let { InkLayer.prepare(it.strokes) }
             OpenTrace.mark("preload: prepared")
-            if (ink is InkLoad.Ok && ink.strokes.isNotEmpty()) {
+            if (prepared != null && ink is InkLoad.Ok && ink.strokes.isNotEmpty()) {
                 // the middle of the sheet first, where the tiles of a fitted page start
                 val sheet = PageGeometry.bounds(page.landscape)
                 val cx = (sheet.left + sheet.right) / 2
@@ -245,9 +241,11 @@ fun CoroutineScope.preloadInk(graph: AppGraph, notebookId: String, pageOf: (List
                     scope.launch(Dispatchers.Default + conversion) {
                         while (isActive) {
                             val s = queue.getOrNull(next.getAndIncrement()) ?: return@launch
-                            if (converted.containsKey(s)) continue // a tile converted it already
+                            // a tile converted it already, or it was erased since the editor took the ink (the
+                            // layer would not keep it: an erased stroke must not come back into its cache)
+                            if (!prepared.wantsConversion(s)) continue
                             try {
-                                StrokeConversion.toInk(s)?.let { converted.putIfAbsent(s, it) }
+                                StrokeConversion.toInk(s)?.let { prepared.offerConverted(s, it) }
                             } catch (e: CancellationException) {
                                 throw e
                             } catch (e: Throwable) {
@@ -258,7 +256,7 @@ fun CoroutineScope.preloadInk(graph: AppGraph, notebookId: String, pageOf: (List
                     }
                 }
             }
-            InkPreload(page.id, ink, converted, prepared, mark)
+            InkPreload(page.id, ink, prepared, mark)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Throwable) {
@@ -536,7 +534,6 @@ class PageEditorState(
             is InkLoad.Ok -> {
                 OpenTrace.mark("load: ink in hand")
                 OpenTrace.timed("load: adoptLoaded") { layer.adoptLoaded(prepared ?: InkLayer.prepare(ink.strokes)) }
-                ahead?.takeIf { it.prepared === prepared }?.let { layer.adoptConverted(it.converted) }
                 // encode the stroke chunks now, so the first save after an edit only encodes the new stroke; on a
                 // low-priority thread, so it does not slow the tiles of the page being opened
                 val encode = layer.snapshotEncoder()
