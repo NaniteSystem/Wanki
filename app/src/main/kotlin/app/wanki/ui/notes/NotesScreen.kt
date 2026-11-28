@@ -81,7 +81,12 @@ import app.wanki.ui.common.ScreenHeader
 import app.wanki.ui.common.drawTemplate
 import app.wanki.ui.common.finalSave
 import app.wanki.ui.common.rememberGuardedBack
+import app.wanki.ui.common.rememberUiScope
 import app.wanki.ui.common.ui
+import app.wanki.ui.texts.RecordKind
+import app.wanki.ui.texts.RecordRef
+import app.wanki.ui.texts.recordText
+import app.wanki.ui.texts.recordTextProblem
 import app.wanki.writing.WritingPaper
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -177,10 +182,12 @@ class BlockState(
  * can carry it (a restored screen then reopens the note instead of a blank one).
  */
 @Composable
-fun NoteEditorScreen(id: String?, onBack: () -> Unit, onCreated: (String) -> Unit = {}) {
+fun NoteEditorScreen(id: String?, onBack: () -> Unit, onCreated: (String) -> Unit = {}, onMemorize: (String) -> Unit = {}) {
     val context = LocalContext.current
     val graph = context.graph
     val undo = LocalUndo.current
+    val scope = rememberUiScope()
+    var memorizing by remember { mutableStateOf(false) }
     var note by remember { mutableStateOf<TextNoteEntity?>(null) }
     // the note is in the database: from then on an emptied note is saved empty, not skipped
     var stored by remember { mutableStateOf(false) }
@@ -243,6 +250,33 @@ fun NoteEditorScreen(id: String?, onBack: () -> Unit, onCreated: (String) -> Uni
             saver.request()
         }
     }
+    // «Учить наизусть»: the note's text (handwriting read now, so a line written a moment ago counts) goes to a new text
+    fun memorize() {
+        val n = note ?: return
+        if (memorizing) return
+        memorizing = true
+        scope.launch {
+            try {
+                var changed = false
+                for (b in blocks.toList()) {
+                    val l = b.layer?.takeIf { !it.isEmpty } ?: continue
+                    // a recognizer that fails (no model yet) leaves the stored text: it is still copied, or reported missing
+                    val r = runCatching { graph.textRecognition.recognize(l.strokes.toList(), AUTO_LANGUAGE) }.getOrNull() ?: continue
+                    if (r.text != b.recognizedText) { b.recognizedText = r.text; changed = true }
+                }
+                if (changed) changes.recognized()
+                // the editor reads the stored note
+                saver.request()
+                saver.flush()
+                if (saver.error.value != null) { undo.say("Заметка не сохранилась — сначала сохраните её"); return@launch }
+                val r = recordText(graph.repository, RecordRef(RecordKind.NOTE, n.id), hasInk = blocks.any { it.layer?.isEmpty == false })
+                val problem = recordTextProblem(r)
+                if (problem != null) undo.say(problem) else onMemorize(n.id)
+            } finally {
+                memorizing = false
+            }
+        }
+    }
     // leaving while saves fail asks first; leaving any other way still saves once more and reports a failure
     val back = rememberGuardedBack(saver, onBack)
     DisposableEffect(Unit) {
@@ -256,6 +290,7 @@ fun NoteEditorScreen(id: String?, onBack: () -> Unit, onCreated: (String) -> Uni
             ScreenHeader(
                 title.ifBlank { "Заметка" }, onBack = back,
                 menu = if (id == null) emptyList() else listOf(
+                    HeaderAction(R.drawable.ic_article, "Учить наизусть", "menu-memorize", enabled = !memorizing, onClick = ::memorize),
                     HeaderAction(R.drawable.ic_delete, "Удалить", "menu-delete") {
                         note = null
                         // a save still running must not bring the note back after it is deleted

@@ -80,6 +80,17 @@ internal class TextEditorState {
         pieces.associateTo(saved) { it.id to it.content }
     }
 
+    /**
+     * A new text filled from a record («Учить наизусть»): its title, the guessed way to split it and its text, split
+     * into pieces like a paste. It is unsaved: leaving asks first.
+     */
+    fun prefill(title: String, content: String, kind: TextKind) {
+        this.title = title
+        changeKind(kind)
+        editContent(content)
+        changed = true
+    }
+
     fun detected(code: String) { if (!languagePicked) { language = code; languageDetected = true } }
 
     fun pickLanguage(code: String) { language = code; languagePicked = true; changed = true }

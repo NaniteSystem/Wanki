@@ -43,6 +43,13 @@ import app.wanki.graph
 import app.wanki.ui.common.HeaderAction
 import app.wanki.ui.common.LocalUndo
 import app.wanki.ui.common.ScreenHeader
+import app.wanki.ui.common.rememberUiScope
+import app.wanki.ui.texts.RecordKind
+import app.wanki.ui.texts.RecordRef
+import app.wanki.ui.texts.recordText
+import app.wanki.ui.texts.recordTextProblem
+import android.util.Log
+import kotlinx.coroutines.launch
 import app.wanki.ui.notebooks.PageEditor
 import app.wanki.ui.notebooks.ExportDialog
 import app.wanki.ui.notebooks.rememberPageUi
@@ -140,7 +147,7 @@ fun DiaryScreen(onOpenDay: (Long) -> Unit) {
 }
 
 @Composable
-fun DiaryDayScreen(epochDay: Long, onBack: () -> Unit) {
+fun DiaryDayScreen(epochDay: Long, onBack: () -> Unit, onMemorize: (String) -> Unit = {}) {
     val graph = LocalContext.current.graph
     val date = LocalDate.ofEpochDay(epochDay)
     val loadedDiary by produceState<app.wanki.data.NotebookEntity?>(null) { value = ui { graph.repository.diary() } }
@@ -162,6 +169,27 @@ fun DiaryDayScreen(epochDay: Long, onBack: () -> Unit) {
     val undo = LocalUndo.current
     val state = remember(page.id) { PageEditorState(graph, diary, page, infinite = false, ui = pageUi) }
     var exporting by remember { mutableStateOf(false) }
+    val scope = rememberUiScope()
+    var memorizing by remember { mutableStateOf(false) }
+    // «Учить наизусть»: the day's text (handwriting read now, so a line written a moment ago counts) goes to a new text
+    fun memorize() {
+        if (memorizing || !state.loaded) return
+        memorizing = true
+        scope.launch {
+            try {
+                // the editor reads the stored page: its ink and text blocks, then the recognised lines
+                state.saver.request()
+                state.saver.flush()
+                if (state.saver.error.value != null) { undo.say("Запись не сохранилась — сначала сохраните её"); return@launch }
+                runCatching { state.recognizeIfDirty() }.onFailure { Log.e("Wanki", "diary ${page.id}: recognition failed", it) }
+                val r = recordText(graph.repository, RecordRef(RecordKind.DIARY, page.id), hasInk = !state.layer.isEmpty)
+                val problem = recordTextProblem(r)
+                if (problem != null) undo.say(problem) else onMemorize(page.id)
+            } finally {
+                memorizing = false
+            }
+        }
+    }
     PageEditor(
         state,
         title = "${date.dayOfMonth} ${date.month.getDisplayName(TextStyle.FULL, ru)} ${date.year}",
@@ -170,6 +198,7 @@ fun DiaryDayScreen(epochDay: Long, onBack: () -> Unit) {
         subtitle = date.dayOfWeek.getDisplayName(TextStyle.FULL, ru).replaceFirstChar { it.uppercase() },
         menu = listOf(
             state.paperAction(), state.fitAction(), state.textAction(),
+            HeaderAction(R.drawable.ic_article, "Учить наизусть", "menu-memorize", enabled = !memorizing, onClick = ::memorize),
             HeaderAction(R.drawable.ic_picture_as_pdf, "Экспорт в PDF", "menu-export-pdf") { exporting = true },
             HeaderAction(R.drawable.ic_delete, "Удалить запись", "menu-delete-day") {
                 undo.deleted(TrashKind.DIARY_DAY, page.id)
