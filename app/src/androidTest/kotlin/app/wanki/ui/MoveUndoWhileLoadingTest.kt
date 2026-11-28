@@ -7,7 +7,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.test.platform.app.InstrumentationRegistry
-import app.wanki.WankiTheme
+import app.wanki.ui.theme.WankiTheme
 import app.wanki.data.PageEntity
 import app.wanki.data.PageTemplate
 import app.wanki.graph
