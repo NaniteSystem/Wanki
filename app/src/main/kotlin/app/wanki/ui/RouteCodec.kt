@@ -20,7 +20,7 @@ object RouteCodec {
         Route.Browser -> name("Browser")
         Route.Catalog -> name("Catalog")
         is Route.CardEditor -> name("CardEditor", str(route.id))
-        is Route.Practice -> name("Practice", opt(route.glyph), str(route.language))
+        is Route.Practice -> name("Practice", opt(route.glyph), str(route.language), opt(route.textId), opt(route.pieceId))
         Route.Notebooks -> name("Notebooks")
         is Route.Notebook -> name("Notebook", str(route.id), opt(route.pageId), opt(route.highlight), opt(route.area))
         is Route.PageGrid -> name("PageGrid", str(route.notebookId))
@@ -55,7 +55,7 @@ object RouteCodec {
             "Browser" -> Route.Browser
             "Catalog" -> Route.Catalog
             "CardEditor" -> Route.CardEditor(unStr(f[0]))
-            "Practice" -> Route.Practice(unOpt(f[0]), unStr(f[1]))
+            "Practice" -> Route.Practice(unOpt(f[0]), unStr(f[1]), f.getOrNull(2)?.let(::unOpt), f.getOrNull(3)?.let(::unOpt))
             "Notebooks" -> Route.Notebooks
             "Notebook" -> Route.Notebook(unStr(f[0]), unOpt(f[1]), f.getOrNull(2)?.let(::unOpt), f.getOrNull(3)?.let(::unOpt))
             "PageGrid" -> Route.PageGrid(unStr(f[0]))

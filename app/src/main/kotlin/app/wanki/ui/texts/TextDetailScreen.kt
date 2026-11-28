@@ -47,6 +47,8 @@ import androidx.lifecycle.compose.LifecycleResumeEffect
 import app.wanki.data.TextEntity
 import app.wanki.data.TextPieceEntity
 import app.wanki.graph
+import app.wanki.practice.copybookLanguage
+import app.wanki.refs.ReferenceRepository
 import app.wanki.texts.TextSchedule
 import app.wanki.ui.common.ConfirmDialog
 import app.wanki.ui.common.HeaderAction
@@ -64,7 +66,11 @@ private fun status(p: TextPieceEntity, schedule: TextSchedule, now: Long) = when
 }
 
 @Composable
-fun TextDetailScreen(id: String, onBack: () -> Unit, onEdit: (String) -> Unit, onReadings: (String) -> Unit, onStudy: (StudyRequest) -> Unit) {
+fun TextDetailScreen(
+    id: String, onBack: () -> Unit, onEdit: (String) -> Unit, onReadings: (String) -> Unit, onStudy: (StudyRequest) -> Unit,
+    /** Copybook practice over the whole text (null) or one piece; never touches the text's schedule. */
+    onCopybook: (pieceId: String?) -> Unit,
+) {
     val graph = LocalContext.current.graph
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LifecycleResumeEffect(Unit) {
@@ -100,6 +106,8 @@ fun TextDetailScreen(id: String, onBack: () -> Unit, onEdit: (String) -> Unit, o
         }
         val schedule = scheduleOf(t.schedule)
         val onMark = { p: TextPieceEntity -> if (ps.any { it.learnedAt == null && it.pieceIndex <= p.pieceIndex }) marking = p }
+        // copybooks need stroke references, which only some languages have
+        val copybook = if (ps.isNotEmpty() && copybookLanguage(t.language) in ReferenceRepository.KANJIVG_LANGUAGES) onCopybook else null
         val summary = @Composable {
             Summary(
                 t, ps, portion.size,
@@ -108,6 +116,7 @@ fun TextDetailScreen(id: String, onBack: () -> Unit, onEdit: (String) -> Unit, o
                 onSwitch = { switching = true },
                 onLearn = if (portion.isNotEmpty()) ({ onStudy(StudyRequest(StudyKind.LEARN, id, portion)) }) else null,
                 onPractice = if (ps.isNotEmpty()) ({ onStudy(StudyRequest(StudyKind.PRACTICE, id, ps.map { it.id })) }) else null,
+                onCopybook = copybook?.let { open -> { open(null) } },
             )
         }
         BoxWithConstraints(Modifier.fillMaxSize().testTag("text-detail")) {
@@ -115,7 +124,7 @@ fun TextDetailScreen(id: String, onBack: () -> Unit, onEdit: (String) -> Unit, o
                 Row(Modifier.fillMaxSize().padding(horizontal = 24.dp), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
                     Column(Modifier.width(360.dp).verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) { summary() }
                     LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        pieceItems(ps, t, schedule, now, weak, onMark)
+                        pieceItems(ps, t, schedule, now, weak, onMark, copybook)
                     }
                 }
             } else {
@@ -125,7 +134,7 @@ fun TextDetailScreen(id: String, onBack: () -> Unit, onEdit: (String) -> Unit, o
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     item { Column(Modifier.padding(bottom = 8.dp)) { summary() } }
-                    pieceItems(ps, t, schedule, now, weak, onMark)
+                    pieceItems(ps, t, schedule, now, weak, onMark, copybook)
                 }
             }
         }
@@ -188,7 +197,7 @@ fun TextDetailScreen(id: String, onBack: () -> Unit, onEdit: (String) -> Unit, o
 @Composable
 private fun Summary(
     t: TextEntity, pieces: List<TextPieceEntity>, portion: Int, onEdit: () -> Unit, onPause: () -> Unit, onSwitch: () -> Unit,
-    onLearn: (() -> Unit)?, onPractice: (() -> Unit)?,
+    onLearn: (() -> Unit)?, onPractice: (() -> Unit)?, onCopybook: (() -> Unit)?,
 ) {
     val learned = pieces.count { it.learnedAt != null }
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -213,6 +222,7 @@ private fun Summary(
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             if (onLearn != null) Button(onClick = onLearn, modifier = Modifier.testTag("learn-portion")) { Text("Учить порцию") }
             if (onPractice != null) OutlinedButton(onClick = onPractice) { Text("Рассказать весь текст") }
+            if (onCopybook != null) OutlinedButton(onClick = onCopybook, modifier = Modifier.testTag("text-copybook")) { Text("Прописи") }
         }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             OutlinedButton(onClick = onEdit) { Text("Изменить") }
@@ -220,7 +230,8 @@ private fun Summary(
             OutlinedButton(onClick = onSwitch) { Text("Расписание: FSRS ↔ Сабак·сабки·манзиль") }
         }
         Text(
-            "Долгое нажатие на кусок — отметить выученным всё до этого места.",
+            "Долгое нажатие на кусок — отметить выученным всё до этого места." +
+                if (onCopybook != null) " Нажатие — прописи этого куска." else "",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -229,20 +240,28 @@ private fun Summary(
 
 private fun LazyListScope.pieceItems(
     pieces: List<TextPieceEntity>, t: TextEntity, schedule: TextSchedule, now: Long, weak: Set<String>, onMark: (TextPieceEntity) -> Unit,
+    onCopybook: ((String?) -> Unit)?,
 ) {
-    items(pieces, key = { it.id }) { p -> PieceRow(p, t.language, status(p, schedule, now), p.id in weak) { onMark(p) } }
+    items(pieces, key = { it.id }) { p ->
+        PieceRow(p, t.language, status(p, schedule, now), p.id in weak, onCopybook?.let { open -> { open(p.id) } }) { onMark(p) }
+    }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun PieceRow(p: TextPieceEntity, language: String, status: PieceStatus, weak: Boolean, onLongPress: () -> Unit) {
+private fun PieceRow(
+    p: TextPieceEntity, language: String, status: PieceStatus, weak: Boolean, onCopybook: (() -> Unit)?, onLongPress: () -> Unit,
+) {
     val colors = if (weak) CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer) else CardDefaults.cardColors()
     Card(colors = colors, modifier = Modifier.fillMaxWidth()) {
         // the whole row is mirrored for RTL, so the number stands where the line starts
         Directional(language) {
             Row(
                 Modifier.clip(CardDefaults.shape)
-                    .combinedClickable(onClick = {}, onLongClick = onLongPress, onLongClickLabel = "Отметить выученным до этого места")
+                    .combinedClickable(
+                        onClick = onCopybook ?: {}, onClickLabel = if (onCopybook != null) "Прописи этого куска" else null,
+                        onLongClick = onLongPress, onLongClickLabel = "Отметить выученным до этого места",
+                    )
                     .padding(start = 8.dp, end = 12.dp, top = 12.dp, bottom = 12.dp),
                 verticalAlignment = Alignment.Top,
             ) {

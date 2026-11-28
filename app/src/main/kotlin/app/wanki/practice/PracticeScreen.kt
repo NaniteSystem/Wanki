@@ -35,12 +35,14 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.wanki.AppGraph
 import app.wanki.graph
 import app.wanki.input.InkLayer
 import app.wanki.input.InkSurface
 import app.wanki.input.ToolSelection
 import app.wanki.review.CellGrade
 import app.wanki.scoring.BeautyResult
+import app.wanki.texts.Copybook
 import app.wanki.ui.common.ScreenHeader
 import app.wanki.ui.common.rememberUiScope
 import app.wanki.ui.common.ui
@@ -52,29 +54,36 @@ import app.wanki.writing.WritingPaper
 import app.wanki.writing.drawReference
 import app.wanki.writing.drawReview
 import app.wanki.writing.drawTianzige
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** Rounds per character: the first traces over the reference, the others are from memory. */
 private const val ROUNDS = 3
 
 /**
- * Handwriting practice: the weak-character queue, or one character ([glyph]). Each character
+ * Handwriting practice: the weak-character queue, one character ([glyph]), or a copybook («Прописи»)
+ * over the characters of text [textId] (its piece [pieceId] only, when given). Each character
  * is traced once and then written twice from memory; the scores from memory feed the queue.
- * Practice never touches card schedules.
+ * Practice never touches card or text schedules.
  */
 @Composable
-fun PracticeScreen(glyph: String?, language: String, onBack: () -> Unit) {
+fun PracticeScreen(glyph: String?, language: String, textId: String?, pieceId: String?, onBack: () -> Unit) {
     val graph = LocalContext.current.graph
     val scope = rememberUiScope()
     val queue = remember { mutableStateListOf<CharQuality>() }
     var loaded by remember { mutableStateOf(false) }
     var index by rememberSaveable { mutableIntStateOf(0) }
     var round by rememberSaveable { mutableIntStateOf(0) }
-    LaunchedEffect(glyph) {
+    val copybook = textId != null
+    LaunchedEffect(glyph, textId, pieceId) {
         ui {
-            val items = if (glyph != null) listOf(CharQuality(glyph, language, 0.0, 0, 0))
-            else graph.repository.charQuality().filter { it.weak }
+            val items = when {
+                textId != null -> copybookQueue(graph, textId, pieceId)
+                glyph != null -> listOf(CharQuality(glyph, language, 0.0, 0, 0))
+                else -> graph.repository.charQuality().filter { it.weak }
+            }
             queue.clear()
             queue.addAll(items.filter { graph.references.get(it.glyph, it.language) != null })
             // a restored position may point past the rebuilt queue
@@ -91,16 +100,20 @@ fun PracticeScreen(glyph: String?, language: String, onBack: () -> Unit) {
 
     Column(Modifier.fillMaxSize()) {
         ScreenHeader(
-            "Тренировка почерка", onBack = onBack,
+            if (copybook) "Прописи" else "Тренировка почерка", onBack = onBack,
             subtitle = current?.let { "знак ${index + 1} из ${queue.size} · попытка ${round + 1} из $ROUNDS" },
         )
         when {
             !loaded -> Unit
             queue.isEmpty() -> Message(
-                if (glyph != null) "Для «$glyph» нет эталона черт." else "Тренировать пока нечего: почерк всех знаков в норме (75 и выше).",
+                when {
+                    copybook -> "Для знаков этого текста нет эталона черт — прописи пока есть только для японских знаков."
+                    glyph != null -> "Для «$glyph» нет эталона черт."
+                    else -> "Тренировать пока нечего: почерк всех знаков в норме (75 и выше)."
+                },
                 onBack,
             )
-            current == null -> Summary(best, onBack)
+            current == null -> Summary(best, queue.size, copybook, onBack)
             else -> {
                 val ref = graph.references.get(current.glyph, current.language) ?: return@Column
                 val density = LocalDensity.current
@@ -223,15 +236,51 @@ private fun Message(text: String, onBack: () -> Unit) {
 }
 
 @Composable
-private fun Summary(best: List<Pair<String, Double?>>, onBack: () -> Unit) {
-    Column(Modifier.fillMaxSize().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-        Text("Тренировка закончена", style = MaterialTheme.typography.headlineSmall)
+private fun Summary(best: List<Pair<String, Double?>>, total: Int, copybook: Boolean, onBack: () -> Unit) {
+    // a whole text can have many characters: the list scrolls under the tally
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
+    ) {
+        Text(if (copybook) "Прописи закончены" else "Тренировка закончена", style = MaterialTheme.typography.headlineSmall)
         Spacer(Modifier.height(12.dp))
+        if (copybook) {
+            val t = Copybook.tally(best.map { it.second }, total, WeakChars.THRESHOLD)
+            Text(
+                buildList {
+                    add("хорошо: ${t.good}")
+                    add("подтянуть: ${t.weak}")
+                    add("не засчитано: ${t.failed}")
+                    if (t.skipped > 0) add("пропущено: ${t.skipped}")
+                }.joinToString(" · ", prefix = "Знаков ${t.total}: "),
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.testTag("copybook-tally"),
+            )
+            Spacer(Modifier.height(12.dp))
+        }
         best.forEach { (g, b) -> Text("$g — " + (b?.let { "почерк %.0f".format(it) } ?: "не засчитано"), style = MaterialTheme.typography.bodyLarge) }
         Spacer(Modifier.height(16.dp))
         Button(onClick = onBack) { Text("Готово") }
     }
 }
+
+/**
+ * The copybook queue of text [textId] (or its piece [pieceId]): its characters with stroke references, in reading
+ * order, each with its handwriting history. Reference files are read off the main thread.
+ */
+private suspend fun copybookQueue(graph: AppGraph, textId: String, pieceId: String?): List<CharQuality> {
+    val text = graph.texts.text(textId) ?: return emptyList()
+    val language = copybookLanguage(text.language)
+    val pieces = if (pieceId != null) graph.texts.piecesByIds(listOf(pieceId)) else graph.texts.pieces(textId)
+    val chars = withContext(Dispatchers.IO) {
+        Copybook.chars(pieces.map { it.content }) { graph.references.get(it, language) != null }
+    }
+    val known = graph.repository.charQuality().filter { it.language == language }.associateBy { it.glyph }
+    return chars.map { known[it] ?: CharQuality(it, language, 0.0, 0, 0) }
+}
+
+/** The reference language of a text language tag (`ja-JP` → `ja`). */
+internal fun copybookLanguage(textLanguage: String): String = textLanguage.substringBefore('-').substringBefore('_').lowercase()
 
 /**
  * Character and attempt to continue at in a queue of [size] (the queue is rebuilt after process death and

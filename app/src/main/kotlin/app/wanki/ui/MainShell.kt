@@ -78,8 +78,13 @@ sealed interface Route {
     data object Browser : Route
     data object Catalog : Route
     data class CardEditor(val id: String) : Route
-    /** Handwriting practice: the weak-character queue, or one [glyph]. */
-    data class Practice(val glyph: String? = null, val language: String = "ja") : Route
+    /**
+     * Handwriting practice: the weak-character queue, or one [glyph], or a copybook («Прописи») over the characters
+     * of text [textId] — only its piece [pieceId] when given; the text's own language is used then.
+     */
+    data class Practice(
+        val glyph: String? = null, val language: String = "ja", val textId: String? = null, val pieceId: String? = null,
+    ) : Route
     data object Notebooks : Route
     /**
      * [highlight]: a search query; the lines of [pageId] that contain it are marked when the page opens.
@@ -260,6 +265,7 @@ internal fun Content(nav: Navigator) {
             onEdit = { nav.open(Route.TextEditor(it)) },
             onReadings = { nav.open(Route.TextReadings(it)) },
             onStudy = { nav.open(Route.TextStudy(it)) },
+            onCopybook = { pieceId -> nav.open(Route.Practice(textId = r.id, pieceId = pieceId)) },
         )
         is Route.TextReadings -> TextReadingsScreen(r.id, onBack = { nav.back() })
         is Route.TextStudy -> StudyScreen(r.request, onClose = { nav.back() })
@@ -277,7 +283,7 @@ internal fun Content(nav: Navigator) {
         is Route.Review -> ReviewScreen(r.deckId, onClose = { nav.back() }, onOpenSource = nav::open)
         Route.Browser -> BrowserScreen(onBack = { nav.back() }, onOpenCard = { nav.open(Route.CardEditor(it)) })
         is Route.CardEditor -> CardEditorScreen(r.id, onBack = { nav.back() }, onPractice = { g, lang -> nav.open(Route.Practice(g, lang)) }, onOpenSource = nav::open)
-        is Route.Practice -> PracticeScreen(r.glyph, r.language, onBack = { nav.back() })
+        is Route.Practice -> PracticeScreen(r.glyph, r.language, r.textId, r.pieceId, onBack = { nav.back() })
         Route.Notebooks -> NotebooksScreen(onOpen = { id, page -> nav.open(Route.Notebook(id, page)) }, onOpenHit = { hit, q -> nav.openSearchHit(hit, q) })
         is Route.Notebook -> NotebookScreen(
             r.id, r.pageId, onBack = { nav.back() }, highlight = r.highlight, area = r.area,
