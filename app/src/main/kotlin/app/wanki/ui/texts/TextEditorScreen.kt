@@ -41,6 +41,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import app.wanki.data.TextEntity
 import app.wanki.graph
+import app.wanki.texts.RecordText
 import app.wanki.texts.TextKind
 import app.wanki.texts.TextLoad
 import app.wanki.texts.TextSchedule
@@ -52,15 +53,22 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @Composable
-fun TextEditorScreen(id: String?, onBack: () -> Unit, onSaved: (String) -> Unit) {
+fun TextEditorScreen(id: String?, onBack: () -> Unit, onSaved: (String) -> Unit, from: RecordRef? = null) {
     val graph = LocalContext.current.graph
-    val state = remember(id) { TextEditorState() }
+    val state = remember(id, from) { TextEditorState() }
     var original by remember(id) { mutableStateOf<TextEntity?>(null) }
-    var loaded by remember(id) { mutableStateOf(id == null) }
+    var loaded by remember(id, from) { mutableStateOf(id == null && from == null) }
     var saving by remember { mutableStateOf(false) }
     var leaving by remember { mutableStateOf(false) }
-    LaunchedEffect(id) {
-        if (id == null) return@LaunchedEffect
+    LaunchedEffect(id, from) {
+        if (id == null) {
+            // «Учить наизусть»: the record's text is copied once; the new text keeps no link to it
+            if (from == null) return@LaunchedEffect
+            val r = ui { recordText(graph.repository, from) }
+            if (r is RecordText.Ready) state.prefill(r.title, r.content, r.kind)
+            loaded = true
+            return@LaunchedEffect
+        }
         val t = ui { graph.texts.text(id) }
         if (t != null) state.load(t, ui { graph.texts.pieces(id) })
         original = t
@@ -101,7 +109,15 @@ fun TextEditorScreen(id: String?, onBack: () -> Unit, onSaved: (String) -> Unit)
 
     BackHandler(enabled = state.changed) { leaving = true }
     Column(Modifier.fillMaxSize()) {
-        ScreenHeader(if (id == null) "Новый текст" else "Изменить текст", onBack = { if (state.changed) leaving = true else onBack() }) {
+        ScreenHeader(
+            if (id == null) "Новый текст" else "Изменить текст",
+            onBack = { if (state.changed) leaving = true else onBack() },
+            subtitle = when (from?.kind) {
+                RecordKind.NOTE -> "Из заметки — разбейте на куски и сохраните"
+                RecordKind.DIARY -> "Из дневника — разбейте на куски и сохраните"
+                null -> null
+            }.takeIf { id == null },
+        ) {
             Button(
                 onClick = ::save,
                 enabled = loaded && !saving && state.canSave,

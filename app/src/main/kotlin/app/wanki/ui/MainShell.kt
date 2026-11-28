@@ -62,6 +62,8 @@ import app.wanki.ui.review.ReviewScreen
 import app.wanki.ui.settings.SettingsScreen
 import app.wanki.ui.settings.TrashScreen
 import app.wanki.ui.stats.StatsScreen
+import app.wanki.ui.texts.RecordKind
+import app.wanki.ui.texts.RecordRef
 import app.wanki.ui.texts.StudyRequest
 import app.wanki.ui.texts.StudyScreen
 import app.wanki.ui.texts.TextDetailScreen
@@ -100,8 +102,8 @@ sealed interface Route {
     data object Boards : Route
     data class Board(val id: String) : Route
     data object Texts : Route
-    /** [id] null = a new text. */
-    data class TextEditor(val id: String?) : Route
+    /** [id] null = a new text; [from] fills a new one with a note's or diary day's text («Учить наизусть»). */
+    data class TextEditor(val id: String?, val from: RecordRef? = null) : Route
     data class TextDetail(val id: String) : Route
     data class TextReadings(val id: String) : Route
     data class TextStudy(val request: StudyRequest) : Route
@@ -255,6 +257,7 @@ internal fun Content(nav: Navigator) {
         )
         is Route.TextEditor -> TextEditorScreen(
             r.id,
+            from = r.from,
             onBack = { nav.back() },
             // a new text replaces the editor with its detail screen; an edited one returns to it
             onSaved = { id -> nav.back(); if (r.id == null) nav.open(Route.TextDetail(id)) },
@@ -298,9 +301,15 @@ internal fun Content(nav: Navigator) {
             onOpen = { page -> nav.back(); nav.replaceTop(Route.Notebook(r.notebookId, page)) },
         )
         Route.Notes -> NotesScreen(onOpen = { nav.open(Route.Note(it)) })
-        is Route.Note -> NoteEditorScreen(r.id, onBack = { nav.back() }, onCreated = { nav.replaceTop(Route.Note(it)) })
+        is Route.Note -> NoteEditorScreen(
+            r.id, onBack = { nav.back() }, onCreated = { nav.replaceTop(Route.Note(it)) },
+            onMemorize = { nav.open(Route.TextEditor(null, RecordRef(RecordKind.NOTE, it))) },
+        )
         Route.Diary -> DiaryScreen(onOpenDay = { nav.open(Route.DiaryDay(it)) })
-        is Route.DiaryDay -> DiaryDayScreen(r.epochDay, onBack = { nav.back() })
+        is Route.DiaryDay -> DiaryDayScreen(
+            r.epochDay, onBack = { nav.back() },
+            onMemorize = { nav.open(Route.TextEditor(null, RecordRef(RecordKind.DIARY, it))) },
+        )
         Route.Boards -> BoardsScreen(onOpen = { nav.open(Route.Board(it)) })
         is Route.Board -> BoardScreen(r.id, onBack = { nav.back() })
         Route.Settings -> SettingsScreen(onOpenLab = { nav.open(Route.WritingLab) }, onOpenTrash = { nav.open(Route.Trash) })

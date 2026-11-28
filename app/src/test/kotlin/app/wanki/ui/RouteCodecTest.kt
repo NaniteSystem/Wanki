@@ -1,5 +1,7 @@
 package app.wanki.ui
 
+import app.wanki.ui.texts.RecordKind
+import app.wanki.ui.texts.RecordRef
 import app.wanki.ui.texts.StudyKind
 import app.wanki.ui.texts.StudyRequest
 import kotlin.test.Test
@@ -13,7 +15,8 @@ class RouteCodecTest {
         Route.Practice(null, "ja", "t1"), Route.Practice(null, "ja", "t|1", "p,2"),
         Route.Notebooks, Route.Notebook("n1", "p2"), Route.Notebook("n1", null), Route.Notebook("n1", "p2", "ёж|1,\\"), Route.Notebook("n1", null, "x"), Route.PageGrid("n1"), Route.PageGrid("a|b"),
         Route.Notes, Route.Note("x1"), Route.Note(null), Route.Diary, Route.DiaryDay(20_000L), Route.Boards, Route.Board("b1"),
-        Route.Texts, Route.TextEditor("t1"), Route.TextEditor(null), Route.TextDetail("t1"), Route.TextReadings("x"), Route.TextReadings("a|b"),
+        Route.Texts, Route.TextEditor("t1"), Route.TextEditor(null), Route.TextEditor(null, RecordRef(RecordKind.NOTE, "n|1")),
+        Route.TextEditor(null, RecordRef(RecordKind.DIARY, "p1")), Route.TextDetail("t1"), Route.TextReadings("x"), Route.TextReadings("a|b"),
         Route.TextStudy(StudyRequest(StudyKind.MANZIL, null, listOf("a", "b"))),
         Route.TextStudy(StudyRequest(StudyKind.LEARN, "t1", emptyList())),
         Route.Settings, Route.Trash, Route.Stats, Route.WritingLab,
@@ -27,6 +30,12 @@ class RouteCodecTest {
     @Test
     fun oldPracticeRouteWithoutTextStillDecodes() {
         assertEquals(Route.Practice("字", "ja"), RouteCodec.decode("Practice|=字|ja"))
+    }
+
+    @Test
+    fun oldTextEditorRouteWithoutRecordStillDecodes() {
+        assertEquals(Route.TextEditor(null), RouteCodec.decode("TextEditor|"))
+        assertEquals(Route.TextEditor("t1"), RouteCodec.decode("TextEditor|=t1"))
     }
 
     @Test

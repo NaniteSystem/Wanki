@@ -42,6 +42,30 @@ class TextEditorStateTest {
     }
 
     @Test
+    fun prefillFromARecordSplitsItAsNewPieces() {
+        val s = TextEditorState()
+        s.prefill("Из заметки", "Первое предложение. Второе предложение.\nТретье", TextKind.PROSE)
+        assertEquals("Из заметки", s.title)
+        assertEquals(TextKind.PROSE, s.kind)
+        assertEquals(TextEditorState.defaultPortion(TextKind.PROSE), s.portion)
+        assertEquals(
+            listOf(EditedPiece(null, "Первое предложение.", ""), EditedPiece(null, "Второе предложение.", ""), EditedPiece(null, "Третье", "")),
+            s.pieces(),
+        )
+        // unsaved: leaving asks first, and the language still follows the text
+        assertTrue(s.changed)
+        assertFalse(s.languagePicked)
+    }
+
+    @Test
+    fun prefilledPoemWithBlankTitleIsNamedByItsFirstLine() {
+        val s = TextEditorState()
+        s.prefill("", "Строка один\nСтрока два", TextKind.POEM)
+        assertEquals(listOf("Строка один", "Строка два"), s.pieces().map { it.content })
+        assertEquals("Строка один", s.resolvedTitle())
+    }
+
+    @Test
     fun joinKeepsThePreviousPieceAndBothNotes() {
         val s = loaded()
         s.joinWithPrevious(1)

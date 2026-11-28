@@ -1,5 +1,7 @@
 package app.wanki.ui
 
+import app.wanki.ui.texts.RecordKind
+import app.wanki.ui.texts.RecordRef
 import app.wanki.ui.texts.StudyKind
 import app.wanki.ui.texts.StudyRequest
 
@@ -31,7 +33,7 @@ object RouteCodec {
         Route.Boards -> name("Boards")
         is Route.Board -> name("Board", str(route.id))
         Route.Texts -> name("Texts")
-        is Route.TextEditor -> name("TextEditor", opt(route.id))
+        is Route.TextEditor -> name("TextEditor", opt(route.id), opt(route.from?.kind?.name), opt(route.from?.id))
         is Route.TextDetail -> name("TextDetail", str(route.id))
         is Route.TextReadings -> name("TextReadings", str(route.id))
         is Route.TextStudy -> name(
@@ -66,7 +68,10 @@ object RouteCodec {
             "Boards" -> Route.Boards
             "Board" -> Route.Board(unStr(f[0]))
             "Texts" -> Route.Texts
-            "TextEditor" -> Route.TextEditor(unOpt(f[0]))
+            "TextEditor" -> Route.TextEditor(
+                unOpt(f[0]),
+                f.getOrNull(1)?.let(::unOpt)?.let { kind -> RecordRef(RecordKind.valueOf(kind), unOpt(f[2])!!) },
+            )
             "TextDetail" -> Route.TextDetail(unStr(f[0]))
             "TextReadings" -> Route.TextReadings(unStr(f[0]))
             "TextStudy" -> Route.TextStudy(StudyRequest(StudyKind.valueOf(f[0]), unOpt(f[1]), unList(f[2])))
