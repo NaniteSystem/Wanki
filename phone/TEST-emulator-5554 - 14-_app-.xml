@@ -1,0 +1,593 @@
+<?xml version='1.0' encoding='UTF-8' ?>
+<testsuites tests="255" failures="10" errors="0" skipped="0" time="838.506" timestamp="2026-11-28T04:58:03" hostname="localhost">
+  <testsuite name="app.wanki.NoteEditorTest" tests="3" failures="0" errors="0" skipped="0" time="15.963" timestamp="2026-11-28T04:58:03" hostname="localhost">
+    <properties>
+      <property name="device" value="emulator-5554 - 14" />
+      <property name="flavor" value="" />
+      <property name="project" value=":app" />
+    </properties>
+    <testcase name="deleteFromEditorOffersUndo" classname="app.wanki.NoteEditorTest" time="6.901" />
+    <testcase name="newNoteSurvivesRecreate" classname="app.wanki.NoteEditorTest" time="5.224" />
+    <testcase name="emptiedStoredNoteIsSaved" classname="app.wanki.NoteEditorTest" time="3.838" />
+  </testsuite>
+  <testsuite name="app.wanki.RecreateTest" tests="3" failures="0" errors="0" skipped="0" time="15.33" timestamp="2026-11-28T04:58:03" hostname="localhost">
+    <properties>
+      <property name="device" value="emulator-5554 - 14" />
+      <property name="flavor" value="" />
+      <property name="project" value=":app" />
+    </properties>
+    <testcase name="textPanelStaysOpenWhenPageTurns" classname="app.wanki.RecreateTest" time="6.756" />
+    <testcase name="notebookPageSurvivesRecreate" classname="app.wanki.RecreateTest" time="4.521" />
+    <testcase name="addPageWorksAtPhoneWidth" classname="app.wanki.RecreateTest" time="4.053" />
+  </testsuite>
+  <testsuite name="app.wanki.SmokeTest" tests="1" failures="1" errors="0" skipped="0" time="20.578" timestamp="2026-11-28T04:58:03" hostname="localhost">
+    <properties>
+      <property name="device" value="emulator-5554 - 14" />
+      <property name="flavor" value="" />
+      <property name="project" value=":app" />
+    </properties>
+    <testcase name="walkThroughAllSections" classname="app.wanki.SmokeTest" time="20.578">
+      <failure>java.lang.AssertionError: Failed to inject touch input.
+Reason: Expected exactly '1' node but could not find any node that satisfies: (Text + InputText + EditableText contains '1 класс' (ignoreCase: false))
+However, the unmerged tree contains '1' node that matches. Are you missing `useUnmergedNode = true` in your finder?
+
+at androidx.compose.ui.test.SemanticsNodeInteraction.fetchOneOrThrow(SemanticsNodeInteraction.kt:178)
+at androidx.compose.ui.test.SemanticsNodeInteraction.fetchOneOrThrow$default(SemanticsNodeInteraction.kt:150)
+at androidx.compose.ui.test.SemanticsNodeInteraction.fetchSemanticsNode(SemanticsNodeInteraction.kt:84)
+at androidx.compose.ui.test.ActionsKt.performTouchInput(Actions.kt:402)
+at androidx.compose.ui.test.AndroidActions.performClickImpl(Actions.android.kt:23)
+at androidx.compose.ui.test.ActionsKt.performClick(Actions.kt:60)
+at app.wanki.SmokeTest.walkThroughAllSections(SmokeTest.kt:402)
+</failure>
+    </testcase>
+  </testsuite>
+  <testsuite name="app.wanki.data.MigrationTest" tests="9" failures="0" errors="0" skipped="0" time="2.962" timestamp="2026-11-28T04:58:03" hostname="localhost">
+    <properties>
+      <property name="device" value="emulator-5554 - 14" />
+      <property name="flavor" value="" />
+      <property name="project" value=":app" />
+    </properties>
+    <testcase name="migrate7To8AddsTypingTables" classname="app.wanki.data.MigrationTest" time="1.467" />
+    <testcase name="migrate5To6AddsTexts" classname="app.wanki.data.MigrationTest" time="0.228" />
+    <testcase name="migrate10To11AddsSourceRefs" classname="app.wanki.data.MigrationTest" time="0.254" />
+    <testcase name="migrate3To4AddsCatalogColumns" classname="app.wanki.data.MigrationTest" time="0.152" />
+    <testcase name="migrate9To10AddsObjectsLinesAndBackground" classname="app.wanki.data.MigrationTest" time="0.227" />
+    <testcase name="migrate2To3KeepsDataAndFillsCharScores" classname="app.wanki.data.MigrationTest" time="0.152" />
+    <testcase name="migrate6To7AddsPageView" classname="app.wanki.data.MigrationTest" time="0.153" />
+    <testcase name="migrate4To5AddsNoteTypes" classname="app.wanki.data.MigrationTest" time="0.127" />
+    <testcase name="migrate8To9AddsTrashPinAndPageSettings" classname="app.wanki.data.MigrationTest" time="0.202" />
+  </testsuite>
+  <testsuite name="app.wanki.data.RepositoryTest" tests="66" failures="0" errors="0" skipped="0" time="10.181" timestamp="2026-11-28T04:58:03" hostname="localhost">
+    <properties>
+      <property name="device" value="emulator-5554 - 14" />
+      <property name="flavor" value="" />
+      <property name="project" value=":app" />
+    </properties>
+    <testcase name="duplicatePageInsertsAfter" classname="app.wanki.data.RepositoryTest" time="0.077" />
+    <testcase name="saveOnRemovedDayPageDoesNotDuplicateTheDate" classname="app.wanki.data.RepositoryTest" time="0.076" />
+    <testcase name="searchFindsByFieldTagAndCase" classname="app.wanki.data.RepositoryTest" time="0.078" />
+    <testcase name="movedStrokesFitInsideTarget" classname="app.wanki.data.RepositoryTest" time="0.077" />
+    <testcase name="inkRowOverCursorWindowReadsBack" classname="app.wanki.data.RepositoryTest" time="5.453" />
+    <testcase name="undecodableInkIsUnreadable" classname="app.wanki.data.RepositoryTest" time="0.102" />
+    <testcase name="diaryDayWithOnlyAnObjectIsTaken" classname="app.wanki.data.RepositoryTest" time="0.153" />
+    <testcase name="restoreSummaryCountsByKind" classname="app.wanki.data.RepositoryTest" time="0.153" />
+    <testcase name="installingFromTheCatalogBuildsThePathAndIsIdempotent" classname="app.wanki.data.RepositoryTest" time="0.08" />
+    <testcase name="restoreDiaryDayOverEmptyDay" classname="app.wanki.data.RepositoryTest" time="0.103" />
+    <testcase name="purgeRemovesObjectsAndLines" classname="app.wanki.data.RepositoryTest" time="0.155" />
+    <testcase name="takeBackRemovesOnlyMoved" classname="app.wanki.data.RepositoryTest" time="0.153" />
+    <testcase name="openedDiaryDayIsNotMarked" classname="app.wanki.data.RepositoryTest" time="0.027" />
+    <testcase name="firstInkSaveStoresAnUnsavedDiaryPage" classname="app.wanki.data.RepositoryTest" time="0.052" />
+    <testcase name="mediaGcKeepsTrashedReferences" classname="app.wanki.data.RepositoryTest" time="0.077" />
+    <testcase name="setLineCorrectionNullResets" classname="app.wanki.data.RepositoryTest" time="0.056" />
+    <testcase name="mediaGcKeepsNewFilesAndReportsFailedDeletes" classname="app.wanki.data.RepositoryTest" time="0.028" />
+    <testcase name="duplicatePageCopiesObjectsAndLines" classname="app.wanki.data.RepositoryTest" time="0.052" />
+    <testcase name="hasContentCountsNotebookInk" classname="app.wanki.data.RepositoryTest" time="0.053" />
+    <testcase name="maskDeleteSuspendsLinkedCard" classname="app.wanki.data.RepositoryTest" time="0.052" />
+    <testcase name="insertPagesKeepsDenseIndices" classname="app.wanki.data.RepositoryTest" time="0.052" />
+    <testcase name="saveInkBlobNullDeletesRow" classname="app.wanki.data.RepositoryTest" time="0.053" />
+    <testcase name="deleteOpenNotebookThenRestore" classname="app.wanki.data.RepositoryTest" time="0.077" />
+    <testcase name="restoreDiaryDayRestoresItsDay" classname="app.wanki.data.RepositoryTest" time="0.103" />
+    <testcase name="editingKeepsScheduleAndMovesCards" classname="app.wanki.data.RepositoryTest" time="0.077" />
+    <testcase name="purgeOfLiveItemsChangesNothing" classname="app.wanki.data.RepositoryTest" time="0.154" />
+    <testcase name="saveInkBlobRoundTrip" classname="app.wanki.data.RepositoryTest" time="0.027" />
+    <testcase name="movePageKeepsDenseIndices" classname="app.wanki.data.RepositoryTest" time="0.102" />
+    <testcase name="deletingLastPageIsRefused" classname="app.wanki.data.RepositoryTest" time="0.051" />
+    <testcase name="saveLinesWithNoLinesClearsText" classname="app.wanki.data.RepositoryTest" time="0.079" />
+    <testcase name="moveToPageIsAtomic" classname="app.wanki.data.RepositoryTest" time="0.102" />
+    <testcase name="answeringNewCardsUsesUpTheDailyLimit" classname="app.wanki.data.RepositoryTest" time="0.077" />
+    <testcase name="purgeExpiredRemovesOnlyOld" classname="app.wanki.data.RepositoryTest" time="0.153" />
+    <testcase name="duplicateNotebookIsDeepCopy" classname="app.wanki.data.RepositoryTest" time="0.101" />
+    <testcase name="pageOrderOperationsRefuseTheDiary" classname="app.wanki.data.RepositoryTest" time="0.077" />
+    <testcase name="oneOffCardIsNotSuspended" classname="app.wanki.data.RepositoryTest" time="0.077" />
+    <testcase name="saveLinesKeepsGivenSearchText" classname="app.wanki.data.RepositoryTest" time="0.077" />
+    <testcase name="moveToPageAppendsAndRemoves" classname="app.wanki.data.RepositoryTest" time="0.102" />
+    <testcase name="restoreIsIdempotent" classname="app.wanki.data.RepositoryTest" time="0.053" />
+    <testcase name="emptiedDiaryDayIsNotMarked" classname="app.wanki.data.RepositoryTest" time="0.08" />
+    <testcase name="searchHitHasKind" classname="app.wanki.data.RepositoryTest" time="0.027" />
+    <testcase name="duplicateNoteCopiesBlocks" classname="app.wanki.data.RepositoryTest" time="0.052" />
+    <testcase name="handwritingScoresAreStoredPerCharacterAndUndone" classname="app.wanki.data.RepositoryTest" time="0.052" />
+    <testcase name="suspendedAndBuriedCardsAreNotStudied" classname="app.wanki.data.RepositoryTest" time="0.052" />
+    <testcase name="restoreDiaryDayOverWrittenDayThrows" classname="app.wanki.data.RepositoryTest" time="0.052" />
+    <testcase name="updatingKeepsSchedulesEditsAndDeletions" classname="app.wanki.data.RepositoryTest" time="0.127" />
+    <testcase name="insertPageUsesNotebookDefaults" classname="app.wanki.data.RepositoryTest" time="0.052" />
+    <testcase name="saveLinesWritesJoinedText" classname="app.wanki.data.RepositoryTest" time="0.028" />
+    <testcase name="duplicatePageDoesNotShareMaskRefs" classname="app.wanki.data.RepositoryTest" time="0.077" />
+    <testcase name="linesSavedBeforeInkAreSearchableOnceInkExists" classname="app.wanki.data.RepositoryTest" time="0.052" />
+    <testcase name="restorePageRestoresNotebook" classname="app.wanki.data.RepositoryTest" time="0.127" />
+    <testcase name="pageViewSurvivesInkSaveAndTemplateChange" classname="app.wanki.data.RepositoryTest" time="0.052" />
+    <testcase name="addCardFromSourceStoresRef" classname="app.wanki.data.RepositoryTest" time="0.055" />
+    <testcase name="setPageBackgroundStoresAndClears" classname="app.wanki.data.RepositoryTest" time="0.051" />
+    <testcase name="moveToPageCarriesObjects" classname="app.wanki.data.RepositoryTest" time="0.077" />
+    <testcase name="searchFiltersKind" classname="app.wanki.data.RepositoryTest" time="0.053" />
+    <testcase name="purgePageDetachesRefs" classname="app.wanki.data.RepositoryTest" time="0.077" />
+    <testcase name="maskBackUnsuspends" classname="app.wanki.data.RepositoryTest" time="0.077" />
+    <testcase name="saveLinesWithoutInkRowReportsTextNotStored" classname="app.wanki.data.RepositoryTest" time="0.027" />
+    <testcase name="newCardLimitsApplyThroughSubdecks" classname="app.wanki.data.RepositoryTest" time="0.051" />
+    <testcase name="pinningAndRenaming" classname="app.wanki.data.RepositoryTest" time="0.051" />
+    <testcase name="pageObjectsRoundTrip" classname="app.wanki.data.RepositoryTest" time="0.027" />
+    <testcase name="hasContentCountsNotes" classname="app.wanki.data.RepositoryTest" time="0.001" />
+    <testcase name="emptyInkCleanupDeletesOnlyDecodableEmptyRows" classname="app.wanki.data.RepositoryTest" time="0.051" />
+    <testcase name="deckPathsAreReusedAndDeletingRemovesTheSubtree" classname="app.wanki.data.RepositoryTest" time="0.026" />
+    <testcase name="movedMaskKeepsItsCard" classname="app.wanki.data.RepositoryTest" time="0.076" />
+  </testsuite>
+  <testsuite name="app.wanki.data.TextRepositoryTest" tests="30" failures="0" errors="0" skipped="0" time="1.121" timestamp="2026-11-28T04:58:03" hostname="localhost">
+    <properties>
+      <property name="device" value="emulator-5554 - 14" />
+      <property name="flavor" value="" />
+      <property name="project" value=":app" />
+    </properties>
+    <testcase name="backupRunsWithOnlyTexts" classname="app.wanki.data.TextRepositoryTest" time="0.026" />
+    <testcase name="typedReviewLogsTypedMode" classname="app.wanki.data.TextRepositoryTest" time="0.026" />
+    <testcase name="missingWordsAreBackfilled" classname="app.wanki.data.TextRepositoryTest" time="0.027" />
+    <testcase name="splitPieceKeepsHistoryAcrossSwitch" classname="app.wanki.data.TextRepositoryTest" time="0.052" />
+    <testcase name="setReadingsNullsWordsOfPieceEditedMeanwhile" classname="app.wanki.data.TextRepositoryTest" time="0.052" />
+    <testcase name="contentRoundTripsVerbatim" classname="app.wanki.data.TextRepositoryTest" time="0.027" />
+    <testcase name="joinAndSplitKeepSchedule" classname="app.wanki.data.TextRepositoryTest" time="0.052" />
+    <testcase name="hifzToFsrsReplaysOnlyRatedLogs" classname="app.wanki.data.TextRepositoryTest" time="0.026" />
+    <testcase name="setReadingsRecomputesAndResets" classname="app.wanki.data.TextRepositoryTest" time="0.052" />
+    <testcase name="practiceDoesNotMoveSchedule" classname="app.wanki.data.TextRepositoryTest" time="0.051" />
+    <testcase name="wordsStoredOnCreate" classname="app.wanki.data.TextRepositoryTest" time="0.026" />
+    <testcase name="saveTextCreatesANewTextInOneCall" classname="app.wanki.data.TextRepositoryTest" time="0.052" />
+    <testcase name="fsrsToHifzUsesRecency" classname="app.wanki.data.TextRepositoryTest" time="0.027" />
+    <testcase name="draftRoundTrip" classname="app.wanki.data.TextRepositoryTest" time="0.026" />
+    <testcase name="sabqiSubmittedTwiceTheSameDayCountsOnce" classname="app.wanki.data.TextRepositoryTest" time="0.051" />
+    <testcase name="hifzSabqiThenManzil" classname="app.wanki.data.TextRepositoryTest" time="0.052" />
+    <testcase name="switchingTwiceKeepsHistory" classname="app.wanki.data.TextRepositoryTest" time="0.052" />
+    <testcase name="saveTextKeepsReadingsSetMeanwhile" classname="app.wanki.data.TextRepositoryTest" time="0.026" />
+    <testcase name="languageChangeRecomputesAllPieces" classname="app.wanki.data.TextRepositoryTest" time="0.051" />
+    <testcase name="createTextRejectsEmpty" classname="app.wanki.data.TextRepositoryTest" time="0.001" />
+    <testcase name="languageChangeWithoutPiecesClearsWords" classname="app.wanki.data.TextRepositoryTest" time="0.027" />
+    <testcase name="markLearnedHifzGoesStraightToManzil" classname="app.wanki.data.TextRepositoryTest" time="0.027" />
+    <testcase name="manzilSubmittedTwiceTheSameDayCountsOnce" classname="app.wanki.data.TextRepositoryTest" time="0.051" />
+    <testcase name="editKeepsHistoryOfUnchangedPieces" classname="app.wanki.data.TextRepositoryTest" time="0.027" />
+    <testcase name="manzilPointerAdvances" classname="app.wanki.data.TextRepositoryTest" time="0.052" />
+    <testcase name="typedReviewWithWrongWordsLogsError" classname="app.wanki.data.TextRepositoryTest" time="0.026" />
+    <testcase name="weakPiecesCountWordHistory" classname="app.wanki.data.TextRepositoryTest" time="0.051" />
+    <testcase name="portionThenReviewByFsrs" classname="app.wanki.data.TextRepositoryTest" time="0.027" />
+    <testcase name="checkModeIsWrittenByEveryCompletion" classname="app.wanki.data.TextRepositoryTest" time="0.052" />
+    <testcase name="backfillDoesNotOverwriteFreshWords" classname="app.wanki.data.TextRepositoryTest" time="0.026" />
+  </testsuite>
+  <testsuite name="app.wanki.export.PdfExportTest" tests="7" failures="0" errors="0" skipped="0" time="2.216" timestamp="2026-11-28T04:58:03" hostname="localhost">
+    <properties>
+      <property name="device" value="emulator-5554 - 14" />
+      <property name="flavor" value="" />
+      <property name="project" value=":app" />
+    </properties>
+    <testcase name="wholeNotebookPageCount" classname="app.wanki.export.PdfExportTest" time="0.252" />
+    <testcase name="threeThousandStrokesUnderLimit" classname="app.wanki.export.PdfExportTest" time="1.532" />
+    <testcase name="a5Size" classname="app.wanki.export.PdfExportTest" time="0.152" />
+    <testcase name="shareIntentGrantsRead" classname="app.wanki.export.PdfExportTest" time="0.026" />
+    <testcase name="unreadableInkStillExportsThePaper" classname="app.wanki.export.PdfExportTest" time="0.102" />
+    <testcase name="endlessSplits" classname="app.wanki.export.PdfExportTest" time="0.051" />
+    <testcase name="inkOnlyPageIsVector" classname="app.wanki.export.PdfExportTest" time="0.101" />
+  </testsuite>
+  <testsuite name="app.wanki.importer.AnkiImportTest" tests="2" failures="0" errors="0" skipped="0" time="0.304" timestamp="2026-11-28T04:58:03" hostname="localhost">
+    <properties>
+      <property name="device" value="emulator-5554 - 14" />
+      <property name="flavor" value="" />
+      <property name="project" value=":app" />
+    </properties>
+    <testcase name="currentPackageWithZstdAndProtobuf" classname="app.wanki.importer.AnkiImportTest" time="0.127" />
+    <testcase name="legacyPackageKeepsTemplatesScheduleLimitsAndMedia" classname="app.wanki.importer.AnkiImportTest" time="0.177" />
+  </testsuite>
+  <testsuite name="app.wanki.importer.PageImportTest" tests="6" failures="0" errors="0" skipped="0" time="0.961" timestamp="2026-11-28T04:58:03" hostname="localhost">
+    <properties>
+      <property name="device" value="emulator-5554 - 14" />
+      <property name="flavor" value="" />
+      <property name="project" value=":app" />
+    </properties>
+    <testcase name="importPdfAddsPagesWithBackgrounds" classname="app.wanki.importer.PageImportTest" time="0.051" />
+    <testcase name="capAt300" classname="app.wanki.importer.PageImportTest" time="0.604" />
+    <testcase name="backgroundRenders" classname="app.wanki.importer.PageImportTest" time="0.051" />
+    <testcase name="backgroundCacheKeepsOneSizePerPage" classname="app.wanki.importer.PageImportTest" time="0.076" />
+    <testcase name="badInputsAddNothing" classname="app.wanki.importer.PageImportTest" time="0.127" />
+    <testcase name="importImages" classname="app.wanki.importer.PageImportTest" time="0.052" />
+  </testsuite>
+  <testsuite name="app.wanki.media.PictureImportTest" tests="4" failures="0" errors="0" skipped="0" time="0.657" timestamp="2026-11-28T04:58:03" hostname="localhost">
+    <properties>
+      <property name="device" value="emulator-5554 - 14" />
+      <property name="flavor" value="" />
+      <property name="project" value=":app" />
+    </properties>
+    <testcase name="hugeJpegIsDownscaled" classname="app.wanki.media.PictureImportTest" time="0.629" />
+    <testcase name="justImportedPictureSurvivesMediaCleanup" classname="app.wanki.media.PictureImportTest" time="0.001" />
+    <testcase name="textFileIsNotAPicture" classname="app.wanki.media.PictureImportTest" time="0.026" />
+    <testcase name="pngWithAlphaStaysPng" classname="app.wanki.media.PictureImportTest" time="0.001" />
+  </testsuite>
+  <testsuite name="app.wanki.texts.KuromojiOnDeviceTest" tests="1" failures="0" errors="0" skipped="0" time="2.008" timestamp="2026-11-28T04:58:03" hostname="localhost">
+    <properties>
+      <property name="device" value="emulator-5554 - 14" />
+      <property name="flavor" value="" />
+      <property name="project" value=":app" />
+    </properties>
+    <testcase name="loadsDictionary" classname="app.wanki.texts.KuromojiOnDeviceTest" time="2.008" />
+  </testsuite>
+  <testsuite name="app.wanki.texts.TextReadingsTest" tests="1" failures="0" errors="0" skipped="0" time="5.18" timestamp="2026-11-28T04:58:03" hostname="localhost">
+    <properties>
+      <property name="device" value="emulator-5554 - 14" />
+      <property name="flavor" value="" />
+      <property name="project" value=":app" />
+    </properties>
+    <testcase name="editReading" classname="app.wanki.texts.TextReadingsTest" time="5.18" />
+  </testsuite>
+  <testsuite name="app.wanki.texts.TextWordsTest" tests="2" failures="0" errors="0" skipped="0" time="0.711" timestamp="2026-11-28T04:58:03" hostname="localhost">
+    <properties>
+      <property name="device" value="emulator-5554 - 14" />
+      <property name="flavor" value="" />
+      <property name="project" value=":app" />
+    </properties>
+    <testcase name="russianUsesSpaces" classname="app.wanki.texts.TextWordsTest" time="0.001" />
+    <testcase name="japaneseIsSplitIntoWords" classname="app.wanki.texts.TextWordsTest" time="0.71" />
+  </testsuite>
+  <testsuite name="app.wanki.texts.TypingScreenTest" tests="7" failures="0" errors="0" skipped="0" time="37.441" timestamp="2026-11-28T04:58:03" hostname="localhost">
+    <properties>
+      <property name="device" value="emulator-5554 - 14" />
+      <property name="flavor" value="" />
+      <property name="project" value=":app" />
+    </properties>
+    <testcase name="typoShowsWrongWord" classname="app.wanki.texts.TypingScreenTest" time="4.826" />
+    <testcase name="arabicWordNodesFollowTheText" classname="app.wanki.texts.TypingScreenTest" time="5.143" />
+    <testcase name="draftSurvivesRecreate" classname="app.wanki.texts.TypingScreenTest" time="5.725" />
+    <testcase name="reviewTypedRatingApplied" classname="app.wanki.texts.TypingScreenTest" time="4.576" />
+    <testcase name="typePieceCleanly" classname="app.wanki.texts.TypingScreenTest" time="4.009" />
+    <testcase name="fitsPhone" classname="app.wanki.texts.TypingScreenTest" time="6.307" />
+    <testcase name="rotationKeepsTypingMode" classname="app.wanki.texts.TypingScreenTest" time="6.855" />
+  </testsuite>
+  <testsuite name="app.wanki.ui.CanvasPerfTest" tests="8" failures="2" errors="0" skipped="0" time="72.306" timestamp="2026-11-28T04:58:03" hostname="localhost">
+    <properties>
+      <property name="device" value="emulator-5554 - 14" />
+      <property name="flavor" value="" />
+      <property name="project" value=":app" />
+    </properties>
+    <testcase name="openPageShowsInkQuickly" classname="app.wanki.ui.CanvasPerfTest" time="4.964">
+      <failure>java.lang.AssertionError: page open took 2947 ms
+at org.junit.Assert.fail(Assert.java:89)
+at org.junit.Assert.assertTrue(Assert.java:42)
+at app.wanki.ui.CanvasPerfTest.openAndMeasure(CanvasPerfTest.kt:144)
+at app.wanki.ui.CanvasPerfTest.openPageShowsInkQuickly(CanvasPerfTest.kt:124)
+</failure>
+    </testcase>
+    <testcase name="eraserWholeStepIsCheap" classname="app.wanki.ui.CanvasPerfTest" time="9.583" />
+    <testcase name="newStrokeShowsWithinOneFrameBudget" classname="app.wanki.ui.CanvasPerfTest" time="7.311" />
+    <testcase name="panFramesStayFast" classname="app.wanki.ui.CanvasPerfTest" time="12.372">
+      <failure>java.lang.AssertionError: pan app work p90 21.959051 ms
+at org.junit.Assert.fail(Assert.java:89)
+at org.junit.Assert.assertTrue(Assert.java:42)
+at app.wanki.ui.CanvasPerfTest.panFramesStayFast(CanvasPerfTest.kt:156)
+</failure>
+    </testcase>
+    <testcase name="eraserStepIsCheap" classname="app.wanki.ui.CanvasPerfTest" time="11.277" />
+    <testcase name="panEmptyPageReference" classname="app.wanki.ui.CanvasPerfTest" time="9.34" />
+    <testcase name="undoAfterEraseIsLogged" classname="app.wanki.ui.CanvasPerfTest" time="10.808" />
+    <testcase name="saveAfterOneStrokeIsCheap" classname="app.wanki.ui.CanvasPerfTest" time="6.651" />
+  </testsuite>
+  <testsuite name="app.wanki.ui.CardFromSelectionTest" tests="4" failures="0" errors="0" skipped="0" time="51.182" timestamp="2026-11-28T04:58:03" hostname="localhost">
+    <properties>
+      <property name="device" value="emulator-5554 - 14" />
+      <property name="flavor" value="" />
+      <property name="project" value=":app" />
+    </properties>
+    <testcase name="cardKeepsPageAndBounds" classname="app.wanki.ui.CardFromSelectionTest" time="15.362" />
+    <testcase name="addMoreUsesCurrentSelection" classname="app.wanki.ui.CardFromSelectionTest" time="14.467" />
+    <testcase name="textDialogSeedsEditedText" classname="app.wanki.ui.CardFromSelectionTest" time="11.571" />
+    <testcase name="uncheckedPictureIsNotAttached" classname="app.wanki.ui.CardFromSelectionTest" time="9.782" />
+  </testsuite>
+  <testsuite name="app.wanki.ui.EraserTest" tests="3" failures="0" errors="0" skipped="0" time="26.821" timestamp="2026-11-28T04:58:03" hostname="localhost">
+    <properties>
+      <property name="device" value="emulator-5554 - 14" />
+      <property name="flavor" value="" />
+      <property name="project" value=":app" />
+    </properties>
+    <testcase name="partialEraseSplitsStroke" classname="app.wanki.ui.EraserTest" time="10.307" />
+    <testcase name="eraserPopupChoosesModeAndSize" classname="app.wanki.ui.EraserTest" time="7.64" />
+    <testcase name="wholeEraseRemovesTheStroke" classname="app.wanki.ui.EraserTest" time="8.874" />
+  </testsuite>
+  <testsuite name="app.wanki.ui.GuardedBackTest" tests="3" failures="0" errors="0" skipped="0" time="10.016" timestamp="2026-11-28T04:58:03" hostname="localhost">
+    <properties>
+      <property name="device" value="emulator-5554 - 14" />
+      <property name="flavor" value="" />
+      <property name="project" value=":app" />
+    </properties>
+    <testcase name="backDuringFirstFailingSaveAsks" classname="app.wanki.ui.GuardedBackTest" time="3.51" />
+    <testcase name="backDuringSucceedingSaveLeavesAfterIt" classname="app.wanki.ui.GuardedBackTest" time="2.657" />
+    <testcase name="questionClosesWhenALaterSaveSucceeds" classname="app.wanki.ui.GuardedBackTest" time="3.849" />
+  </testsuite>
+  <testsuite name="app.wanki.ui.InkTilesTest" tests="2" failures="0" errors="0" skipped="0" time="28.257" timestamp="2026-11-28T04:58:03" hostname="localhost">
+    <properties>
+      <property name="device" value="emulator-5554 - 14" />
+      <property name="flavor" value="" />
+      <property name="project" value=":app" />
+    </properties>
+    <testcase name="undoAndEraseLeaveNoStaleInk" classname="app.wanki.ui.InkTilesTest" time="19.36" />
+    <testcase name="panAndZoomShowTheSameInk" classname="app.wanki.ui.InkTilesTest" time="8.897" />
+  </testsuite>
+  <testsuite name="app.wanki.ui.LassoTest" tests="6" failures="0" errors="0" skipped="0" time="41.738" timestamp="2026-11-28T04:58:03" hostname="localhost">
+    <properties>
+      <property name="device" value="emulator-5554 - 14" />
+      <property name="flavor" value="" />
+      <property name="project" value=":app" />
+    </properties>
+    <testcase name="customGrey" classname="app.wanki.ui.LassoTest" time="6.449" />
+    <testcase name="offEdgePrompt" classname="app.wanki.ui.LassoTest" time="7.571" />
+    <testcase name="scaleHandleDrag" classname="app.wanki.ui.LassoTest" time="5.361" />
+    <testcase name="moveToNewPageWithUndo" classname="app.wanki.ui.LassoTest" time="8.187" />
+    <testcase name="recolorFromMenu" classname="app.wanki.ui.LassoTest" time="6.403" />
+    <testcase name="copyPasteOnAnotherPage" classname="app.wanki.ui.LassoTest" time="7.767" />
+  </testsuite>
+  <testsuite name="app.wanki.ui.ListsTest" tests="7" failures="0" errors="0" skipped="0" time="28.644" timestamp="2026-11-28T04:58:03" hostname="localhost">
+    <properties>
+      <property name="device" value="emulator-5554 - 14" />
+      <property name="flavor" value="" />
+      <property name="project" value=":app" />
+    </properties>
+    <testcase name="renameFromMenu" classname="app.wanki.ui.ListsTest" time="4.988" />
+    <testcase name="pinMovesToTop" classname="app.wanki.ui.ListsTest" time="3.509" />
+    <testcase name="notebookMenuHasSettings" classname="app.wanki.ui.ListsTest" time="4.236" />
+    <testcase name="deleteShowsUndoAndRestores" classname="app.wanki.ui.ListsTest" time="3.899" />
+    <testcase name="emptyListHasOneNewButton" classname="app.wanki.ui.ListsTest" time="3.581" />
+    <testcase name="sortByTitlePersists" classname="app.wanki.ui.ListsTest" time="4.258" />
+    <testcase name="duplicateAddsCopy" classname="app.wanki.ui.ListsTest" time="4.173" />
+  </testsuite>
+  <testsuite name="app.wanki.ui.MaskCardsTest" tests="4" failures="0" errors="0" skipped="0" time="14.104" timestamp="2026-11-28T04:58:03" hostname="localhost">
+    <properties>
+      <property name="device" value="emulator-5554 - 14" />
+      <property name="flavor" value="" />
+      <property name="project" value=":app" />
+    </properties>
+    <testcase name="reviewShowsClosedThenOpenAndFollowsEdits" classname="app.wanki.ui.MaskCardsTest" time="3.225" />
+    <testcase name="maskCardWithPurgedPageShowsPlaceholder" classname="app.wanki.ui.MaskCardsTest" time="2.455" />
+    <testcase name="maskBelowThumbnailCutIsCropped" classname="app.wanki.ui.MaskCardsTest" time="2.28" />
+    <testcase name="cardsFromTapeOncePerMask" classname="app.wanki.ui.MaskCardsTest" time="6.144" />
+  </testsuite>
+  <testsuite name="app.wanki.ui.MaskToolTest" tests="3" failures="0" errors="0" skipped="0" time="18.662" timestamp="2026-11-28T04:58:03" hostname="localhost">
+    <properties>
+      <property name="device" value="emulator-5554 - 14" />
+      <property name="flavor" value="" />
+      <property name="project" value=":app" />
+    </properties>
+    <testcase name="masksSurviveReopenClosed" classname="app.wanki.ui.MaskToolTest" time="6.212" />
+    <testcase name="tapeHidesInkAndOpens" classname="app.wanki.ui.MaskToolTest" time="7.667" />
+    <testcase name="undoMaskDeleteRestoresCard" classname="app.wanki.ui.MaskToolTest" time="4.783" />
+  </testsuite>
+  <testsuite name="app.wanki.ui.MoveUndoWhileLoadingTest" tests="1" failures="0" errors="0" skipped="0" time="9.502" timestamp="2026-11-28T04:58:03" hostname="localhost">
+    <properties>
+      <property name="device" value="emulator-5554 - 14" />
+      <property name="flavor" value="" />
+      <property name="project" value=":app" />
+    </properties>
+    <testcase name="undoWhileSourceLoadsKeepsStrokesOnce" classname="app.wanki.ui.MoveUndoWhileLoadingTest" time="9.502" />
+  </testsuite>
+  <testsuite name="app.wanki.ui.MultiTouchTest" tests="2" failures="2" errors="0" skipped="0" time="25.952" timestamp="2026-11-28T04:58:03" hostname="localhost">
+    <properties>
+      <property name="device" value="emulator-5554 - 14" />
+      <property name="flavor" value="" />
+      <property name="project" value=":app" />
+    </properties>
+    <testcase name="twoFingerTapUndoesAndThreeFingerTapRedoes" classname="app.wanki.ui.MultiTouchTest" time="12.188">
+      <failure>androidx.compose.ui.test.ComposeTimeoutException: Condition still not satisfied after 5000 ms
+at androidx.compose.ui.test.AndroidComposeUiTestEnvironment$AndroidComposeUiTestImpl.waitUntil(ComposeUiTest.android.kt:809)
+at androidx.compose.ui.test.junit4.AndroidComposeTestRule.waitUntil(AndroidComposeTestRule.android.kt:378)
+at app.wanki.ui.MultiTouchTest.twoFingerTapUndoesAndThreeFingerTapRedoes(MultiTouchTest.kt:114)
+</failure>
+    </testcase>
+    <testcase name="twoFingerDragPansWithoutDrawing" classname="app.wanki.ui.MultiTouchTest" time="13.764">
+      <failure>androidx.compose.ui.test.ComposeTimeoutException: Condition still not satisfied after 10000 ms
+at androidx.compose.ui.test.AndroidComposeUiTestEnvironment$AndroidComposeUiTestImpl.waitUntil(ComposeUiTest.android.kt:809)
+at androidx.compose.ui.test.junit4.AndroidComposeTestRule.waitUntil(AndroidComposeTestRule.android.kt:378)
+at app.wanki.ui.MultiTouchTest.twoFingerDragPansWithoutDrawing(MultiTouchTest.kt:148)
+</failure>
+    </testcase>
+  </testsuite>
+  <testsuite name="app.wanki.ui.NotebookSettingsTest" tests="4" failures="0" errors="0" skipped="0" time="35.533" timestamp="2026-11-28T04:58:03" hostname="localhost">
+    <properties>
+      <property name="device" value="emulator-5554 - 14" />
+      <property name="flavor" value="" />
+      <property name="project" value=":app" />
+    </properties>
+    <testcase name="landscapeNewPages" classname="app.wanki.ui.NotebookSettingsTest" time="7.838" />
+    <testcase name="languageChangeKeepsFreshInk" classname="app.wanki.ui.NotebookSettingsTest" time="12.104" />
+    <testcase name="changeLanguageAndPaper" classname="app.wanki.ui.NotebookSettingsTest" time="8.478" />
+    <testcase name="toggleCurrentPageOrientation" classname="app.wanki.ui.NotebookSettingsTest" time="7.113" />
+  </testsuite>
+  <testsuite name="app.wanki.ui.PageEditorStateTest" tests="6" failures="0" errors="0" skipped="0" time="1.569" timestamp="2026-11-28T04:58:03" hostname="localhost">
+    <properties>
+      <property name="device" value="emulator-5554 - 14" />
+      <property name="flavor" value="" />
+      <property name="project" value=":app" />
+    </properties>
+    <testcase name="viewSavedAfterPan" classname="app.wanki.ui.PageEditorStateTest" time="1.361" />
+    <testcase name="readableInkIsSavedIncrementally" classname="app.wanki.ui.PageEditorStateTest" time="0.028" />
+    <testcase name="preloadOfAnotherPageIsDroppedAndStopsConverting" classname="app.wanki.ui.PageEditorStateTest" time="0.077" />
+    <testcase name="preloadWhoseReadFailsLeavesTheScreenWorkingAndTheEditorReads" classname="app.wanki.ui.PageEditorStateTest" time="0.026" />
+    <testcase name="saveDuringEraseDragThenCancelStoresRestoredStrokes" classname="app.wanki.ui.PageEditorStateTest" time="0.051" />
+    <testcase name="unreadableInkIsNeverOverwritten" classname="app.wanki.ui.PageEditorStateTest" time="0.026" />
+  </testsuite>
+  <testsuite name="app.wanki.ui.PageGridTest" tests="7" failures="0" errors="0" skipped="0" time="34.909" timestamp="2026-11-28T04:58:03" hostname="localhost">
+    <properties>
+      <property name="device" value="emulator-5554 - 14" />
+      <property name="flavor" value="" />
+      <property name="project" value=":app" />
+    </properties>
+    <testcase name="dragReorderPersists" classname="app.wanki.ui.PageGridTest" time="4.448" />
+    <testcase name="insertBeforeAndAfter" classname="app.wanki.ui.PageGridTest" time="6.266" />
+    <testcase name="duplicatePage" classname="app.wanki.ui.PageGridTest" time="5.469" />
+    <testcase name="cancelledDragStoresNothing" classname="app.wanki.ui.PageGridTest" time="5.029" />
+    <testcase name="openPageFromGrid" classname="app.wanki.ui.PageGridTest" time="4.804" />
+    <testcase name="deletePageWithUndo" classname="app.wanki.ui.PageGridTest" time="4.492" />
+    <testcase name="lastPageCannotBeDeleted" classname="app.wanki.ui.PageGridTest" time="4.401" />
+  </testsuite>
+  <testsuite name="app.wanki.ui.PageObjectsUiTest" tests="7" failures="0" errors="0" skipped="0" time="48.768" timestamp="2026-11-28T04:58:03" hostname="localhost">
+    <properties>
+      <property name="device" value="emulator-5554 - 14" />
+      <property name="flavor" value="" />
+      <property name="project" value=":app" />
+    </properties>
+    <testcase name="boardHasNoInsertItems" classname="app.wanki.ui.PageObjectsUiTest" time="3.706" />
+    <testcase name="missingPictureShowsPlaceholder" classname="app.wanki.ui.PageObjectsUiTest" time="7.074" />
+    <testcase name="undoRemovesInsertedBlock" classname="app.wanki.ui.PageObjectsUiTest" time="5.596" />
+    <testcase name="insertPictureFromGallery" classname="app.wanki.ui.PageObjectsUiTest" time="10.237" />
+    <testcase name="insertTextBlock" classname="app.wanki.ui.PageObjectsUiTest" time="7.181" />
+    <testcase name="editTextBlockFromLasso" classname="app.wanki.ui.PageObjectsUiTest" time="7.342" />
+    <testcase name="consecutiveInsertsDoNotStack" classname="app.wanki.ui.PageObjectsUiTest" time="7.632" />
+  </testsuite>
+  <testsuite name="app.wanki.ui.PageThumbnailTest" tests="5" failures="0" errors="0" skipped="0" time="12.53" timestamp="2026-11-28T04:58:03" hostname="localhost">
+    <properties>
+      <property name="device" value="emulator-5554 - 14" />
+      <property name="flavor" value="" />
+      <property name="project" value=":app" />
+    </properties>
+    <testcase name="strokeShowsAsDarkPixels" classname="app.wanki.ui.PageThumbnailTest" time="2.259" />
+    <testcase name="landscapePageKeepsItsAspect" classname="app.wanki.ui.PageThumbnailTest" time="2.318" />
+    <testcase name="emptyPageHasOnlyPaperColours" classname="app.wanki.ui.PageThumbnailTest" time="2.405" />
+    <testcase name="strokeKeepsItsPositionOnThePage" classname="app.wanki.ui.PageThumbnailTest" time="3.17" />
+    <testcase name="unknownTemplateKeepsPlainPaper" classname="app.wanki.ui.PageThumbnailTest" time="2.378" />
+  </testsuite>
+  <testsuite name="app.wanki.ui.PaperTest" tests="8" failures="0" errors="0" skipped="0" time="34.866" timestamp="2026-11-28T04:58:03" hostname="localhost">
+    <properties>
+      <property name="device" value="emulator-5554 - 14" />
+      <property name="flavor" value="" />
+      <property name="project" value=":app" />
+    </properties>
+    <testcase name="settingsOfferEndless" classname="app.wanki.ui.PaperTest" time="7.769" />
+    <testcase name="endlessPageGrowsWhileWriting" classname="app.wanki.ui.PaperTest" time="5.66" />
+    <testcase name="arabicBaselineOnRightMargin" classname="app.wanki.ui.PaperTest" time="2.348" />
+    <testcase name="cornellCueAndSummary" classname="app.wanki.ui.PaperTest" time="2.581" />
+    <testcase name="verticalGenkouColumnsFromRight" classname="app.wanki.ui.PaperTest" time="1.816" />
+    <testcase name="templatesFillTheWholeGrownHeight" classname="app.wanki.ui.PaperTest" time="2.409" />
+    <testcase name="mizigeHasDiagonals" classname="app.wanki.ui.PaperTest" time="2.908" />
+    <testcase name="newPapersOnScreen" classname="app.wanki.ui.PaperTest" time="9.375" />
+  </testsuite>
+  <testsuite name="app.wanki.ui.PdfUiTest" tests="3" failures="0" errors="0" skipped="0" time="24.989" timestamp="2026-11-28T04:58:03" hostname="localhost">
+    <properties>
+      <property name="device" value="emulator-5554 - 14" />
+      <property name="flavor" value="" />
+      <property name="project" value=":app" />
+    </properties>
+    <testcase name="exportDialogMakesTheFile" classname="app.wanki.ui.PdfUiTest" time="12.874" />
+    <testcase name="importPdfFromMenuAndWriteOverIt" classname="app.wanki.ui.PdfUiTest" time="7.963" />
+    <testcase name="missingBackgroundSaysSo" classname="app.wanki.ui.PdfUiTest" time="4.152" />
+  </testsuite>
+  <testsuite name="app.wanki.ui.RecognizedLinesTest" tests="7" failures="0" errors="0" skipped="0" time="74.796" timestamp="2026-11-28T04:58:03" hostname="localhost">
+    <properties>
+      <property name="device" value="emulator-5554 - 14" />
+      <property name="flavor" value="" />
+      <property name="project" value=":app" />
+    </properties>
+    <testcase name="resetCorrection" classname="app.wanki.ui.RecognizedLinesTest" time="11.901" />
+    <testcase name="searchHitHighlightsLine" classname="app.wanki.ui.RecognizedLinesTest" time="7.853" />
+    <testcase name="correctionSurvivesRecognition" classname="app.wanki.ui.RecognizedLinesTest" time="13.074" />
+    <testcase name="oneFailedLineKeepsOthers" classname="app.wanki.ui.RecognizedLinesTest" time="10.515" />
+    <testcase name="legacyPageHitGetsHighlight" classname="app.wanki.ui.RecognizedLinesTest" time="4.481" />
+    <testcase name="onlyChangedLineIsSentAgain" classname="app.wanki.ui.RecognizedLinesTest" time="15.316" />
+    <testcase name="failedFirstRecognitionKeepsLegacyText" classname="app.wanki.ui.RecognizedLinesTest" time="11.656" />
+  </testsuite>
+  <testsuite name="app.wanki.ui.SearchOpenTest" tests="3" failures="0" errors="0" skipped="0" time="8.992" timestamp="2026-11-28T04:58:03" hostname="localhost">
+    <properties>
+      <property name="device" value="emulator-5554 - 14" />
+      <property name="flavor" value="" />
+      <property name="project" value=":app" />
+    </properties>
+    <testcase name="boardAndNotebookHitRoutes" classname="app.wanki.ui.SearchOpenTest" time="2.639" />
+    <testcase name="diaryHitRoute" classname="app.wanki.ui.SearchOpenTest" time="2.299" />
+    <testcase name="hitOpensItsPage" classname="app.wanki.ui.SearchOpenTest" time="4.054" />
+  </testsuite>
+  <testsuite name="app.wanki.ui.SourceLinksTest" tests="3" failures="0" errors="0" skipped="0" time="10.692" timestamp="2026-11-28T04:58:03" hostname="localhost">
+    <properties>
+      <property name="device" value="emulator-5554 - 14" />
+      <property name="flavor" value="" />
+      <property name="project" value=":app" />
+    </properties>
+    <testcase name="cardsFromHereListsPageCards" classname="app.wanki.ui.SourceLinksTest" time="4.108" />
+    <testcase name="reviewOpensSourceWithArea" classname="app.wanki.ui.SourceLinksTest" time="2.993" />
+    <testcase name="trashedSourceIsRestoredAndOpened" classname="app.wanki.ui.SourceLinksTest" time="3.591" />
+  </testsuite>
+  <testsuite name="app.wanki.ui.StraightLineTest" tests="6" failures="5" errors="0" skipped="0" time="54.136" timestamp="2026-11-28T04:58:03" hostname="localhost">
+    <properties>
+      <property name="device" value="emulator-5554 - 14" />
+      <property name="flavor" value="" />
+      <property name="project" value=":app" />
+    </properties>
+    <testcase name="tapPageNumberJumps" classname="app.wanki.ui.StraightLineTest" time="4.52" />
+    <testcase name="liftingEarlyKeepsStroke" classname="app.wanki.ui.StraightLineTest" time="10.154">
+      <failure>androidx.compose.ui.test.ComposeTimeoutException: Condition still not satisfied after 5000 ms
+at androidx.compose.ui.test.AndroidComposeUiTestEnvironment$AndroidComposeUiTestImpl.waitUntil(ComposeUiTest.android.kt:809)
+at androidx.compose.ui.test.junit4.AndroidComposeTestRule.waitUntil(AndroidComposeTestRule.android.kt:378)
+at app.wanki.ui.StraightLineTest.liftingEarlyKeepsStroke(StraightLineTest.kt:150)
+</failure>
+    </testcase>
+    <testcase name="penSwipeAtEdgeDoesNotTurn" classname="app.wanki.ui.StraightLineTest" time="9.496">
+      <failure>androidx.compose.ui.test.ComposeTimeoutException: Condition still not satisfied after 5000 ms
+at androidx.compose.ui.test.AndroidComposeUiTestEnvironment$AndroidComposeUiTestImpl.waitUntil(ComposeUiTest.android.kt:809)
+at androidx.compose.ui.test.junit4.AndroidComposeTestRule.waitUntil(AndroidComposeTestRule.android.kt:378)
+at app.wanki.ui.StraightLineTest.penSwipeAtEdgeDoesNotTurn(StraightLineTest.kt:222)
+</failure>
+    </testcase>
+    <testcase name="jitteringPenStillStraightens" classname="app.wanki.ui.StraightLineTest" time="10.614">
+      <failure>androidx.compose.ui.test.ComposeTimeoutException: Condition still not satisfied after 5000 ms
+at androidx.compose.ui.test.AndroidComposeUiTestEnvironment$AndroidComposeUiTestImpl.waitUntil(ComposeUiTest.android.kt:809)
+at androidx.compose.ui.test.junit4.AndroidComposeTestRule.waitUntil(AndroidComposeTestRule.android.kt:378)
+at app.wanki.ui.StraightLineTest.jitteringPenStillStraightens(StraightLineTest.kt:138)
+</failure>
+    </testcase>
+    <testcase name="holdingStraightens" classname="app.wanki.ui.StraightLineTest" time="10.131">
+      <failure>androidx.compose.ui.test.ComposeTimeoutException: Condition still not satisfied after 5000 ms
+at androidx.compose.ui.test.AndroidComposeUiTestEnvironment$AndroidComposeUiTestImpl.waitUntil(ComposeUiTest.android.kt:809)
+at androidx.compose.ui.test.junit4.AndroidComposeTestRule.waitUntil(AndroidComposeTestRule.android.kt:378)
+at app.wanki.ui.StraightLineTest.holdingStraightens(StraightLineTest.kt:123)
+</failure>
+    </testcase>
+    <testcase name="swipeTurnsPage" classname="app.wanki.ui.StraightLineTest" time="9.221">
+      <failure>androidx.compose.ui.test.ComposeTimeoutException: Condition (at least one node matches (Text + InputText + EditableText contains 'стр. 2 из 3' (ignoreCase: false))) still not satisfied after 5000 ms
+at androidx.compose.ui.test.AndroidComposeUiTestEnvironment$AndroidComposeUiTestImpl.waitUntil(ComposeUiTest.android.kt:809)
+at androidx.compose.ui.test.ComposeUiTestKt.waitUntilAtLeastOneExists(ComposeUiTest.kt:234)
+at androidx.compose.ui.test.junit4.AndroidComposeTestRule.waitUntilAtLeastOneExists(AndroidComposeTestRule.android.kt:394)
+at app.wanki.ui.StraightLineTest.swipeTurnsPage(StraightLineTest.kt:191)
+</failure>
+    </testcase>
+  </testsuite>
+  <testsuite name="app.wanki.ui.TrashTest" tests="10" failures="0" errors="0" skipped="0" time="43.059" timestamp="2026-11-28T04:58:03" hostname="localhost">
+    <properties>
+      <property name="device" value="emulator-5554 - 14" />
+      <property name="flavor" value="" />
+      <property name="project" value=":app" />
+    </properties>
+    <testcase name="diaryUndoOnTakenDayShowsMessage" classname="app.wanki.ui.TrashTest" time="4.643" />
+    <testcase name="deletedPageShowsNotebookAndNumber" classname="app.wanki.ui.TrashTest" time="3.855" />
+    <testcase name="emptyTrash" classname="app.wanki.ui.TrashTest" time="4.239" />
+    <testcase name="deletedNotebookAppearsAndRestores" classname="app.wanki.ui.TrashTest" time="3.344" />
+    <testcase name="diaryMenuDeletesDayWithUndo" classname="app.wanki.ui.TrashTest" time="4.515" />
+    <testcase name="daysLeftShown" classname="app.wanki.ui.TrashTest" time="3.527" />
+    <testcase name="diaryDayDeleteAndRestore" classname="app.wanki.ui.TrashTest" time="3.643" />
+    <testcase name="purgeForeverAsksAndRemoves" classname="app.wanki.ui.TrashTest" time="5.096" />
+    <testcase name="diaryUndoOverReopenedDayShowsRestoredPage" classname="app.wanki.ui.TrashTest" time="6.61" />
+    <testcase name="restoreOfTakenDayShowsMessage" classname="app.wanki.ui.TrashTest" time="3.587" />
+  </testsuite>
+  <testsuite name="app.wanki.ui.UndoSnackbarTest" tests="1" failures="0" errors="0" skipped="0" time="2.701" timestamp="2026-11-28T04:58:03" hostname="localhost">
+    <properties>
+      <property name="device" value="emulator-5554 - 14" />
+      <property name="flavor" value="" />
+      <property name="project" value=":app" />
+    </properties>
+    <testcase name="deleteShowsSnackbarAndUndoRestores" classname="app.wanki.ui.UndoSnackbarTest" time="2.701" />
+  </testsuite>
+</testsuites>
