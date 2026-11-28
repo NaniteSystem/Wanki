@@ -260,7 +260,8 @@ fun NoteEditorScreen(id: String?, onBack: () -> Unit, onCreated: (String) -> Uni
                 var changed = false
                 for (b in blocks.toList()) {
                     val l = b.layer?.takeIf { !it.isEmpty } ?: continue
-                    val r = graph.textRecognition.recognize(l.strokes.toList(), AUTO_LANGUAGE) ?: continue
+                    // a recognizer that fails (no model yet) leaves the stored text: it is still copied, or reported missing
+                    val r = runCatching { graph.textRecognition.recognize(l.strokes.toList(), AUTO_LANGUAGE) }.getOrNull() ?: continue
                     if (r.text != b.recognizedText) { b.recognizedText = r.text; changed = true }
                 }
                 if (changed) changes.recognized()
